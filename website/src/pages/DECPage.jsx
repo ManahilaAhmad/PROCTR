@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -83,7 +83,7 @@ function poolStatusBadge(status) {
 }
 
 // ── Main Component ───────────────────────────────────────────────────
-export default function DECPage({ activePage }) {
+export default function DECPage({ activePage, setPage }) {
   const tabMap = {
     dec: "overview",
     "dec-exams": "exams",
@@ -91,6 +91,10 @@ export default function DECPage({ activePage }) {
     "dec-swaps": "swaps",
   };
   const [activeTab, setActiveTab] = useState(tabMap[activePage] || "overview");
+
+  useEffect(() => {
+    setActiveTab(tabMap[activePage] || "overview");
+  }, [activePage]);
 
   const [assignments, setAssignments] = useState(initialAssignments);
   const [swapRequests, setSwapRequests] = useState(initialSwapRequests);
@@ -437,7 +441,18 @@ export default function DECPage({ activePage }) {
         </div>
       )}
 
-      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+      <Tabs tabs={tabs} active={activeTab} onChange={(id) => {
+        setActiveTab(id);
+        if (setPage) {
+          const pageMap = {
+            overview: "dec",
+            exams: "dec-exams",
+            invigilators: "dec-invigilators",
+            swaps: "dec-swaps"
+          };
+          setPage(pageMap[id]);
+        }
+      }} />
 
       {/* ══════════════════════════════════════════════
           OVERVIEW TAB

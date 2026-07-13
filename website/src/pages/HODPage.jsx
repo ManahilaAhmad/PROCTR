@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -9,8 +9,12 @@ import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 
-export default function HODPage({ activePage }) {
+export default function HODPage({ activePage, setPage }) {
   const [activeTab, setActiveTab] = useState(activePage === "reports" ? "reports" : "queue");
+
+  useEffect(() => {
+    setActiveTab(activePage === "reports" ? "reports" : "queue");
+  }, [activePage]);
   const initialQueue = [
     { title: "Data Structures Lab", teacher: "Dr. Ayesha Khan", course: "CS-301", submitted: "June 20", questions: 5, rubric: "Complete" },
     { title: "Networks Lab Final", teacher: "Prof. Tariq Bashir", course: "CS-415", submitted: "June 22", questions: 8, rubric: "Partial" },
@@ -62,7 +66,13 @@ export default function HODPage({ activePage }) {
         </div>
       )}
 
-      <Tabs tabs={[{ id: "queue", label: "Review Queue" }, { id: "reports", label: "Reports" }]} active={activeTab} onChange={setActiveTab} />
+      <Tabs tabs={[{ id: "queue", label: "Review Queue" }, { id: "reports", label: "Reports" }]} active={activeTab} onChange={(id) => {
+        setActiveTab(id);
+        if (setPage) {
+          const pageMap = { queue: "hod", reports: "reports" };
+          setPage(pageMap[id]);
+        }
+      }} />
 
       {/* ── REVIEW QUEUE ── */}
       {activeTab === "queue" && <>

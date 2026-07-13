@@ -31,30 +31,27 @@ export default function App() {
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "monitor", "results", "reports", "dir-timetable", "dir-labs", "dir-results", "rooms", "inv-exams", "inv-monitor", "dec-exams", "dec-invigilators", "dec-swaps"].includes(page);
+      ["upload", "inv-schedule", "results", "reports", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps"].includes(page);
 
     if (isDashboard) {
       const mainPage = {
-        teacher: <TeacherPage activePage="teacher" />,
-        upload: <TeacherPage activePage="upload" />,
-        monitor: <TeacherPage activePage="monitor" />,
-        student: <StudentPage activePage="student" />,
-        results: <StudentPage activePage="results" />,
-        hod: <HODPage activePage="hod" />,
-        reports: <HODPage activePage="reports" />,
-        director: <DirectorPage activePage="overview" />,
-        "dir-timetable": <DirectorPage activePage="dir-timetable" />,
-        "dir-labs": <DirectorPage activePage="dir-labs" />,
-        "dir-results": <DirectorPage activePage="dir-results" />,
-        coordinator: <CoordinatorPage activePage="coordinator" />,
-        rooms: <CoordinatorPage activePage="rooms" />,
-        invigilator: <InvigilatorPage activePage="invigilator" />,
-        "inv-exams": <InvigilatorPage activePage="inv-exams" />,
-        "inv-monitor": <InvigilatorPage activePage="inv-monitor" />,
-        dec: <DECPage activePage="dec" />,
-        "dec-exams": <DECPage activePage="dec-exams" />,
-        "dec-invigilators": <DECPage activePage="dec-invigilators" />,
-        "dec-swaps": <DECPage activePage="dec-swaps" />,
+        teacher: <TeacherPage activePage="teacher" setPage={navigateTo} />,
+        upload: <TeacherPage activePage="upload" setPage={navigateTo} />,
+        "inv-schedule": <TeacherPage activePage="inv-schedule" setPage={navigateTo} />,
+        student: <StudentPage activePage="student" setPage={navigateTo} />,
+        results: <StudentPage activePage="results" setPage={navigateTo} />,
+        hod: <HODPage activePage="hod" setPage={navigateTo} />,
+        reports: <HODPage activePage="reports" setPage={navigateTo} />,
+        director: <DirectorPage activePage="overview" setPage={navigateTo} />,
+        "dir-timetable": <DirectorPage activePage="dir-timetable" setPage={navigateTo} />,
+        "dir-labs": <DirectorPage activePage="dir-labs" setPage={navigateTo} />,
+        "dir-results": <DirectorPage activePage="dir-results" setPage={navigateTo} />,
+        coordinator: <CoordinatorPage activePage="coordinator" setPage={navigateTo} />,
+        rooms: <CoordinatorPage activePage="rooms" setPage={navigateTo} />,
+        dec: <DECPage activePage="dec" setPage={navigateTo} />,
+        "dec-exams": <DECPage activePage="dec-exams" setPage={navigateTo} />,
+        "dec-invigilators": <DECPage activePage="dec-invigilators" setPage={navigateTo} />,
+        "dec-swaps": <DECPage activePage="dec-swaps" setPage={navigateTo} />,
       }[page];
 
       return (

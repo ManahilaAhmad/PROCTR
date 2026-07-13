@@ -3,9 +3,10 @@ import { Icon } from "../../theme/icons";
 
 const navItems = {
   teacher: [
-    { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
-    { id: "upload", icon: Icon.upload, label: "Upload Exam" },
-    { id: "monitor", icon: Icon.monitor, label: "Live Monitor" },
+    { id: "teacher",      icon: Icon.clipboardList, label: "My Exams" },
+    { id: "upload",       icon: Icon.upload,        label: "Upload Exam" },
+    { id: "__divider__",  icon: null,               label: "Invigilation Duty", isDivider: true },
+    { id: "inv-schedule", icon: Icon.clipboard,     label: "My Schedule" },
   ],
   student: [
     { id: "student", icon: Icon.home, label: "Dashboard" },
@@ -16,25 +17,20 @@ const navItems = {
     { id: "reports", icon: Icon.fileText, label: "Reports" },
   ],
   director: [
-    { id: "director", icon: Icon.chart, label: "Overview" },
-    { id: "dir-timetable", icon: Icon.calendar, label: "Timetable" },
-    { id: "dir-labs", icon: Icon.server, label: "Labs" },
-    { id: "dir-results", icon: Icon.fileText, label: "Section Results" },
+    { id: "director",      icon: Icon.chart,     label: "Overview" },
+    { id: "dir-timetable", icon: Icon.calendar,  label: "Timetable" },
+    { id: "dir-labs",      icon: Icon.server,    label: "Labs" },
+    { id: "dir-results",   icon: Icon.fileText,  label: "Section Results" },
   ],
   coordinator: [
     { id: "coordinator", icon: Icon.calendar, label: "Date Sheets" },
-    { id: "rooms", icon: Icon.building, label: "Lab Rooms" },
-  ],
-  invigilator: [
-    { id: "invigilator", icon: Icon.clipboard, label: "My Schedule" },
-    { id: "inv-exams", icon: Icon.play, label: "Start Exam" },
-    { id: "inv-monitor", icon: Icon.monitor, label: "Live Monitor" },
+    { id: "rooms",       icon: Icon.building, label: "Lab Rooms" },
   ],
   dec: [
-    { id: "dec", icon: Icon.chart, label: "Overview" },
-    { id: "dec-exams", icon: Icon.calendar, label: "Scheduled Exams" },
-    { id: "dec-invigilators", icon: Icon.userCheck, label: "Invigilators" },
-    { id: "dec-swaps", icon: Icon.bell, label: "Swap Requests" },
+    { id: "dec",               icon: Icon.chart,     label: "Overview" },
+    { id: "dec-exams",         icon: Icon.calendar,  label: "Scheduled Exams" },
+    { id: "dec-invigilators",  icon: Icon.userCheck, label: "Invigilators" },
+    { id: "dec-swaps",         icon: Icon.bell,      label: "Swap Requests" },
   ],
 };
 
@@ -64,13 +60,22 @@ export default function Sidebar({ role, activePage, setPage, setRole, sidebarOpe
         </div>
       </div>
       <nav style={{ flex: 1, padding: "14px 10px", overflowY: "auto" }}>
-        {items.map((item, i) => (
-          <button key={item.id} onClick={() => setPage(item.id)} className="nav-btn"
-            style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "10px 13px", borderRadius: 8, border: "none", cursor: "pointer", marginBottom: 2, fontWeight: 600, fontSize: 13.5, background: activePage === item.id ? C.teal : "transparent", color: activePage === item.id ? C.white : "rgba(255,255,255,.55)", textAlign: "left", animation: `slideInLeft .35s cubic-bezier(.22,.68,0,1.2) ${i * 60 + 80}ms both` }}>
-            <span style={{ display: "flex", flexShrink: 0, opacity: activePage === item.id ? 1 : 0.7, transition: "transform .2s ease", transform: activePage === item.id ? "scale(1.15)" : "scale(1)" }}>{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
+        {items.map((item, i) => {
+          if (item.isDivider) {
+            return (
+              <div key={item.id} style={{ padding: "14px 13px 5px", fontSize: 10, fontWeight: 800, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(255,255,255,.28)", marginTop: 6, borderTop: "1px solid rgba(255,255,255,.07)" }}>
+                {item.label}
+              </div>
+            );
+          }
+          return (
+            <button key={item.id} onClick={() => setPage(item.id)} className="nav-btn"
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "10px 13px", borderRadius: 8, border: "none", cursor: "pointer", marginBottom: 2, fontWeight: 600, fontSize: 13.5, background: activePage === item.id ? C.teal : "transparent", color: activePage === item.id ? C.white : "rgba(255,255,255,.55)", textAlign: "left", animation: `slideInLeft .35s cubic-bezier(.22,.68,0,1.2) ${i * 60 + 80}ms both` }}>
+              <span style={{ display: "flex", flexShrink: 0, opacity: activePage === item.id ? 1 : 0.7, transition: "transform .2s ease", transform: activePage === item.id ? "scale(1.15)" : "scale(1)" }}>{item.icon}</span>
+              {item.label}
+            </button>
+          );
+        })}
       </nav>
       <div style={{ padding: "14px 10px", borderTop: "1px solid rgba(255,255,255,.08)" }}>
         <button onClick={() => { setRole(null); setPage("login"); }}

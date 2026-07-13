@@ -22,12 +22,45 @@ const loginStyles = `
     50%       { transform: translateY(-18px); }
   }
   .login-card { animation: fadeUp .55s cubic-bezier(.22,.68,0,1.2) both; }
-  .login-bg   { animation: fadeIn .4s ease both; }
+  .login-bg   { 
+    animation: fadeIn .4s ease both; 
+    width: 100%;
+    height: 100vh;
+    height: 100svh;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
   .role-btn { transition: all .18s cubic-bezier(.22,.68,0,1.2); }
   .role-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,180,166,.18); }
   .sign-btn { transition: all .18s ease; }
   .sign-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(26,43,75,.3); }
   .sign-btn:active { transform: translateY(0); }
+
+  @media (max-height: 680px), (max-width: 600px) {
+    .login-bg {
+      height: auto;
+      min-height: 100vh;
+      min-height: 100svh;
+      overflow-y: auto;
+      align-items: flex-start !important;
+      padding: 32px 0;
+    }
+  }
+
+  @media (max-height: 740px) {
+    .login-card-responsive {
+      padding: 32px 30px 24px !important;
+    }
+    .login-logo-container {
+      margin-bottom: 20px !important;
+    }
+    .login-welcome-title {
+      margin-bottom: 4px !important;
+    }
+    .role-grid-responsive {
+      margin-bottom: 16px !important;
+    }
+  }
 `;
 
 export default function LoginPage({ setPage, setRole }) {
@@ -38,13 +71,12 @@ export default function LoginPage({ setPage, setRole }) {
   const [shake, setShake] = useState(false);
 
   const roles = [
-    { id: "student", label: "Student", icon: Icon.users },
-    { id: "teacher", label: "Teacher", icon: Icon.clipboardList },
-    { id: "hod", label: "Head of Department", icon: Icon.check },
-    { id: "invigilator", label: "Invigilator", icon: Icon.monitor },
-    { id: "coordinator", label: "Coordinator", icon: Icon.calendar },
-    { id: "director", label: "Director Examination", icon: Icon.chart },
-    { id: "dec", label: "Dept. Exam Committee", icon: Icon.shield },
+    { id: "student",     label: "Student",              icon: Icon.users },
+    { id: "teacher",     label: "Teacher",              icon: Icon.clipboardList },
+    { id: "hod",         label: "Head of Department",   icon: Icon.check },
+    { id: "coordinator", label: "Coordinator",           icon: Icon.calendar },
+    { id: "director",    label: "Director Examination", icon: Icon.chart },
+    { id: "dec",         label: "Dept. Exam Committee", icon: Icon.shield },
   ];
 
   function handleLogin() {
@@ -53,7 +85,7 @@ export default function LoginPage({ setPage, setRole }) {
     setTimeout(() => {
       setLoading(false);
       setRole(selectedRole);
-      const dest = { student: "student", teacher: "teacher", hod: "hod", director: "director", coordinator: "coordinator", invigilator: "invigilator", dec: "dec" };
+      const dest = { student: "student", teacher: "teacher", hod: "hod", director: "director", coordinator: "coordinator", dec: "dec" };
       setPage(dest[selectedRole]);
     }, 900);
   }
@@ -61,7 +93,7 @@ export default function LoginPage({ setPage, setRole }) {
   return (
     <>
       <style>{loginStyles}</style>
-      <div className="login-bg" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark} 0%, ${C.navy} 50%, #1a3a5c 100%)`, position: "relative", overflow: "hidden" }}>
+      <div className="login-bg" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark} 0%, ${C.navy} 50%, #1a3a5c 100%)`, position: "relative" }}>
         {/* Decorative background circles */}
         <div style={{ position: "absolute", top: -120, right: -120, width: 480, height: 480, borderRadius: "50%", background: `radial-gradient(circle, ${C.teal}22 0%, transparent 70%)`, pointerEvents: "none" }} />
         <div style={{ position: "absolute", bottom: -80, left: -80, width: 360, height: 360, borderRadius: "50%", background: `radial-gradient(circle, ${C.teal}18 0%, transparent 70%)`, pointerEvents: "none" }} />
@@ -71,7 +103,7 @@ export default function LoginPage({ setPage, setRole }) {
 
         <div className="login-card login-card-responsive" style={{ width: "100%", maxWidth: 480, margin: "0 24px", background: "rgba(255,255,255,.97)", borderRadius: 24, boxShadow: "0 32px 80px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.06)" }}>
           {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 36 }}>
+          <div className="login-logo-container" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 36 }}>
             <div style={{ position: "relative", width: 42, height: 42 }}>
               <div style={{ position: "absolute", inset: 0, borderRadius: 11, background: C.teal, animation: "pulse-ring 2s ease-out infinite" }} />
               <div style={{ position: "relative", width: 42, height: 42, borderRadius: 11, background: C.navy, display: "flex", alignItems: "center", justifyContent: "center", color: C.white }}>

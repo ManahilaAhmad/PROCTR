@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -11,78 +11,234 @@ import StatCard from "../components/common/StatCard";
 import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
 
-export default function TeacherPage({ activePage }) {
-  const tabFromPage = { upload: "upload", monitor: "monitor", teacher: "exams" };
-  const [activeTab, setActiveTab] = useState(tabFromPage[activePage] || "exams");
-  const [exams, setExams] = useState([
-    { title: "Data Structures Lab", course: "CS-301", date: "2026-07-02", status: "Approved", students: 34 },
-    { title: "Operating Systems Lab", course: "CS-402", date: "2026-07-08", status: "Pending HOD", students: 28 },
-    { title: "Networks Lab Final", course: "CS-415", date: "2026-07-15", status: "Draft", students: 30 },
-    { title: "AI Lab Practical", course: "CS-501", date: "2026-07-20", status: "Rejected", students: 22 },
-  ]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newCourse, setNewCourse] = useState("");
-  const [newDate, setNewDate] = useState("");
-  const [toast, setToast] = useState("");
+// ─── Mock data ────────────────────────────────────────────────────────────────
+const initialExams = [
+  { title: "Data Structures Lab",   course: "CS-301", date: "2026-07-02", status: "Approved",    students: 34 },
+  { title: "Operating Systems Lab", course: "CS-402", date: "2026-07-08", status: "Pending HOD", students: 28 },
+  { title: "Networks Lab Final",    course: "CS-415", date: "2026-07-15", status: "Draft",        students: 30 },
+  { title: "AI Lab Practical",      course: "CS-501", date: "2026-07-20", status: "Rejected",     students: 22 },
+];
 
-  function showToast(msg) { setToast(msg); setTimeout(() => setToast(""), 3000); }
+// Set to [] to simulate "no duty assigned"
+const invigilatorAssignments = [
+  { exam: "Data Structures Lab", course: "CS-301", section: "CS-301 A", date: "Jul 2, 2026",  time: "09:00 AM", lab: "Lab-3", students: 34, duration: "90 min",  approvedBy: "Dr. Imran HOD" },
+  { exam: "OS Lab Final",         course: "CS-402", section: "CS-402 A", date: "Jul 8, 2026",  time: "11:00 AM", lab: "Lab-1", students: 28, duration: "90 min",  approvedBy: "Dr. Imran HOD" },
+  { exam: "Networks Lab",         course: "CS-415", section: "CS-415 A", date: "Jul 15, 2026", time: "02:00 PM", lab: "Lab-2", students: 30, duration: "120 min", approvedBy: "Dr. Imran HOD" },
+];
+
+// Other teachers available for swap
+const availableTeachers = [
+  "Dr. Sana Mir", "Prof. Arif Khan", "Dr. Hira Baig", "Mr. Usman Raza", "Prof. Kamran Iqbal",
+];
+
+// Incoming swap request where this teacher was nominated as replacement
+const initialIncoming = [
+  { id: 101, exam: "AI Lab Practical", course: "CS-501", date: "Jul 20, 2026", time: "09:00 AM", lab: "TBD", requester: "Prof. Arif Khan", reason: "Medical leave", myStatus: "Pending" },
+];
+
+function statusBadge(status) {
+  const map = {
+    Confirmed: [C.teal,   C.tealLight],
+    Upcoming:  [C.amber,  C.amberLight],
+    Accepted:  [C.green,  C.greenLight],
+    Declined:  [C.red,    C.redLight],
+    Pending:   [C.amber,  C.amberLight],
+    Approved:  [C.green,  C.greenLight],
+    Rejected:  [C.red,    C.redLight],
+  };
+  const [c, bg] = map[status] || [C.grey500, C.grey100];
+  return <Badge color={c} bg={bg}>{status}</Badge>;
+}
+
+export default function TeacherPage({ activePage, setPage }) {
+  const initTab = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : "exams";
+  const [activeTab, setActiveTab] = useState(initTab);
+
+  useEffect(() => {
+    const target = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : "exams";
+    setActiveTab(target);
+  }, [activePage]);
+
+  const [exams, setExams] = useState(initialExams);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle,  setNewTitle]  = useState("");
+  const [newCourse, setNewCourse] = useState("");
+  const [newDate,   setNewDate]   = useState("");
+  const [toast,     setToast]     = useState(null);
+
+  const hasDuty = invigilatorAssignments.length > 0;
+
+  // Swap state
+  const [mySwaps,    setMySwaps]    = useState([]);
+  const [incoming,   setIncoming]   = useState(initialIncoming);
+  const [swapModal,  setSwapModal]  = useState(null); // duty to swap
+  const [swapFor,    setSwapFor]    = useState("");
+  const [swapReason, setSwapReason] = useState("");
+  const [viewSwap,   setViewSwap]   = useState(null);
+
+  function showToast(msg, type = "ok") { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); }
 
   function submitToHOD(title) {
-    setExams((e) => e.map((x) => x.title === title ? { ...x, status: "Pending HOD" } : x));
+    setExams(e => e.map(x => x.title === title ? { ...x, status: "Pending HOD" } : x));
     showToast("Exam submitted to HOD for review.");
   }
-
   function createExam() {
     if (!newTitle.trim() || !newCourse.trim()) return;
-    setExams((e) => [...e, { title: newTitle, course: newCourse, date: newDate || "TBD", status: "Draft", students: 0 }]);
+    setExams(e => [...e, { title: newTitle, course: newCourse, date: newDate || "TBD", status: "Draft", students: 0 }]);
     setNewTitle(""); setNewCourse(""); setNewDate(""); setShowCreate(false);
-    showToast("Draft created. Submit to HOD when ready.");
+    showToast("Draft created.");
+  }
+  function submitSwap() {
+    if (!swapFor || !swapReason.trim()) return;
+    setMySwaps(prev => [...prev, {
+      id: Date.now(), exam: swapModal.exam, course: swapModal.course,
+      date: swapModal.date, time: swapModal.time, lab: swapModal.lab,
+      replacement: swapFor, reason: swapReason,
+      replacementStatus: "Pending", decStatus: "Pending",
+      submittedOn: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
+    }]);
+    setSwapModal(null); setSwapFor(""); setSwapReason("");
+    showToast(`Swap request sent to ${swapFor} and DEC.`);
+  }
+  function respondIncoming(id, decision) {
+    setIncoming(prev => prev.map(r => r.id === id ? { ...r, myStatus: decision } : r));
+    showToast(decision === "Accepted" ? "Accepted — DEC will review." : "Swap declined.", decision === "Accepted" ? "ok" : "warn");
+  }
+  function cancelSwap(id) {
+    setMySwaps(prev => prev.filter(r => r.id !== id));
+    showToast("Request cancelled.", "warn");
   }
 
-  const teacherStatusBadge = (s) => {
+  const examBadge = (s) => {
     const map = { Draft: [C.grey500, C.grey100], "Pending HOD": [C.navy, C.grey200], Approved: [C.teal, C.tealLight], Rejected: [C.grey800, C.grey200] };
     const [c, bg] = map[s] || [C.grey500, C.grey100];
     return <Badge color={c} bg={bg}>{s}</Badge>;
   };
 
-  const titleMap = { exams: "My Exams", upload: "Upload Exam", monitor: "Live Monitor" };
-  const subtitleMap = { exams: "Create exam papers and submit for HOD approval", upload: "Upload your exam paper file", monitor: "View live student activity during an active session" };
+  const pendingIncoming = incoming.filter(r => r.myStatus === "Pending").length;
+
+  const titleMap    = { exams: "My Exams", upload: "Upload Exam", invigilation: "Invigilation Duty" };
+  const subtitleMap = {
+    exams:       "Create exam papers and submit for HOD approval",
+    upload:      "Upload your exam paper file",
+    invigilation:"View your assigned invigilator duties and manage swap requests",
+  };
 
   return (
-    <PageWrap title={titleMap[activeTab]} subtitle={subtitleMap[activeTab]}
-      actions={activeTab === "exams" ? <Btn variant="primary" onClick={() => setShowCreate(true)}>+ Create Exam</Btn> : undefined}>
-
+    <PageWrap
+      title={titleMap[activeTab]}
+      subtitle={subtitleMap[activeTab]}
+      actions={activeTab === "exams" ? <Btn variant="primary" onClick={() => setShowCreate(true)}>+ Create Exam</Btn> : undefined}
+    >
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: C.navy, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10, animation: "popIn .25s ease both" }}>
-          {Icon.check} {toast}
+        <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: toast.type === "warn" ? C.amber : C.navy, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10, animation: "popIn .25s ease both" }}>
+          {toast.type === "warn" ? Icon.alertTriangle : Icon.check} {toast.msg}
         </div>
       )}
 
-      {/* Create modal */}
+      {/* Create Exam Modal */}
       {showCreate && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowCreate(false)}>
-          <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
             <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: C.navy }}>Create New Exam</h2>
-            <p style={{ margin: "0 0 22px", fontSize: 13, color: C.grey500 }}>Saved as draft. Submit to HOD when the paper is ready.</p>
-            <Input label="Exam Title" placeholder="e.g. Networks Lab Final" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
-            <Input label="Course Code" placeholder="e.g. CS-415" value={newCourse} onChange={(e) => setNewCourse(e.target.value)} />
-            <Input label="Proposed Exam Date" type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+            <p style={{ margin: "0 0 22px", fontSize: 13, color: C.grey500 }}>Saved as draft. Submit to HOD when ready.</p>
+            <Input label="Exam Title"         placeholder="e.g. Networks Lab Final" value={newTitle}  onChange={e => setNewTitle(e.target.value)} />
+            <Input label="Course Code"        placeholder="e.g. CS-415"            value={newCourse} onChange={e => setNewCourse(e.target.value)} />
+            <Input label="Proposed Exam Date" type="date"                           value={newDate}   onChange={e => setNewDate(e.target.value)} />
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowCreate(false)}>Cancel</Btn>
-              <Btn variant="navy" style={{ flex: 1, justifyContent: "center" }} onClick={createExam}>Save Draft</Btn>
+              <Btn variant="navy"  style={{ flex: 1, justifyContent: "center" }} onClick={createExam}>Save Draft</Btn>
             </div>
           </div>
         </div>
       )}
 
-      <Tabs tabs={[{ id: "exams", label: "My Exams" }, { id: "upload", label: "Upload Exam" }, { id: "monitor", label: "Live Monitor" }]} active={activeTab} onChange={setActiveTab} />
+      {/* Swap Request Modal */}
+      {swapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setSwapModal(null)}>
+          <div style={{ background: C.white, borderRadius: 18, padding: 36, width: 480, boxShadow: "0 28px 72px rgba(0,0,0,.22)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+              <div style={{ width: 46, height: 46, borderRadius: 12, background: C.amberLight, display: "flex", alignItems: "center", justifyContent: "center", color: C.amber }}>{Icon.bell}</div>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.navy }}>Request Duty Swap</h2>
+                <p style={{ margin: 0, fontSize: 13, color: C.grey500 }}>{swapModal.exam} · {swapModal.date}</p>
+              </div>
+            </div>
+            <div style={{ padding: "11px 14px", background: C.grey50, borderRadius: 9, fontSize: 13, color: C.grey500, marginBottom: 18, lineHeight: 1.6 }}>
+              <strong style={{ color: C.navy }}>How it works: </strong>You nominate a replacement → they accept → DEC gives final approval.
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Replacement Teacher *</label>
+              <select value={swapFor} onChange={e => setSwapFor(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapFor ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: C.navy, background: C.white, outline: "none", boxSizing: "border-box" }}>
+                <option value="">Select a teacher…</option>
+                {availableTeachers.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Reason *</label>
+              <textarea value={swapReason} onChange={e => setSwapReason(e.target.value)} placeholder="e.g. Family emergency, conference, medical leave…" rows={3} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapReason.trim() ? C.teal : C.grey200}`, fontSize: 13, color: C.navy, background: C.grey50, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Btn variant="ghost"   style={{ flex: 1, justifyContent: "center" }} onClick={() => setSwapModal(null)}>Cancel</Btn>
+              <Btn variant="primary" style={{ flex: 1, justifyContent: "center", opacity: (!swapFor || !swapReason.trim()) ? 0.5 : 1 }} onClick={submitSwap}>Submit Swap Request</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* ── MY EXAMS ── */}
+      {/* View Swap Detail Modal */}
+      {viewSwap && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setViewSwap(null)}>
+          <div style={{ background: C.white, borderRadius: 16, padding: 36, width: 450, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ margin: "0 0 18px", fontSize: 17, fontWeight: 800, color: C.navy }}>Swap Request Details</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 20 }}>
+              {[["Exam", viewSwap.exam], ["Date", viewSwap.date], ["Replacement", viewSwap.replacement], ["Reason", viewSwap.reason], ["Submitted", viewSwap.submittedOn]].map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: C.grey50, borderRadius: 7 }}>
+                  <span style={{ fontSize: 13, color: C.grey500 }}>{l}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.navy, textAlign: "right", maxWidth: 230 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: C.grey500, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Approval Pipeline</div>
+              {[
+                { label: "Your Request", status: "Submitted", c: C.teal,  bg: C.tealLight },
+                { label: `${viewSwap.replacement} (Replacement)`, status: viewSwap.replacementStatus, c: viewSwap.replacementStatus === "Accepted" ? C.green : C.amber, bg: viewSwap.replacementStatus === "Accepted" ? C.greenLight : C.amberLight },
+                { label: "DEC Approval", status: viewSwap.decStatus, c: viewSwap.decStatus === "Approved" ? C.green : viewSwap.decStatus === "Rejected" ? C.red : C.grey400, bg: viewSwap.decStatus === "Approved" ? C.greenLight : viewSwap.decStatus === "Rejected" ? C.redLight : C.grey100 },
+              ].map(({ label, status, c, bg }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: bg, borderRadius: 7, marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>{label}</span>
+                  <Badge color={c} bg={bg}>{status}</Badge>
+                </div>
+              ))}
+            </div>
+            <Btn variant="ghost" style={{ width: "100%", justifyContent: "center" }} onClick={() => setViewSwap(null)}>Close</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <Tabs
+        tabs={[
+          { id: "exams",        label: "My Exams" },
+          { id: "upload",       label: "Upload Exam" },
+          { id: "invigilation", label: `Invigilation Duty${pendingIncoming ? ` (${pendingIncoming})` : ""}` },
+        ]}
+        active={activeTab}
+        onChange={(id) => {
+          setActiveTab(id);
+          if (setPage) {
+            const pageMap = { exams: "teacher", upload: "upload", invigilation: "inv-schedule" };
+            setPage(pageMap[id]);
+          }
+        }}
+      />
+
+      {/* ═══════════════ MY EXAMS ═══════════════ */}
       {activeTab === "exams" && <>
         <div className="steps-container" style={{ marginBottom: 26, padding: "14px 22px", background: C.navy, borderRadius: 12 }}>
-          {[["1", "Create Draft"], ["2", "Submit to HOD"], ["3", "HOD Reviews"], ["4", "Invigilator Runs Exam"]].map(([n, label], i) => (
+          {[["1","Create Draft"],["2","Submit to HOD"],["3","HOD Reviews"],["4","Invigilator Runs Exam"]].map(([n, label], i) => (
             <div key={n} style={{ display: "flex", alignItems: "center", flex: i < 3 ? 1 : undefined }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <div style={{ width: 24, height: 24, borderRadius: "50%", background: C.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: C.white, flexShrink: 0 }}>{n}</div>
@@ -93,44 +249,41 @@ export default function TeacherPage({ activePage }) {
           ))}
         </div>
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-          <StatCard label="Total Exams" value={exams.length} icon={Icon.clipboardList} delay={0} />
-          <StatCard label="Pending HOD" value={exams.filter(e => e.status === "Pending HOD").length} icon={Icon.bell} delay={80} />
-          <StatCard label="Approved" value={exams.filter(e => e.status === "Approved").length} icon={Icon.check} delay={160} />
-          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + e.students, 0)} icon={Icon.users} delay={240} />
+          <StatCard label="Total Exams"      value={exams.length}                                          icon={Icon.clipboardList} delay={0}   />
+          <StatCard label="Pending HOD"       value={exams.filter(e => e.status === "Pending HOD").length} icon={Icon.bell}          delay={80}  />
+          <StatCard label="Approved"          value={exams.filter(e => e.status === "Approved").length}    icon={Icon.check}         delay={160} />
+          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + e.students, 0)}            icon={Icon.users}         delay={240} />
         </div>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>Exam Papers</div>
           <Table columns={["Title", "Course", "Exam Date", "Students", "Status", "Actions"]}
-            rows={exams.map((e) => [
+            rows={exams.map(e => [
               <span style={{ fontWeight: 700, color: C.navy }}>{e.title}</span>,
               <Badge>{e.course}</Badge>,
-              e.date, e.students,
-              teacherStatusBadge(e.status),
+              e.date, e.students, examBadge(e.status),
               <div style={{ display: "flex", gap: 8 }}>
-                {e.status === "Draft" && <Btn variant="navy" size="sm" onClick={() => submitToHOD(e.title)}>Submit to HOD</Btn>}
-                {e.status === "Approved" && <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>Forwarded to Invigilator</span>}
-                {e.status === "Rejected" && <Btn variant="ghost" size="sm" onClick={() => { setExams((x) => x.map((r) => r.title === e.title ? { ...r, status: "Draft" } : r)); showToast("Exam returned to Draft for revision."); }}>Revise</Btn>}
+                {e.status === "Draft"       && <Btn variant="navy"  size="sm" onClick={() => submitToHOD(e.title)}>Submit to HOD</Btn>}
+                {e.status === "Approved"    && <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>Forwarded to Invigilator</span>}
+                {e.status === "Rejected"    && <Btn variant="ghost" size="sm" onClick={() => { setExams(x => x.map(r => r.title === e.title ? { ...r, status: "Draft" } : r)); showToast("Returned to Draft.", "warn"); }}>Revise</Btn>}
                 {e.status === "Pending HOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
               </div>,
             ])} />
         </Card>
       </>}
 
-      {/* ── UPLOAD EXAM ── */}
+      {/* ═══════════════ UPLOAD EXAM ═══════════════ */}
       {activeTab === "upload" && <>
         <div className="resp-grid-2">
           <Card>
             <h3 style={{ margin: "0 0 20px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Upload Exam Paper</h3>
-            <Select label="Select Exam to Attach Paper To">
-              {exams.map(e => <option key={e.title}>{e.title} ({e.course})</option>)}
-            </Select>
+            <Select label="Select Exam"><option value="">Choose exam…</option>{exams.map(e => <option key={e.title}>{e.title} ({e.course})</option>)}</Select>
             <div style={{ border: `2px dashed ${C.grey200}`, borderRadius: 10, padding: "36px 24px", textAlign: "center", background: C.grey50, marginBottom: 18 }}>
               <div style={{ color: C.grey400, display: "flex", justifyContent: "center", marginBottom: 12 }}>{Icon.upload}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Drag and drop your exam file here</div>
-              <div style={{ fontSize: 12, color: C.grey400, marginBottom: 16 }}>Supported formats: PDF, DOCX — Max 10 MB</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Drag and drop file here</div>
+              <div style={{ fontSize: 12, color: C.grey400, marginBottom: 16 }}>PDF, DOCX — Max 10 MB</div>
               <Btn variant="ghost" size="sm">Browse Files</Btn>
             </div>
-            <Input label="Add Notes for HOD (optional)" placeholder="e.g. Please review question 4 rubric" />
+            <Input label="Notes for HOD (optional)" placeholder="e.g. Review question 4 rubric" />
             <Btn variant="navy" style={{ width: "100%", justifyContent: "center" }}>Upload and Attach</Btn>
           </Card>
           <Card>
@@ -151,14 +304,140 @@ export default function TeacherPage({ activePage }) {
         </div>
       </>}
 
-      {/* ── LIVE MONITOR ── */}
-      {activeTab === "monitor" && <>
-        <Card style={{ textAlign: "center", padding: "52px 24px" }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 16px" }}>{Icon.monitor}</div>
-          <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 800, color: C.navy }}>No Active Session</h3>
-          <p style={{ margin: "0 0 6px", color: C.grey500, fontSize: 14 }}>Live monitoring is available during an active exam session.</p>
-          <p style={{ margin: 0, color: C.grey400, fontSize: 13 }}>The invigilator starts the session — it will appear here automatically once active.</p>
-        </Card>
+      {/* ═══════════════ INVIGILATION DUTY ═══════════════ */}
+      {activeTab === "invigilation" && <>
+        {!hasDuty ? (
+          <Card style={{ textAlign: "center", padding: "64px 24px" }}>
+            <div style={{ width: 64, height: 64, borderRadius: 18, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 20px" }}>{Icon.clipboard}</div>
+            <h3 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: C.navy }}>No Invigilation Duty Assigned</h3>
+            <p style={{ margin: "0 auto", color: C.grey500, fontSize: 14, maxWidth: 380, lineHeight: 1.65 }}>You have not been assigned any invigilator duties this semester. Duties are assigned by the Departmental Exam Committee (DEC).</p>
+          </Card>
+        ) : <>
+          {/* Incoming swap invitations */}
+          {incoming.filter(r => r.myStatus === "Pending").length > 0 && (
+            <Card style={{ marginBottom: 24, border: `1.5px solid ${C.amber}`, background: C.amberLight }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span style={{ color: C.amber, display: "flex" }}>{Icon.bell}</span>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Swap Invitation — Your Acceptance Required</h3>
+                <Badge color={C.amber} bg={"#fde68a"}>{incoming.filter(r => r.myStatus === "Pending").length} pending</Badge>
+              </div>
+              <p style={{ margin: "0 0 14px", fontSize: 13, color: C.grey500 }}>A colleague has nominated you as their replacement. Please accept or decline so DEC can proceed.</p>
+              {incoming.filter(r => r.myStatus === "Pending").map(req => (
+                <div key={req.id} style={{ background: C.white, borderRadius: 10, padding: "14px 16px", border: `1px solid ${C.grey200}`, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 3 }}>{req.exam} <Badge style={{ marginLeft: 6 }}>{req.course}</Badge></div>
+                      <div style={{ fontSize: 13, color: C.grey500 }}>{req.date} · {req.time} · {req.lab}</div>
+                      <div style={{ fontSize: 13, color: C.grey500 }}>From: <strong style={{ color: C.navy }}>{req.requester}</strong> · Reason: <em>{req.reason}</em></div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn variant="ghost" size="sm" style={{ borderColor: C.red, color: C.red }} onClick={() => respondIncoming(req.id, "Declined")}>✕ Decline</Btn>
+                      <Btn variant="primary" size="sm" style={{ background: C.green }} onClick={() => respondIncoming(req.id, "Accepted")}>✓ Accept</Btn>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {/* Responded invitations */}
+          {incoming.filter(r => r.myStatus !== "Pending").length > 0 && (
+            <Card style={{ marginBottom: 24 }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 800, color: C.navy }}>Responded Invitations</h3>
+              {incoming.filter(r => r.myStatus !== "Pending").map(req => (
+                <div key={req.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: C.grey50, borderRadius: 8, marginBottom: 6 }}>
+                  <div><span style={{ fontWeight: 700, fontSize: 13, color: C.navy }}>{req.exam}</span><span style={{ fontSize: 12, color: C.grey400, marginLeft: 8 }}>{req.date} · from {req.requester}</span></div>
+                  {statusBadge(req.myStatus)}
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {/* Duty banner */}
+          <div style={{ padding: "12px 20px", background: C.tealLight, border: `1.5px solid ${C.tealMid}`, borderRadius: 10, marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ color: C.teal, display: "flex" }}>{Icon.userCheck}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>You have <strong>{invigilatorAssignments.length}</strong> invigilator {invigilatorAssignments.length === 1 ? "duty" : "duties"} assigned this semester.</span>
+          </div>
+
+          {/* Stats */}
+          <div className="resp-grid-4" style={{ marginBottom: 28 }}>
+            <StatCard label="Assigned Exams" value={invigilatorAssignments.length}                        icon={Icon.clipboard} />
+            <StatCard label="Total Students"  value={invigilatorAssignments.reduce((s,a)=>s+a.students,0)} icon={Icon.users} />
+            <StatCard label="Swap Requests"   value={mySwaps.length} icon={Icon.bell} accent={mySwaps.length ? C.amber : C.teal} light={mySwaps.length ? C.amberLight : C.tealLight} />
+            <StatCard label="Next Exam"       value="Jul 2"                                               icon={Icon.calendar} />
+          </div>
+
+          {/* Assignment cards */}
+          <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 800, color: C.navy }}>My Schedule</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
+            {invigilatorAssignments.map((a, ai) => {
+              const alreadyRequested = mySwaps.some(r => r.exam === a.exam);
+              return (
+                <Card key={a.exam} style={{ border: alreadyRequested ? `2px solid ${C.amber}` : undefined, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${ai * 100}ms both` }}>
+                  <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ width: 50, height: 50, borderRadius: 13, background: C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: C.teal, flexShrink: 0 }}>{Icon.clipboard}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
+                        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{a.exam}</h3>
+                        <Badge>{a.course}</Badge>
+                        {alreadyRequested && <Badge color={C.amber} bg={C.amberLight}>Swap Requested</Badge>}
+                      </div>
+                      <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap" }}>
+                        <span>{a.date} · {a.time}</span>
+                        <span>Lab: <strong style={{ color: C.navy }}>{a.lab}</strong></span>
+                        <span>Section: <strong style={{ color: C.navy }}>{a.section}</strong></span>
+                        <span>Students: <strong style={{ color: C.navy }}>{a.students}</strong></span>
+                        <span>Duration: <strong style={{ color: C.navy }}>{a.duration}</strong></span>
+                      </div>
+                      <div style={{ marginTop: 5, fontSize: 12, color: C.grey400 }}>Approved by {a.approvedBy}</div>
+                    </div>
+                    <Btn variant="ghost" size="sm" style={alreadyRequested ? { borderColor: C.amber, color: C.amber } : {}} onClick={() => !alreadyRequested && setSwapModal(a)}>
+                      {alreadyRequested ? "Swap Pending" : "Request Swap"}
+                    </Btn>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* My Swap Requests */}
+          <Card>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Swap Requests</h3>
+              {mySwaps.filter(r => r.decStatus === "Pending").length > 0 && <Badge color={C.amber} bg={C.amberLight}>{mySwaps.filter(r => r.decStatus === "Pending").length} pending</Badge>}
+            </div>
+            {mySwaps.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "24px 0", color: C.grey400, fontSize: 13 }}>
+                <div style={{ marginBottom: 6, display: "flex", justifyContent: "center", opacity: 0.4 }}>{Icon.bell}</div>
+                No swap requests yet. Use <strong>"Request Swap"</strong> on a duty card above.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {mySwaps.map(req => (
+                  <div key={req.id} style={{ padding: "13px 16px", borderRadius: 10, background: C.grey50, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 2 }}>{req.exam} <span style={{ fontSize: 12, color: C.grey400, fontWeight: 500 }}>({req.course})</span></div>
+                      <div style={{ fontSize: 12, color: C.grey500 }}>{req.date} · Replacement: <strong style={{ color: C.navy }}>{req.replacement}</strong></div>
+                      <div style={{ fontSize: 12, color: C.grey500 }}>Submitted: {req.submittedOn}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>Replacement</div>
+                        {statusBadge(req.replacementStatus)}
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>DEC</div>
+                        {statusBadge(req.decStatus)}
+                      </div>
+                      <Btn variant="ghost" size="sm" onClick={() => setViewSwap(req)}>Details</Btn>
+                      {req.decStatus === "Pending" && <Btn variant="ghost" size="sm" style={{ color: C.red, borderColor: C.red }} onClick={() => cancelSwap(req.id)}>Cancel</Btn>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </>}
       </>}
 
       <div style={{ height: 48 }} />

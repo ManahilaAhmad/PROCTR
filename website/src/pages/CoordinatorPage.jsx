@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -13,8 +13,12 @@ import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
 import { timetableData, labsData } from "../data/mockData";
 
-export default function CoordinatorPage({ activePage }) {
+export default function CoordinatorPage({ activePage, setPage }) {
   const [activeTab, setActiveTab] = useState(activePage === "rooms" ? "rooms" : "schedule");
+
+  useEffect(() => {
+    setActiveTab(activePage === "rooms" ? "rooms" : "schedule");
+  }, [activePage]);
   const [notifSubject, setNotifSubject] = useState("");
   const [notifMsg, setNotifMsg] = useState("");
   const [notifAudience, setNotifAudience] = useState("All Students");
@@ -24,11 +28,17 @@ export default function CoordinatorPage({ activePage }) {
   const [schedDate, setSchedDate] = useState("");
   const [schedLab, setSchedLab] = useState("");
 
+  // Broadcast states
+  const [broadcastType, setBroadcastType] = useState("all"); // "all" | "specific"
+  const [specificUser, setSpecificUser] = useState("");
+  const [customUser, setCustomUser] = useState("");
+
   function sendNotif() {
     if (!notifSubject.trim() || !notifMsg.trim()) return;
+    if (broadcastType === "specific" && !specificUser && !customUser.trim()) return;
     setNotifSent(true);
-    setNotifSubject(""); setNotifMsg("");
-    setTimeout(() => setNotifSent(false), 3000);
+    setNotifSubject(""); setNotifMsg(""); setSpecificUser(""); setCustomUser("");
+    setTimeout(() => setNotifSent(false), 3200);
   }
 
   function exportDateSheet() {
@@ -56,14 +66,20 @@ export default function CoordinatorPage({ activePage }) {
         </div>
       )}
 
-      <Tabs tabs={[{ id: "schedule", label: "Date Sheets" }, { id: "rooms", label: "Lab Rooms" }]} active={activeTab} onChange={setActiveTab} />
+      <Tabs tabs={[{ id: "schedule", label: "Date Sheets" }, { id: "rooms", label: "Lab Rooms" }]} active={activeTab} onChange={(id) => {
+        setActiveTab(id);
+        if (setPage) {
+          const pageMap = { schedule: "coordinator", rooms: "rooms" };
+          setPage(pageMap[id]);
+        }
+      }} />
 
       {/* ── DATE SHEETS ── */}
       {activeTab === "schedule" && <>
-        <div className="resp-grid-4" style={{ marginBottom: 28 }}>
+        {/* Changed grid layout to 3-column and removed Pending Assignment stat card */}
+        <div className="resp-grid-3" style={{ marginBottom: 28 }}>
           <StatCard label="Scheduled Exams" value={4} icon={Icon.calendar} />
           <StatCard label="Labs Available" value={3} icon={Icon.server} />
-          <StatCard label="Pending Assignment" value={2} icon={Icon.bell} />
           <StatCard label="Total Students" value={114} icon={Icon.users} />
         </div>
         <Card style={{ padding: 0, overflow: "hidden", marginBottom: 24 }}>
@@ -83,21 +99,70 @@ export default function CoordinatorPage({ activePage }) {
               statusBadge(s.status),
             ])} />
         </Card>
+
+        {/* Dynamic Broadcast & Target Specific User Notifications */}
         <Card>
           <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Broadcast Notification</h3>
           {notifSent && (
             <div style={{ marginBottom: 14, padding: "10px 14px", background: C.tealLight, borderRadius: 8, fontSize: 13, color: C.navy, fontWeight: 700 }}>
-              Notification sent to {notifAudience}.
+              Notification sent to {broadcastType === "all" ? notifAudience : (specificUser === "custom" ? customUser : specificUser)}.
             </div>
           )}
-          <div className="resp-grid-2" style={{ gap: 16 }}>
-            <Select label="Audience" value={notifAudience} onChange={(e) => setNotifAudience(e.target.value)}>
-              <option>All Students</option>
-              <option>CS Department Only</option>
-              <option>Invigilators Only</option>
-            </Select>
+
+          <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+            <button
+              onClick={() => setBroadcastType("all")}
+              style={{
+                flex: 1, padding: "10px", borderRadius: 8, border: `2px solid ${broadcastType === "all" ? C.teal : C.grey200}`,
+                background: broadcastType === "all" ? C.tealLight : C.white,
+                color: C.navy, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+              }}
+            >
+              📢 Broadcast to All
+            </button>
+            <button
+              onClick={() => setBroadcastType("specific")}
+              style={{
+                flex: 1, padding: "10px", borderRadius: 8, border: `2px solid ${broadcastType === "specific" ? C.teal : C.grey200}`,
+                background: broadcastType === "specific" ? C.tealLight : C.white,
+                color: C.navy, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+              }}
+            >
+              👤 Message Specific User
+            </button>
+          </div>
+
+          <div className="resp-grid-2" style={{ gap: 16, marginBottom: 16 }}>
+            {broadcastType === "all" ? (
+              <Select label="Audience Group" value={notifAudience} onChange={(e) => setNotifAudience(e.target.value)}>
+                <option>All Students</option>
+                <option>CS Department Only</option>
+                <option>Invigilators Only</option>
+                <option>All Teachers & Faculty</option>
+              </Select>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Select label="Select User" value={specificUser} onChange={(e) => setSpecificUser(e.target.value)}>
+                  <option value="">Choose a user...</option>
+                  <option value="Ali Hassan (Student - 2021-CS-101)">Ali Hassan (Student - 2021-CS-101)</option>
+                  <option value="Sara Malik (Student - F21-302)">Sara Malik (Student - F21-302)</option>
+                  <option value="Dr. Sana Mir (Teacher)">Dr. Sana Mir (Teacher)</option>
+                  <option value="Prof. Arif (Teacher)">Prof. Arif (Teacher)</option>
+                  <option value="custom">Type Custom Roll No / Email...</option>
+                </Select>
+                {specificUser === "custom" && (
+                  <Input
+                    label="Enter Custom Roll No / Email"
+                    placeholder="e.g. F21-123 or name@university.edu"
+                    value={customUser}
+                    onChange={(e) => setCustomUser(e.target.value)}
+                  />
+                )}
+              </div>
+            )}
             <Input label="Subject" placeholder="e.g. July Exam Schedule Published" value={notifSubject} onChange={(e) => setNotifSubject(e.target.value)} />
           </div>
+
           <div style={{ marginBottom: 18 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Message</label>
             <textarea value={notifMsg} onChange={(e) => setNotifMsg(e.target.value)} placeholder="Write your notification here..." style={{ width: "100%", padding: "11px 14px", borderRadius: 8, border: `1.5px solid ${C.grey200}`, fontSize: 14, color: C.grey800, background: C.grey50, minHeight: 80, resize: "vertical", boxSizing: "border-box", outline: "none", fontFamily: "inherit" }} />

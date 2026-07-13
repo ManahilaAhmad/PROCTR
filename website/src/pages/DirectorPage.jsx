@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -11,12 +11,21 @@ import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
 import { allSections, timetableData, labsData, sectionResultsData } from "../data/mockData";
 
-export default function DirectorPage({ activePage }) {
+export default function DirectorPage({ activePage, setPage }) {
   const [tab, setTab] = useState(
     activePage === "dir-timetable" ? "timetable" :
       activePage === "dir-labs" ? "labs" :
         activePage === "dir-results" ? "results" : "overview"
   );
+
+  useEffect(() => {
+    setTab(
+      activePage === "dir-timetable" ? "timetable" :
+        activePage === "dir-labs" ? "labs" :
+          activePage === "dir-results" ? "results" : "overview"
+    );
+  }, [activePage]);
+
   const [sectionFilter, setSectionFilter] = useState("All");
   const [selectedSection, setSelectedSection] = useState(null);
 
@@ -30,7 +39,18 @@ export default function DirectorPage({ activePage }) {
           { id: "results", label: "Section Results" },
         ]}
         active={tab}
-        onChange={setTab}
+        onChange={(id) => {
+          setTab(id);
+          if (setPage) {
+            const pageMap = {
+              overview: "director",
+              timetable: "dir-timetable",
+              labs: "dir-labs",
+              results: "dir-results"
+            };
+            setPage(pageMap[id]);
+          }
+        }}
       />
 
       {/* ── OVERVIEW ─────────────────────────────────────────────── */}
