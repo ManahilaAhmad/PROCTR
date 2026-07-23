@@ -3,10 +3,10 @@ import { Icon } from "../../theme/icons";
 
 const navItems = {
   teacher: [
-    { id: "teacher",      icon: Icon.clipboardList, label: "My Exams" },
-    { id: "upload",       icon: Icon.upload,        label: "Upload Exam" },
-    { id: "__divider__",  icon: null,               label: "Invigilation Duty", isDivider: true },
-    { id: "inv-schedule", icon: Icon.clipboard,     label: "My Schedule" },
+    { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
+    { id: "upload", icon: Icon.upload, label: "Upload Exam" },
+    { id: "__divider__", icon: null, label: "Invigilation Duty", isDivider: true },
+    { id: "inv-schedule", icon: Icon.clipboard, label: "My Schedule" },
   ],
   student: [
     { id: "student", icon: Icon.home, label: "Dashboard" },
@@ -17,20 +17,20 @@ const navItems = {
     { id: "reports", icon: Icon.fileText, label: "Reports" },
   ],
   director: [
-    { id: "director",      icon: Icon.chart,     label: "Overview" },
-    { id: "dir-timetable", icon: Icon.calendar,  label: "Timetable" },
-    { id: "dir-labs",      icon: Icon.server,    label: "Labs" },
-    { id: "dir-results",   icon: Icon.fileText,  label: "Section Results" },
+    { id: "director", icon: Icon.chart, label: "Overview" },
+    { id: "dir-timetable", icon: Icon.calendar, label: "Timetable" },
+    { id: "dir-labs", icon: Icon.server, label: "Labs" },
+    { id: "dir-results", icon: Icon.fileText, label: "Section Results" },
   ],
   coordinator: [
     { id: "coordinator", icon: Icon.calendar, label: "Date Sheets" },
-    { id: "rooms",       icon: Icon.building, label: "Lab Rooms" },
+    { id: "rooms", icon: Icon.building, label: "Lab Rooms" },
   ],
   dec: [
-    { id: "dec",               icon: Icon.chart,     label: "Overview" },
-    { id: "dec-exams",         icon: Icon.calendar,  label: "Scheduled Exams" },
-    { id: "dec-invigilators",  icon: Icon.userCheck, label: "Invigilators" },
-    { id: "dec-swaps",         icon: Icon.bell,      label: "Swap Requests" },
+    { id: "dec", icon: Icon.chart, label: "Overview" },
+    { id: "dec-exams", icon: Icon.calendar, label: "Scheduled Exams" },
+    { id: "dec-invigilators", icon: Icon.userCheck, label: "Invigilators" },
+    { id: "dec-swaps", icon: Icon.bell, label: "Swap Requests" },
   ],
 };
 
@@ -49,9 +49,9 @@ export default function Sidebar({ role, activePage, setPage, setRole, sidebarOpe
               <div style={{ color: C.teal, fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{role}</div>
             </div>
           </div>
-          <button 
-            className="show-mobile" 
-            onClick={() => setSidebarOpen(false)} 
+          <button
+            className="show-mobile"
+            onClick={() => setSidebarOpen(false)}
             style={{ background: "none", border: "none", color: "rgba(255,255,255,.45)", cursor: "pointer", display: "flex", padding: "6px" }}
             aria-label="Close menu"
           >

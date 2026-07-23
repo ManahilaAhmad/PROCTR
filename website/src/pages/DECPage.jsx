@@ -10,80 +10,9 @@ import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
 import Select from "../components/common/Select";
-import { timetableData } from "../data/mockData";
-
-// ── Mock invigilator pool ────────────────────────────────────────────
-const invigilatorPool = [
-  { name: "Dr. Sana Mir",   dept: "CS", status: "Available" },
-  { name: "Prof. Arif",     dept: "CS", status: "Available" },
-  { name: "Prof. Malik",    dept: "CS", status: "Available" },
-  { name: "Dr. Hira Baig",  dept: "CS", status: "Available" },
-  { name: "Mr. Usman Raza", dept: "CS", status: "On Leave"  },
-];
-
-// Pre-assign default invigilators (lab teacher = invigilator)
-const initialAssignments = timetableData.map((exam) => ({
-  ...exam,
-  assignedBy: "default",
-}));
-
-// Mock swap requests from teachers
-const initialSwapRequests = [
-  {
-    id: 1,
-    exam: "Networks Lab",
-    course: "CS-415",
-    date: "Jul 15, 2026",
-    time: "02:00 PM",
-    lab: "Lab-2",
-    requester: "Prof. Arif",
-    requestedReplacement: "Dr. Hira Baig",
-    reason: "Conference attendance on that date",
-    status: "Pending",
-  },
-  {
-    id: 2,
-    exam: "AI Practical",
-    course: "CS-501",
-    date: "Jul 20, 2026",
-    time: "09:00 AM",
-    lab: "TBD",
-    requester: "Prof. Malik",
-    requestedReplacement: "Mr. Usman Raza",
-    reason: "Medical leave",
-    status: "Pending",
-  },
-  {
-    id: 3,
-    exam: "Data Structures Lab",
-    course: "CS-301",
-    date: "Jul 2, 2026",
-    time: "11:00 AM",
-    lab: "Lab-1",
-    requester: "Dr. Sana Mir",
-    requestedReplacement: "Prof. Arif",
-    reason: "Family emergency",
-    status: "Approved",
-  },
-];
-
-// ── Helpers ─────────────────────────────────────────────────────────
-function swapStatusBadge(status) {
-  if (status === "Approved")
-    return <Badge color={C.green} bg={C.greenLight}>Approved</Badge>;
-  if (status === "Rejected")
-    return <Badge color={C.red} bg={C.redLight}>Rejected</Badge>;
-  return <Badge color={C.amber} bg={C.amberLight}>Pending</Badge>;
-}
-
-function poolStatusBadge(status) {
-  if (status === "Available")
-    return <Badge color={C.green} bg={C.greenLight}>Available</Badge>;
-  return <Badge color={C.red} bg={C.redLight}>On Leave</Badge>;
-}
 
 // ── Main Component ───────────────────────────────────────────────────
-export default function DECPage({ activePage, setPage }) {
+export default function DECPage({ activePage, setPage, user }) {
   const tabMap = {
     dec: "overview",
     "dec-exams": "exams",
@@ -96,8 +25,30 @@ export default function DECPage({ activePage, setPage }) {
     setActiveTab(tabMap[activePage] || "overview");
   }, [activePage]);
 
-  const [assignments, setAssignments] = useState(initialAssignments);
-  const [swapRequests, setSwapRequests] = useState(initialSwapRequests);
+  const [assignments, setAssignments] = useState([]);
+  const [swapRequests, setSwapRequests] = useState([]);
+  const [teachersPool, setTeachersPool] = useState([]);
+
+  const fetchData = () => {
+    fetch("http://localhost:5000/api/schedule")
+      .then(res => res.json())
+      .then(data => { if (data.status === "success" && Array.isArray(data.schedule)) setAssignments(data.schedule); })
+      .catch(() => {});
+
+    fetch("http://localhost:5000/api/swap-requests/dec")
+      .then(res => res.json())
+      .then(data => { if (data.status === "success" && Array.isArray(data.requests)) setSwapRequests(data.requests); })
+      .catch(() => {});
+
+    fetch("http://localhost:5000/api/teachers")
+      .then(res => res.json())
+      .then(data => { if (data.status === "success" && Array.isArray(data.teachers)) setTeachersPool(data.teachers); })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   // assign modal
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -119,33 +70,44 @@ export default function DECPage({ activePage, setPage }) {
   // ── Assign invigilator ──────────────────────────────────────────
   function openAssignModal(exam) {
     setAssignTarget(exam);
-    setSelectedInvigilator(
-      exam.invigilator !== "Unassigned" ? exam.invigilator : ""
-    );
+    // Find matching teacher ID if already assigned
+    const matched = teachersPool.find(t => t.name === exam.invigilator_name);
+    setSelectedInvigilator(matched ? matched.id : "");
     setShowAssignModal(true);
   }
 
   function confirmAssign() {
     if (!selectedInvigilator) return;
-    setAssignments((prev) =>
-      prev.map((a) =>
-        a.exam === assignTarget.exam &&
-        a.date === assignTarget.date &&
-        a.time === assignTarget.time
-          ? {
-              ...a,
-              invigilator: selectedInvigilator,
-              assignedBy: "DEC",
-              status:
-                a.status === "Draft" || a.status === "Pending"
-                  ? "Confirmed"
-                  : a.status,
-            }
-          : a
-      )
-    );
-    setShowAssignModal(false);
-    showToast(`Invigilator assigned: ${selectedInvigilator}`);
+    fetch("http://localhost:5000/api/invigilator/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schedule_id: assignTarget?.schedule_id,
+        teacher_id: parseInt(selectedInvigilator),
+        user_id: user?.userId || 1,
+      }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          setShowAssignModal(false);
+          const matched = teachersPool.find(t => t.id === parseInt(selectedInvigilator));
+          showToast(`Invigilator assigned: ${matched ? matched.name : "Teacher"}`);
+          fetchData();
+        } else {
+          alert(data.message || "Failed to assign invigilator.");
+        }
+      })
+      .catch(err => alert("Connection error to assignment api."));
+  }
+
+  // Helper badge
+  function swapStatusBadge(status) {
+    if (status === "Approved")
+      return <Badge color={C.green} bg={C.greenLight}>Approved</Badge>;
+    if (status === "Rejected")
+      return <Badge color={C.red} bg={C.redLight}>Rejected</Badge>;
+    return <Badge color={C.amber} bg={C.amberLight}>Pending</Badge>;
   }
 
   // ── Approve / Reject swap ───────────────────────────────────────
@@ -155,38 +117,41 @@ export default function DECPage({ activePage, setPage }) {
   }
 
   function handleSwapDecision(decision) {
-    setSwapRequests((prev) =>
-      prev.map((r) =>
-        r.id === swapTarget.id ? { ...r, status: decision } : r
-      )
-    );
-    if (decision === "Approved") {
-      setAssignments((prev) =>
-        prev.map((a) =>
-          a.exam === swapTarget.exam && a.date === swapTarget.date
-            ? {
-                ...a,
-                invigilator: swapTarget.requestedReplacement,
-                assignedBy: "DEC (Swap)",
-              }
-            : a
-        )
-      );
-      showToast(
-        `Swap approved — ${swapTarget.requestedReplacement} assigned`,
-        C.green
-      );
-    } else {
-      showToast("Swap request rejected", C.red);
-    }
-    setShowSwapDetail(false);
+    fetch("http://localhost:5000/api/swap-requests/dec/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_id: swapTarget?.request_id,
+        user_id: user?.userId || 1,
+        status: decision, // Approved / Rejected
+      }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          if (decision === "Approved") {
+            showToast(`Swap approved — ${swapTarget?.replacement_name || "replacement"} assigned`, C.green);
+          } else {
+            showToast("Swap request rejected", C.red);
+          }
+          setShowSwapDetail(false);
+          fetchData();
+        } else {
+          alert(data.message || "Failed to submit decision.");
+        }
+      })
+      .catch(err => alert("Connection error to swap review api."));
   }
 
   // ── Derived stats ───────────────────────────────────────────────
-  const totalExams   = assignments.length;
-  const assigned     = assignments.filter((a) => a.invigilator !== "Unassigned").length;
+  const safeAssignments  = (Array.isArray(assignments) ? assignments : []).filter(Boolean);
+  const safeSwapRequests = (Array.isArray(swapRequests) ? swapRequests : []).filter(Boolean);
+  const safeTeachersPool = (Array.isArray(teachersPool) ? teachersPool : []).filter(Boolean);
+
+  const totalExams   = safeAssignments.length;
+  const assigned     = safeAssignments.filter((a) => a?.invigilator_name && a?.invigilator_name !== "Unassigned").length;
   const unassigned   = totalExams - assigned;
-  const pendingSwaps = swapRequests.filter((r) => r.status === "Pending").length;
+  const pendingSwaps = safeSwapRequests.filter((r) => r?.dec_status === "Pending").length;
   const coveragePct  = totalExams ? Math.round((assigned / totalExams) * 100) : 0;
 
   const tabs = [
@@ -262,8 +227,8 @@ export default function DECPage({ activePage, setPage }) {
               Assign Invigilator
             </h2>
             <p style={{ margin: "0 0 22px", fontSize: 13, color: C.grey500 }}>
-              {assignTarget.exam} — {assignTarget.date}, {assignTarget.time} ·{" "}
-              {assignTarget.lab}
+              {assignTarget?.course_code} {assignTarget?.exam_type} — {assignTarget?.exam_date ? new Date(assignTarget.exam_date).toLocaleDateString() : "TBD"} ·{" "}
+              {assignTarget?.lab_name || "Unassigned Lab"}
             </p>
             <Select
               label="Select Invigilator"
@@ -271,13 +236,11 @@ export default function DECPage({ activePage, setPage }) {
               onChange={(e) => setSelectedInvigilator(e.target.value)}
             >
               <option value="">Choose an invigilator…</option>
-              {invigilatorPool
-                .filter((inv) => inv.status === "Available")
-                .map((inv) => (
-                  <option key={inv.name} value={inv.name}>
-                    {inv.name}
-                  </option>
-                ))}
+              {safeTeachersPool.map((inv) => (
+                <option key={inv?.id || Math.random()} value={inv?.id}>
+                  {inv?.name || "Teacher"} ({inv?.designation || "Faculty"})
+                </option>
+              ))}
             </Select>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
               <Btn
@@ -358,7 +321,7 @@ export default function DECPage({ activePage, setPage }) {
                   Swap Request
                 </h2>
                 <p style={{ margin: 0, fontSize: 12, color: C.grey500 }}>
-                  {swapTarget.exam} · {swapTarget.course}
+                  {swapTarget?.course_code} · {swapTarget?.exam_type}
                 </p>
               </div>
             </div>
@@ -375,11 +338,11 @@ export default function DECPage({ activePage, setPage }) {
               }}
             >
               {[
-                ["Date & Time", `${swapTarget.date} at ${swapTarget.time}`],
-                ["Lab", swapTarget.lab],
-                ["Current Invigilator", swapTarget.requester],
-                ["Requested Replacement", swapTarget.requestedReplacement],
-                ["Reason", swapTarget.reason],
+                ["Date & Time", `${swapTarget?.exam_date ? new Date(swapTarget.exam_date).toLocaleDateString() : "TBD"} at ${(swapTarget?.start_time || "--:--").substring(0, 5)}`],
+                ["Lab", swapTarget?.lab_name || "N/A"],
+                ["Current Invigilator", swapTarget?.requester_name || "N/A"],
+                ["Requested Replacement", swapTarget?.replacement_name || "N/A"],
+                ["Reason", swapTarget?.reason || "None"],
               ].map(([label, value]) => (
                 <div
                   key={label}
@@ -402,12 +365,12 @@ export default function DECPage({ activePage, setPage }) {
               ))}
             </div>
 
-            {swapTarget.status !== "Pending" ? (
+            {swapTarget?.dec_status !== "Pending" ? (
               <div style={{ textAlign: "center", padding: "10px 0" }}>
-                {swapStatusBadge(swapTarget.status)}
+                {swapStatusBadge(swapTarget?.dec_status)}
                 <p style={{ margin: "12px 0 0", fontSize: 13, color: C.grey500 }}>
                   This request has already been{" "}
-                  {swapTarget.status.toLowerCase()}.
+                  {(swapTarget?.dec_status || "").toLowerCase()}.
                 </p>
               </div>
             ) : (
@@ -551,7 +514,6 @@ export default function DECPage({ activePage, setPage }) {
             </p>
           </Card>
 
-          {/* Pending swaps alert */}
           {pendingSwaps > 0 && (
             <Card
               style={{
@@ -579,11 +541,11 @@ export default function DECPage({ activePage, setPage }) {
                 </Badge>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {swapRequests
-                  .filter((r) => r.status === "Pending")
+                {safeSwapRequests
+                  .filter((r) => r?.dec_status === "Pending")
                   .map((req) => (
                     <div
-                      key={req.id}
+                      key={req?.request_id || Math.random()}
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
@@ -601,16 +563,7 @@ export default function DECPage({ activePage, setPage }) {
                             color: C.navy,
                           }}
                         >
-                          {req.exam}{" "}
-                          <span
-                            style={{
-                              color: C.grey500,
-                              fontWeight: 500,
-                              fontSize: 12,
-                            }}
-                          >
-                            ({req.course})
-                          </span>
+                          {req?.course_code} {req?.exam_type}
                         </div>
                         <div
                           style={{
@@ -619,8 +572,8 @@ export default function DECPage({ activePage, setPage }) {
                             marginTop: 2,
                           }}
                         >
-                          {req.requester} → {req.requestedReplacement} ·{" "}
-                          {req.date}
+                          {req?.requester_name || "Teacher"} → {req?.replacement_name || "Teacher"} ·{" "}
+                          {req?.exam_date ? new Date(req.exam_date).toLocaleDateString() : "TBD"}
                         </div>
                       </div>
                       <Btn
@@ -639,7 +592,7 @@ export default function DECPage({ activePage, setPage }) {
             </Card>
           )}
 
-          {/* Invigilator pool */}
+          {/* Invigilator pool from DB */}
           <Card>
             <h3
               style={{ margin: "0 0 16px", fontWeight: 800, color: C.navy, fontSize: 15 }}
@@ -647,9 +600,11 @@ export default function DECPage({ activePage, setPage }) {
               Invigilator Pool
             </h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {invigilatorPool.map((inv) => (
+              {safeTeachersPool.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "20px 0", color: C.grey400, fontSize: 13 }}>No teachers loaded.</div>
+              ) : safeTeachersPool.map((inv) => (
                 <div
-                  key={inv.name}
+                  key={inv?.id || Math.random()}
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -666,7 +621,7 @@ export default function DECPage({ activePage, setPage }) {
                         width: 32,
                         height: 32,
                         borderRadius: "50%",
-                        background: inv.status === "Available" ? C.teal : C.grey400,
+                        background: C.teal,
                         color: C.white,
                         display: "flex",
                         alignItems: "center",
@@ -676,9 +631,10 @@ export default function DECPage({ activePage, setPage }) {
                         flexShrink: 0,
                       }}
                     >
-                      {inv.name
+                      {(inv?.name || "Teacher")
                         .split(" ")
                         .map((w) => w[0])
+                        .filter(Boolean)
                         .slice(0, 2)
                         .join("")}
                     </div>
@@ -686,14 +642,14 @@ export default function DECPage({ activePage, setPage }) {
                       <div
                         style={{ fontWeight: 700, fontSize: 14, color: C.navy }}
                       >
-                        {inv.name}
+                        {inv?.name}
                       </div>
                       <div style={{ fontSize: 11, color: C.grey500 }}>
-                        {inv.dept} Dept
+                        {inv?.designation}
                       </div>
                     </div>
                   </div>
-                  {poolStatusBadge(inv.status)}
+                  <Badge color={C.teal} bg={C.tealLight}>Available</Badge>
                 </div>
               ))}
             </div>
@@ -740,22 +696,18 @@ export default function DECPage({ activePage, setPage }) {
               <span style={{ fontWeight: 700, fontSize: 15, color: C.navy }}>
                 Lab Exam Schedule
               </span>
-              <Badge>July 2026</Badge>
+              <Badge>Spring 2026</Badge>
             </div>
             <Table
-              columns={["Exam", "Course", "Date", "Time", "Lab", "Students", "Status"]}
-              rows={assignments.map((s) => [
-                <span style={{ fontWeight: 700, color: C.navy }}>{s.exam}</span>,
-                <Badge>{s.course}</Badge>,
-                s.date,
-                s.time,
-                s.lab === "TBD" ? (
-                  <span style={{ color: C.amber, fontWeight: 700 }}>TBD</span>
-                ) : (
-                  s.lab
-                ),
-                s.students,
-                statusBadge(s.status),
+              columns={["Exam", "Section", "Date", "Time", "Lab", "Lab Capacity", "Status"]}
+              rows={safeAssignments.map((s) => [
+                <span style={{ fontWeight: 700, color: C.navy }}>{s?.course_code} {s?.exam_type}</span>,
+                <Badge>{s?.section_name}</Badge>,
+                s?.exam_date ? new Date(s.exam_date).toLocaleDateString() : "TBD",
+                `${(s?.start_time || "--:--").substring(0, 5)} - ${(s?.end_time || "--:--").substring(0, 5)}`,
+                s?.lab_name || "N/A",
+                s?.capacity || 0,
+                statusBadge(s?.status),
               ])}
             />
           </Card>
@@ -801,20 +753,14 @@ export default function DECPage({ activePage, setPage }) {
               Invigilation Assignments
             </div>
             <Table
-              columns={["Exam", "Course", "Date", "Time", "Lab", "Invigilator", "Assigned By", "Action"]}
-              rows={assignments.map((a) => [
-                <span style={{ fontWeight: 700, color: C.navy }}>{a.exam}</span>,
-                <Badge>{a.course}</Badge>,
-                a.date,
-                a.time,
-                a.lab === "TBD" ? (
-                  <span style={{ color: C.amber, fontWeight: 700 }}>TBD</span>
-                ) : (
-                  a.lab
-                ),
-                a.invigilator === "Unassigned" ? (
-                  <span style={{ color: C.red, fontWeight: 700 }}>⚠ Unassigned</span>
-                ) : (
+              columns={["Exam", "Section", "Date", "Time", "Lab", "Invigilator", "Assignment Status", "Action"]}
+              rows={safeAssignments.map((a) => [
+                <span style={{ fontWeight: 700, color: C.navy }}>{a?.course_code} {a?.exam_type}</span>,
+                <Badge>{a?.section_name}</Badge>,
+                a?.exam_date ? new Date(a.exam_date).toLocaleDateString() : "TBD",
+                `${(a?.start_time || "--:--").substring(0, 5)} - ${(a?.end_time || "--:--").substring(0, 5)}`,
+                a?.lab_name || "N/A",
+                a?.invigilator_name && a?.invigilator_name !== "Unassigned" ? (
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span
                       style={{
@@ -831,24 +777,27 @@ export default function DECPage({ activePage, setPage }) {
                         flexShrink: 0,
                       }}
                     >
-                      {a.invigilator
+                      {(a?.invigilator_name || "")
                         .split(" ")
                         .map((w) => w[0])
+                        .filter(Boolean)
                         .slice(0, 2)
                         .join("")}
                     </span>
                     <span style={{ fontWeight: 600, color: C.navy, fontSize: 13 }}>
-                      {a.invigilator}
+                      {a?.invigilator_name}
                     </span>
                   </span>
+                ) : (
+                  <span style={{ color: C.red, fontWeight: 700 }}>⚠ Unassigned</span>
                 ),
                 <span
                   style={{ fontSize: 12, color: C.grey500, fontStyle: "italic" }}
                 >
-                  {a.assignedBy === "default" ? "Auto (Lab Teacher)" : a.assignedBy}
+                  {a?.assignment_status || "None"}
                 </span>,
                 <Btn variant="ghost" size="sm" onClick={() => openAssignModal(a)}>
-                  {a.invigilator === "Unassigned" ? "Assign" : "Reassign"}
+                  {a?.invigilator_name && a?.invigilator_name !== "Unassigned" ? "Reassign" : "Assign"}
                 </Btn>,
               ])}
             />
@@ -876,7 +825,7 @@ export default function DECPage({ activePage, setPage }) {
             />
             <StatCard
               label="Resolved"
-              value={swapRequests.filter((r) => r.status !== "Pending").length}
+              value={swapRequests.filter((r) => r.dec_status !== "Pending").length}
               icon={Icon.checkCircle}
               accent={C.green}
               light={C.greenLight}
@@ -893,19 +842,19 @@ export default function DECPage({ activePage, setPage }) {
                 color: C.navy,
               }}
             >
-              Invigilation Swap Requests
+               Invigilation Swap Requests
             </div>
             <Table
-              columns={["Exam", "Course", "Date", "From", "To", "Reason", "Status", "Action"]}
-              rows={swapRequests.map((req) => [
-                <span style={{ fontWeight: 700, color: C.navy }}>{req.exam}</span>,
-                <Badge>{req.course}</Badge>,
-                req.date,
+              columns={["Exam", "Section", "Date", "From", "To", "Reason", "Status", "Action"]}
+              rows={safeSwapRequests.map((req) => [
+                <span style={{ fontWeight: 700, color: C.navy }}>{req?.exam_type}</span>,
+                <Badge>{req?.course_code}</Badge>,
+                req?.exam_date ? new Date(req.exam_date).toLocaleDateString() : "TBD",
                 <span style={{ fontWeight: 600, color: C.grey800, fontSize: 13 }}>
-                  {req.requester}
+                  {req?.requester_name || "Teacher"}
                 </span>,
                 <span style={{ fontWeight: 700, color: C.teal, fontSize: 13 }}>
-                  {req.requestedReplacement}
+                  {req?.replacement_name || "Teacher"}
                 </span>,
                 <span
                   style={{
@@ -917,17 +866,17 @@ export default function DECPage({ activePage, setPage }) {
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                   }}
-                  title={req.reason}
+                  title={req?.reason}
                 >
-                  {req.reason}
+                  {req?.reason || "N/A"}
                 </span>,
-                swapStatusBadge(req.status),
+                swapStatusBadge(req?.dec_status),
                 <Btn
                   variant="ghost"
                   size="sm"
                   onClick={() => openSwapDetail(req)}
                 >
-                  {req.status === "Pending" ? "Review" : "View"}
+                  {req?.dec_status === "Pending" ? "Review" : "View"}
                 </Btn>,
               ])}
             />

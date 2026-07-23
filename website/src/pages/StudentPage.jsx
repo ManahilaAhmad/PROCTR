@@ -8,14 +8,9 @@ import Input from "../components/common/Input";
 import Badge from "../components/common/Badge";
 import StatCard from "../components/common/StatCard";
 
-// Mock faculty / coordinator notifications
-const initialNotifications = [
-  { id: 1, sender: "Coordinator", date: "Jul 12, 2026", subject: "July Exam Schedule Published", msg: "The final datesheet for BSCS 6th Semester lab exams has been published. Please review your schedules under the date sheet section.", isCritical: true },
-  { id: 2, sender: "Prof. Arif Khan", date: "Jul 10, 2026", subject: "Networks Lab Seating Plan", msg: "Students of section A are directed to report to Lab-2, and section B to Lab-3 for the upcoming practical final.", isCritical: false },
-  { id: 3, sender: "Dept. Exam Committee", date: "Jul 08, 2026", subject: "Mandatory Student ID Cards", msg: "No student will be allowed to sit in the lab final exam without their physical student registration card.", isCritical: true },
-];
+import { useEffect } from "react";
 
-export default function StudentPage({ activePage }) {
+export default function StudentPage({ activePage, user }) {
   const [selectedExam, setSelectedExam] = useState(null);
 
   // Profile states
@@ -23,14 +18,28 @@ export default function StudentPage({ activePage }) {
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [toast, setToast] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+
+  useEffect(() => {
+    fetch("http://localhost:5000/api/notifications")
+      .then(res => res.json())
+      .then(data => { if (data.status === "success") setNotifications(data.notifications); });
+
+    if (user?.userId) {
+      fetch(`http://localhost:5000/api/student/${user.userId}/schedule`)
+        .then(res => res.json())
+        .then(data => { if (data.status === "success") setSchedule(data.schedule); });
+    }
+  }, [user]);
 
   // Student details (Read-only)
   const studentInfo = {
-    name: "Ali Hassan",
-    rollNo: "2021-CS-101",
-    email: "ali.hassan@university.edu",
+    name: user?.name || "Ali Hassan",
+    rollNo: user?.rollNo || "2021-CS-101",
+    email: user?.email || "ali.hassan@university.edu",
     phone: "+92 300 1234567",
-    degree: "BS Computer Science",
+    degree: user?.departmentName || "BS Computer Science",
     semester: "6th Semester (Spring 2026)",
     advisor: "Dr. Sana Mir",
     gpa: "3.78",
@@ -38,11 +47,7 @@ export default function StudentPage({ activePage }) {
 
   const [avatarImg, setAvatarImg] = useState(null); // File object url or null
 
-  const pastExams = [
-    { title: "Networks Lab Final", course: "CS-415", date: "Jun 18, 2026", score: 84, total: 100, grade: "A", time: "52 min", questions: 8, breakdown: [{ label: "Subnetting", score: 22, max: 25 }, { label: "Routing Protocols", score: 18, max: 25 }, { label: "Socket Programming", score: 24, max: 30 }, { label: "Network Security", score: 20, max: 20 }] },
-    { title: "Database Lab Mid", course: "CS-312", date: "May 10, 2026", score: 71, total: 100, grade: "B", time: "48 min", questions: 6, breakdown: [{ label: "SQL Queries", score: 28, max: 35 }, { label: "Normalization", score: 20, max: 30 }, { label: "ER Diagrams", score: 23, max: 35 }] },
-    { title: "OOP Lab Final", course: "CS-211", date: "Jan 22, 2026", score: 91, total: 100, grade: "A+", time: "58 min", questions: 7, breakdown: [{ label: "Inheritance", score: 30, max: 30 }, { label: "Polymorphism", score: 28, max: 30 }, { label: "STL & Templates", score: 33, max: 40 }] },
-  ];
+  const pastExams = [];
 
   function showToast(msg, type = "success") {
     setToast({ msg, type });
@@ -171,18 +176,23 @@ export default function StudentPage({ activePage }) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {initialNotifications.map(n => (
-              <div key={n.id} style={{ padding: "16px 20px", borderRadius: 10, background: n.isCritical ? "rgba(225,29,72,.05)" : C.grey50, border: `1px solid ${n.isCritical ? "#f43f5e33" : C.grey200}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
-                  <div>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: n.isCritical ? C.red : C.teal, textTransform: "uppercase", letterSpacing: 0.5 }}>{n.sender}</span>
-                    <h4 style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 800, color: C.navy }}>{n.subject}</h4>
+            {notifications.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px 0", color: C.grey400, fontSize: 13 }}>No announcements yet.</div>
+            ) : notifications.map(n => {
+              const isCritical = n.audience_type === "Critical" || n.audience_type === "Invigilators";
+              return (
+                <div key={n.announcement_id} style={{ padding: "16px 20px", borderRadius: 10, background: isCritical ? "rgba(225,29,72,.05)" : C.grey50, border: `1px solid ${isCritical ? "#f43f5e33" : C.grey200}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: isCritical ? C.red : C.teal, textTransform: "uppercase", letterSpacing: 0.5 }}>{n.sender_name || "Faculty"}</span>
+                      <h4 style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 800, color: C.navy }}>{n.subject}</h4>
+                    </div>
+                    <span style={{ fontSize: 12, color: C.grey400 }}>{new Date(n.created_at).toLocaleDateString()}</span>
                   </div>
-                  <span style={{ fontSize: 12, color: C.grey400 }}>{n.date}</span>
+                  <p style={{ margin: 0, fontSize: 13, color: C.grey600, lineHeight: 1.6 }}>{n.message}</p>
                 </div>
-                <p style={{ margin: 0, fontSize: 13, color: C.grey600, lineHeight: 1.6 }}>{n.msg}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </PageWrap>
@@ -191,104 +201,56 @@ export default function StudentPage({ activePage }) {
 
   // ── Render Results Page ──
   return (
-    <PageWrap title="My Results" subtitle="Detailed breakdown of your academic performances and final lab exams">
+    <PageWrap title="My Exam Schedule" subtitle="Upcoming lab exams assigned to your section">
       <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-        <StatCard label="Exams Completed" value={3} icon={Icon.clipboardList} delay={0} />
-        <StatCard label="Average Score" value={`${avg}%`} icon={Icon.chart} delay={80} />
-        <StatCard label="Best Grade" value="A+" icon={Icon.trendingUp} delay={160} />
-        <StatCard label="Total Time Spent" value="2h 38m" icon={Icon.monitor} delay={240} />
+        <StatCard label="Scheduled Exams"  value={schedule.length}                                                  icon={Icon.clipboardList} delay={0} />
+        <StatCard label="Upcoming"         value={schedule.filter(e => new Date(e.exam_date) >= new Date()).length} icon={Icon.calendar}     delay={80} />
+        <StatCard label="Completed"        value={schedule.filter(e => new Date(e.exam_date) < new Date()).length}  icon={Icon.check}        delay={160} />
+        <StatCard label="Published"        value={schedule.filter(e => e.status === "Published").length}            icon={Icon.trendingUp}   delay={240} />
       </div>
 
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: C.navy, margin: "0 0 18px", letterSpacing: -0.2 }}>Past Exam Results</h2>
-      <div className="resp-grid-3" style={{ marginBottom: 28 }}>
-        {pastExams.map((e) => {
-          const [gc] = gradeColor(e.grade);
-          const pct = Math.round((e.score / e.total) * 100);
-          const isSelected = selectedExam?.title === e.title;
-          return (
-            <Card key={e.title} style={{ cursor: "pointer", border: `2px solid ${isSelected ? C.teal : C.grey200}`, position: "relative", overflow: "hidden" }} onClick={() => setSelectedExam(isSelected ? null : e)}>
-              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: gc }} />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <Badge>{e.course}</Badge>
-                <span style={{ fontSize: 24, fontWeight: 900, color: gc }}>{e.grade}</span>
-              </div>
-              <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 800, color: C.navy, lineHeight: 1.3 }}>{e.title}</h3>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
-                <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
-                  <svg viewBox="0 0 52 52" width="52" height="52">
-                    <circle cx="26" cy="26" r="20" fill="none" stroke={C.grey100} strokeWidth="5" />
-                    <circle cx="26" cy="26" r="20" fill="none" stroke={gc} strokeWidth="5"
-                      strokeDasharray={`${2 * Math.PI * 20 * pct / 100} ${2 * Math.PI * 20}`}
-                      strokeLinecap="round" transform="rotate(-90 26 26)" />
-                    <text x="26" y="30" textAnchor="middle" fontSize="10" fontWeight="800" fill={C.navy}>{pct}%</text>
-                  </svg>
-                </div>
-                <div>
-                  <div style={{ fontSize: 19, fontWeight: 900, color: C.navy }}>{e.score}<span style={{ fontSize: 12, color: C.grey400, fontWeight: 600 }}>/{e.total}</span></div>
-                  <div style={{ fontSize: 12, color: C.grey400, marginTop: 1 }}>{e.date}</div>
-                  <div style={{ fontSize: 12, color: C.grey400 }}>{e.time} · {e.questions} questions</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: C.teal, fontWeight: 700, borderTop: `1px solid ${C.grey100}`, paddingTop: 10, textAlign: "center" }}>
-                {isSelected ? "Hide breakdown" : "View breakdown"}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+      <h2 style={{ fontSize: 17, fontWeight: 800, color: C.navy, margin: "0 0 18px", letterSpacing: -0.2 }}>My Lab Exam Schedule</h2>
 
-      {selectedExam && (
-        <Card style={{ marginBottom: 28, borderTop: `4px solid ${C.teal}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-            <div>
-              <h3 style={{ margin: "0 0 3px", fontSize: 16, fontWeight: 800, color: C.navy }}>{selectedExam.title} — Breakdown</h3>
-              <span style={{ fontSize: 13, color: C.grey500 }}>Score by topic</span>
-            </div>
-            <button onClick={() => setSelectedExam(null)} style={{ background: "none", border: "none", cursor: "pointer", color: C.grey400, display: "flex" }}>{Icon.x}</button>
-          </div>
-          <div className="resp-grid-2" style={{ gap: "4px 40px" }}>
-            {selectedExam.breakdown.map((b) => {
-              const pct = Math.round((b.score / b.max) * 100);
-              return (
-                <div key={b.label} style={{ marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>
-                    <span>{b.label}</span><span style={{ color: C.grey500 }}>{b.score}/{b.max}</span>
-                  </div>
-                  <div style={{ height: 7, background: C.grey100, borderRadius: 99 }}>
-                    <div style={{ height: "100%", width: `${pct}%`, background: C.teal, borderRadius: 99 }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 18, padding: "12px 16px", background: C.grey50, borderRadius: 9, fontSize: 13, color: C.grey500, display: "flex", gap: 28, flexWrap: "wrap" }}>
-            <span>Total: <strong style={{ color: C.navy }}>{selectedExam.score}/{selectedExam.total}</strong></span>
-            <span>Time: <strong style={{ color: C.navy }}>{selectedExam.time}</strong></span>
-            <span>Questions: <strong style={{ color: C.navy }}>{selectedExam.questions}</strong></span>
-            <span>Grade: <strong style={{ color: C.navy }}>{selectedExam.grade}</strong></span>
-          </div>
+      {schedule.length === 0 ? (
+        <Card style={{ textAlign: "center", padding: "56px 24px" }}>
+          <div style={{ width: 60, height: 60, borderRadius: 16, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 16px" }}>{Icon.clipboard}</div>
+          <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 800, color: C.navy }}>No Exams Scheduled Yet</h3>
+          <p style={{ margin: 0, color: C.grey500, fontSize: 14, maxWidth: 340, margin: "0 auto" }}>Your section's exam schedule will appear here once the coordinator publishes it.</p>
         </Card>
-      )}
-
-      <Card style={{ marginBottom: 24 }}>
-        <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Score Trend</h3>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 96, marginBottom: 8 }}>
-          {[...pastExams].reverse().map((e) => {
-            const h = Math.round((e.score / e.total) * 96);
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {schedule.map((e, i) => {
+            const isPast = new Date(e.exam_date) < new Date();
             return (
-              <div key={e.title} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>{e.score}%</span>
-                <div style={{ width: "100%", height: h, background: `linear-gradient(to top, ${C.teal}, ${C.tealMid})`, borderRadius: "5px 5px 0 0", minHeight: 8 }} />
-              </div>
+              <Card key={e.schedule_id} style={{ border: isPast ? `1px solid ${C.grey200}` : `1.5px solid ${C.tealMid}`, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${i * 80}ms both` }}>
+                <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ width: 50, height: 50, borderRadius: 13, background: isPast ? C.grey100 : C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: isPast ? C.grey400 : C.teal, flexShrink: 0 }}>{Icon.clipboard}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
+                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{e.course_code} — {e.exam_type}</h3>
+                      <Badge>{e.section_name}</Badge>
+                      <Badge color={isPast ? C.grey500 : C.teal} bg={isPast ? C.grey100 : C.tealLight}>{isPast ? "Completed" : "Upcoming"}</Badge>
+                    </div>
+                    <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap" }}>
+                      <span>{new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} · {e.start_time?.substring(0,5)}</span>
+                      <span>Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></span>
+                      <span>Capacity: <strong style={{ color: C.navy }}>{e.capacity}</strong></span>
+                      <span>Duration: <strong style={{ color: C.navy }}>{e.duration} min</strong></span>
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 12, color: C.grey400 }}>
+                      Invigilator: <strong style={{ color: C.navy }}>{e.invigilator_name || "Not yet assigned"}</strong>
+                    </div>
+                  </div>
+                  {e.exam_paper_url && (
+                    <Btn variant="ghost" size="sm" onClick={() => window.open(e.exam_paper_url, "_blank")}>View Paper</Btn>
+                  )}
+                </div>
+              </Card>
             );
           })}
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[...pastExams].reverse().map((e) => (
-            <div key={e.title} style={{ flex: 1, textAlign: "center", fontSize: 11, color: C.grey400, fontWeight: 600 }}>{e.course}</div>
-          ))}
-        </div>
-      </Card>
+      )}
+      <div style={{ height: 48 }} />
     </PageWrap>
   );
 }

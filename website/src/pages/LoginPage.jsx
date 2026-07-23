@@ -63,7 +63,7 @@ const loginStyles = `
   }
 `;
 
-export default function LoginPage({ setPage, setRole }) {
+export default function LoginPage({ setPage, setRole, setUser }) {
   const [selectedRole, setSelectedRole] = useState("");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
@@ -73,6 +73,7 @@ export default function LoginPage({ setPage, setRole }) {
   const roles = [
     { id: "student",     label: "Student",              icon: Icon.users },
     { id: "teacher",     label: "Teacher",              icon: Icon.clipboardList },
+    { id: "invigilator", label: "Invigilator",          icon: Icon.monitor },
     { id: "hod",         label: "Head of Department",   icon: Icon.check },
     { id: "coordinator", label: "Coordinator",           icon: Icon.calendar },
     { id: "director",    label: "Director Examination", icon: Icon.chart },
@@ -81,13 +82,47 @@ export default function LoginPage({ setPage, setRole }) {
 
   function handleLogin() {
     if (!selectedRole) { setShake(true); setTimeout(() => setShake(false), 600); return; }
+    if (!email.trim() || !pass.trim()) { setShake(true); setTimeout(() => setShake(false), 600); return; }
+    
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setRole(selectedRole);
-      const dest = { student: "student", teacher: "teacher", hod: "hod", director: "director", coordinator: "coordinator", dec: "dec" };
-      setPage(dest[selectedRole]);
-    }, 900);
+    fetch("http://localhost:5000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), password: pass.trim(), user_type: selectedRole }),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error("Invalid credentials or server error.");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setLoading(false);
+        if (data.status === "success") {
+          setRole(data.user.userType);
+          setUser(data.user);
+          const dest = {
+            student: "student",
+            teacher: "teacher",
+            invigilator: "invigilator",
+            hod: "hod",
+            director: "director",
+            coordinator: "coordinator",
+            dec: "dec",
+          };
+          setPage(dest[selectedRole]);
+        } else {
+          setShake(true);
+          setTimeout(() => setShake(false), 600);
+          alert(data.message || "Failed to log in.");
+        }
+      })
+      .catch((err) => {
+        setLoading(false);
+        setShake(true);
+        setTimeout(() => setShake(false), 600);
+        alert(err.message || "Network error. Make sure your backend server is running.");
+      });
   }
 
   return (

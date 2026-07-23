@@ -13,11 +13,14 @@ import CoordinatorPage from "./pages/CoordinatorPage";
 import InvigilatorPage from "./pages/InvigilatorPage";
 import DECPage from "./pages/DECPage";
 
+import { ErrorBoundary } from "./components/common/ErrorBoundary";
+
 const dashboardPages = ["teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
 
 export default function App() {
   const [page, setPage] = useState("login");
   const [role, setRole] = useState(null);
+  const [user, setUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const navigateTo = (p) => {
@@ -25,35 +28,62 @@ export default function App() {
     setSidebarOpen(false);
   };
 
+  function renderDashboardContent() {
+    switch (page) {
+      case "teacher":
+        return <TeacherPage activePage="teacher" setPage={navigateTo} user={user} />;
+      case "upload":
+        return <TeacherPage activePage="upload" setPage={navigateTo} user={user} />;
+      case "inv-schedule":
+        return <TeacherPage activePage="inv-schedule" setPage={navigateTo} user={user} />;
+      case "student":
+        return <StudentPage activePage="student" setPage={navigateTo} user={user} />;
+      case "results":
+        return <StudentPage activePage="results" setPage={navigateTo} user={user} />;
+      case "hod":
+        return <HODPage activePage="hod" setPage={navigateTo} user={user} />;
+      case "reports":
+        return <HODPage activePage="reports" setPage={navigateTo} user={user} />;
+      case "director":
+        return <DirectorPage activePage="overview" setPage={navigateTo} user={user} />;
+      case "dir-timetable":
+        return <DirectorPage activePage="dir-timetable" setPage={navigateTo} user={user} />;
+      case "dir-labs":
+        return <DirectorPage activePage="dir-labs" setPage={navigateTo} user={user} />;
+      case "dir-results":
+        return <DirectorPage activePage="dir-results" setPage={navigateTo} user={user} />;
+      case "coordinator":
+        return <CoordinatorPage activePage="coordinator" setPage={navigateTo} user={user} />;
+      case "rooms":
+        return <CoordinatorPage activePage="rooms" setPage={navigateTo} user={user} />;
+      case "dec":
+        return <DECPage activePage="dec" setPage={navigateTo} user={user} />;
+      case "dec-exams":
+        return <DECPage activePage="dec-exams" setPage={navigateTo} user={user} />;
+      case "dec-invigilators":
+        return <DECPage activePage="dec-invigilators" setPage={navigateTo} user={user} />;
+      case "dec-swaps":
+        return <DECPage activePage="dec-swaps" setPage={navigateTo} user={user} />;
+      case "invigilator":
+        return <InvigilatorPage activePage="schedule" setPage={navigateTo} user={user} />;
+      case "inv-exams":
+        return <InvigilatorPage activePage="start" setPage={navigateTo} user={user} />;
+      case "inv-monitor":
+        return <InvigilatorPage activePage="monitor" setPage={navigateTo} user={user} />;
+      default:
+        return <DECPage activePage="dec" setPage={navigateTo} user={user} />;
+    }
+  }
+
   function renderPage() {
     if (page === "home") return <Homepage setPage={navigateTo} />;
     if (page === "about") return <AboutPage setPage={navigateTo} />;
-    if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} />;
+    if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "inv-schedule", "results", "reports", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps"].includes(page);
+      ["upload", "inv-schedule", "results", "reports", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
-      const mainPage = {
-        teacher: <TeacherPage activePage="teacher" setPage={navigateTo} />,
-        upload: <TeacherPage activePage="upload" setPage={navigateTo} />,
-        "inv-schedule": <TeacherPage activePage="inv-schedule" setPage={navigateTo} />,
-        student: <StudentPage activePage="student" setPage={navigateTo} />,
-        results: <StudentPage activePage="results" setPage={navigateTo} />,
-        hod: <HODPage activePage="hod" setPage={navigateTo} />,
-        reports: <HODPage activePage="reports" setPage={navigateTo} />,
-        director: <DirectorPage activePage="overview" setPage={navigateTo} />,
-        "dir-timetable": <DirectorPage activePage="dir-timetable" setPage={navigateTo} />,
-        "dir-labs": <DirectorPage activePage="dir-labs" setPage={navigateTo} />,
-        "dir-results": <DirectorPage activePage="dir-results" setPage={navigateTo} />,
-        coordinator: <CoordinatorPage activePage="coordinator" setPage={navigateTo} />,
-        rooms: <CoordinatorPage activePage="rooms" setPage={navigateTo} />,
-        dec: <DECPage activePage="dec" setPage={navigateTo} />,
-        "dec-exams": <DECPage activePage="dec-exams" setPage={navigateTo} />,
-        "dec-invigilators": <DECPage activePage="dec-invigilators" setPage={navigateTo} />,
-        "dec-swaps": <DECPage activePage="dec-swaps" setPage={navigateTo} />,
-      }[page];
-
       return (
         <div className="resp-layout-container">
           {/* Mobile top navigation header */}
@@ -99,7 +129,9 @@ export default function App() {
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
           />
-          {mainPage}
+          <ErrorBoundary>
+            {renderDashboardContent()}
+          </ErrorBoundary>
         </div>
       );
     }
