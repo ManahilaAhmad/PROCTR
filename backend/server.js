@@ -196,6 +196,33 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Change Password (any authenticated user)
+app.post('/api/auth/change-password', async (req, res) => {
+  const { user_id, current_password, new_password } = req.body;
+  try {
+    if (!user_id || !current_password || !new_password) {
+      return res.status(400).json({ status: 'error', message: 'All fields are required.' });
+    }
+    if (new_password.length < 6) {
+      return res.status(400).json({ status: 'error', message: 'New password must be at least 6 characters.' });
+    }
+    const userResult = await pool.query('SELECT password_hash FROM users WHERE user_id = $1', [user_id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'User not found.' });
+    }
+    const isMatch = await bcrypt.compare(current_password, userResult.rows[0].password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ status: 'error', message: 'Current password is incorrect.' });
+    }
+    const newHash = await bcrypt.hash(new_password, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE user_id = $2', [newHash, user_id]);
+    res.status(200).json({ status: 'success', message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to update password.' });
+  }
+});
+
 // =====================================================================
 // B. LAB ALLOCATION ENDPOINTS
 // =====================================================================
@@ -490,7 +517,8 @@ app.get('/api/teacher/:userId/schedule', async (req, res) => {
 
     const query = `
       SELECT es.schedule_id, es.exam_date, es.start_time, es.end_time, es.status,
-             e.exam_id, e.exam_type, e.status as exam_status, e.exam_paper_url,
+             e.exam_id, e.exam_type, e.status as exam_status,
+             qp.file_path AS exam_paper_url,
              c.course_code, c.course_title, s.section_name, l.lab_name, l.capacity,
              COALESCE(u_inv.first_name || ' ' || u_inv.last_name, 'Unassigned') as invigilator_name,
              ia.assignment_status,
@@ -502,6 +530,7 @@ app.get('/api/teacher/:userId/schedule', async (req, res) => {
       JOIN course c ON co.course_id = c.course_id
       JOIN section s ON co.section_id = s.section_id
       JOIN lab l ON es.lab_id = l.lab_id
+      LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
       LEFT JOIN invigilator_assignment ia ON es.schedule_id = ia.schedule_id
       LEFT JOIN teacher t_inv ON ia.teacher_id = t_inv.teacher_id
       LEFT JOIN users u_inv ON t_inv.user_id = u_inv.user_id
@@ -516,11 +545,25 @@ app.get('/api/teacher/:userId/schedule', async (req, res) => {
   }
 });
 
-// Upload exam paper (Teacher panel)
+// Upload exam paper URL (Teacher panel) — stores in question_paper table
 app.post('/api/exams/upload', async (req, res) => {
-  const { exam_id, paper_url } = req.body;
+  const { exam_id, paper_url, teacher_id } = req.body;
   try {
-    await pool.query('UPDATE exam SET exam_paper_url = $1, status = $2 WHERE exam_id = $3', [paper_url, 'Approved', exam_id]);
+    // Get teacher_id from exam if not provided
+    let tid = teacher_id;
+    if (!tid) {
+      const tRes = await pool.query('SELECT teacher_id FROM exam WHERE exam_id = $1', [exam_id]);
+      if (tRes.rows.length) tid = tRes.rows[0].teacher_id;
+    }
+    // Upsert into question_paper table
+    await pool.query(
+      `INSERT INTO question_paper (exam_id, uploaded_by, file_path, version)
+       VALUES ($1, $2, $3, 1)
+       ON CONFLICT DO NOTHING`,
+      [exam_id, tid, paper_url]
+    );
+    // Update exam status to PendingHOD
+    await pool.query("UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1", [exam_id]);
     res.status(200).json({ status: 'success', message: 'Exam paper uploaded successfully.' });
   } catch (error) {
     console.error('Error uploading exam paper:', error);
@@ -671,7 +714,7 @@ app.get('/api/student/:userId/schedule', async (req, res) => {
   const { userId } = req.params;
   try {
     // Get student_id
-    const studentQuery = await pool.query('SELECT student_id, roll_number FROM student WHERE user_id = $1', [userId]);
+    const studentQuery = await pool.query('SELECT student_id, registration_no FROM student WHERE user_id = $1', [userId]);
     if (studentQuery.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Student profile not found.' });
     }
@@ -679,7 +722,8 @@ app.get('/api/student/:userId/schedule', async (req, res) => {
 
     const query = `
       SELECT es.schedule_id, es.exam_date, es.start_time, es.end_time, es.status,
-             e.exam_id, e.exam_type, e.total_marks, e.duration, e.exam_paper_url,
+             e.exam_id, e.exam_type, e.total_marks, e.duration,
+             qp.file_path AS exam_paper_url,
              c.course_code, c.course_title,
              s.section_name, l.lab_name, l.capacity,
              u_inv.first_name || ' ' || u_inv.last_name as invigilator_name,
@@ -690,11 +734,12 @@ app.get('/api/student/:userId/schedule', async (req, res) => {
       JOIN course c ON co.course_id = c.course_id
       JOIN section s ON co.section_id = s.section_id
       JOIN lab l ON es.lab_id = l.lab_id
+      LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
       LEFT JOIN invigilator_assignment ia ON es.schedule_id = ia.schedule_id
       LEFT JOIN teacher t_inv ON ia.teacher_id = t_inv.teacher_id
       LEFT JOIN users u_inv ON t_inv.user_id = u_inv.user_id
       WHERE co.section_id = (
-        SELECT section_id FROM student_enrollment se
+        SELECT section_id FROM enrollment se
         JOIN course_offering co2 ON se.course_offering_id = co2.course_offering_id
         WHERE se.student_id = $1
         LIMIT 1

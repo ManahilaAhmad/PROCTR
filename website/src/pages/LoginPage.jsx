@@ -73,7 +73,6 @@ export default function LoginPage({ setPage, setRole, setUser }) {
   const roles = [
     { id: "student",     label: "Student",              icon: Icon.users },
     { id: "teacher",     label: "Teacher",              icon: Icon.clipboardList },
-    { id: "invigilator", label: "Invigilator",          icon: Icon.monitor },
     { id: "hod",         label: "Head of Department",   icon: Icon.check },
     { id: "coordinator", label: "Coordinator",           icon: Icon.calendar },
     { id: "director",    label: "Director Examination", icon: Icon.chart },
@@ -104,7 +103,6 @@ export default function LoginPage({ setPage, setRole, setUser }) {
           const dest = {
             student: "student",
             teacher: "teacher",
-            invigilator: "invigilator",
             hod: "hod",
             director: "director",
             coordinator: "coordinator",

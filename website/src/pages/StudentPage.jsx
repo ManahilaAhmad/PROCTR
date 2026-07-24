@@ -33,16 +33,14 @@ export default function StudentPage({ activePage, user }) {
     }
   }, [user]);
 
-  // Student details (Read-only)
+  // Student details — only authentic data from DB
   const studentInfo = {
-    name: user?.name || "Ali Hassan",
-    rollNo: user?.rollNo || "2021-CS-101",
-    email: user?.email || "ali.hassan@university.edu",
-    phone: "+92 300 1234567",
-    degree: user?.departmentName || "BS Computer Science",
-    semester: "6th Semester (Spring 2026)",
-    advisor: "Dr. Sana Mir",
-    gpa: "3.78",
+    name: user?.name || "Student",
+    rollNo: user?.registrationNo || user?.rollNo || "—",
+    email: user?.email || "—",
+    degree: user?.departmentName || user?.programName || "—",
+    semester: user?.currentSemester ? `Semester ${user.currentSemester}` : "—",
+    batch: user?.batchName || "—",
   };
 
   const [avatarImg, setAvatarImg] = useState(null); // File object url or null
@@ -60,11 +58,33 @@ export default function StudentPage({ activePage, user }) {
       return;
     }
     if (newPass !== confirmPass) {
-      showToast("Passwords do not match.", "warn");
+      showToast("New passwords do not match.", "warn");
       return;
     }
-    showToast("Password updated successfully!");
-    setCurrentPass(""); setNewPass(""); setConfirmPass("");
+    if (newPass.length < 6) {
+      showToast("Password must be at least 6 characters.", "warn");
+      return;
+    }
+    const userId = user?.userId || user?.user_id;
+    if (!userId) {
+      showToast("Session error. Please log in again.", "warn");
+      return;
+    }
+    fetch("http://localhost:5000/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, current_password: currentPass, new_password: newPass }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          showToast("Password updated successfully!");
+          setCurrentPass(""); setNewPass(""); setConfirmPass("");
+        } else {
+          showToast(data.message || "Failed to update password.", "warn");
+        }
+      })
+      .catch(() => showToast("Network error. Could not update password.", "warn"));
   }
 
   function handleAvatarChange(e) {
@@ -128,7 +148,7 @@ export default function StudentPage({ activePage, user }) {
             {/* Profile fields */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: `1px solid ${C.grey100}`, paddingTop: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-                <span style={{ color: C.grey500 }}>Roll Number</span>
+                <span style={{ color: C.grey500 }}>Roll / Registration No.</span>
                 <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.rollNo}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
@@ -136,24 +156,16 @@ export default function StudentPage({ activePage, user }) {
                 <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.email}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-                <span style={{ color: C.grey500 }}>Phone Number</span>
-                <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.phone}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
                 <span style={{ color: C.grey500 }}>Degree Program</span>
                 <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.degree}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-                <span style={{ color: C.grey500 }}>Semester</span>
+                <span style={{ color: C.grey500 }}>Current Semester</span>
                 <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.semester}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-                <span style={{ color: C.grey500 }}>Academic Advisor</span>
-                <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.advisor}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-                <span style={{ color: C.grey500 }}>Current CGPA</span>
-                <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.gpa}</span>
+                <span style={{ color: C.grey500 }}>Batch</span>
+                <span style={{ color: C.navy, fontWeight: 700 }}>{studentInfo.batch}</span>
               </div>
             </div>
           </Card>
@@ -168,7 +180,31 @@ export default function StudentPage({ activePage, user }) {
           </Card>
         </div>
 
-        {/* Notifications from Faculty */}
+        {/* Upcoming Lab Exams quick-view */}
+        {schedule.length > 0 && (
+          <Card style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <div style={{ color: C.teal, display: "flex" }}>{Icon.calendar}</div>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Upcoming Lab Exams</h3>
+              <Badge color={C.teal} bg={C.tealLight}>{schedule.filter(e => new Date(e.exam_date) >= new Date()).length} upcoming</Badge>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {schedule.filter(e => new Date(e.exam_date) >= new Date()).slice(0, 3).map(e => (
+                <div key={e.schedule_id} style={{ padding: "12px 16px", borderRadius: 10, background: C.tealLight, border: `1px solid ${C.tealMid}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy }}>{e.course_code} — {e.exam_type}</div>
+                    <div style={{ fontSize: 12, color: C.grey500, marginTop: 2 }}>
+                      📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} at {e.start_time?.substring(0,5)} · Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong>
+                    </div>
+                  </div>
+                  <Badge color={C.teal} bg="white">Upcoming</Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Faculty Announcements */}
         <Card>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
             <div style={{ color: C.navy, display: "flex" }}>{Icon.bell}</div>
