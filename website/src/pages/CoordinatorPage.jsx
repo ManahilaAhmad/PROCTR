@@ -12,6 +12,49 @@ import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
 
+// Small inline icon buttons for row actions (edit / delete)
+function EditIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
+function TrashIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
+function RowActionBtn({ onClick, title, hoverColor, children }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 30, height: 30, borderRadius: 7, border: "none", cursor: "pointer",
+        background: hover ? `${hoverColor}1A` : "transparent",
+        color: hover ? hoverColor : C.grey500,
+        transition: "all .15s",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function CoordinatorPage({ activePage, setPage, user }) {
   const [activeTab, setActiveTab] = useState(activePage === "rooms" ? "rooms" : "schedule");
   const [schedule, setSchedule] = useState([]);
@@ -24,15 +67,15 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
   // Fetch labs, schedule, and approved exams from database
   const fetchData = () => {
-    fetch("http://localhost:5000/api/labs")
+    fetch("http://localhost:5000/api/coordinator/labs")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setLabs(data.labs); });
 
-    fetch("http://localhost:5000/api/schedule")
+    fetch("http://localhost:5000/api/coordinator/schedule")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSchedule(data.schedule); });
 
-    fetch("http://localhost:5000/api/exams/approved")
+   fetch("http://localhost:5000/api/coordinator/exams/approved")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setApprovedExams(data.exams); });
   };
@@ -46,35 +89,70 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   const [notifAudience, setNotifAudience] = useState("All Students");
   const [notifSent, setNotifSent] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
-  
+
   const [schedExam, setSchedExam] = useState("");
   const [schedDate, setSchedDate] = useState("");
   const [schedLab, setSchedLab] = useState("");
   const [schedStartTime, setSchedStartTime] = useState("09:00");
   const [schedEndTime, setSchedEndTime] = useState("10:30");
 
+  // Tracks whether the modal is creating a new schedule entry or editing an existing one
+  const [editingScheduleId, setEditingScheduleId] = useState(null);
+
   // Broadcast states
   const [broadcastType, setBroadcastType] = useState("all"); // "all" | "specific"
-  const [specificUser, setSpecificUser] = useState("");
-  const [customUser, setCustomUser] = useState("");
+  const [specificSearch, setSpecificSearch] = useState("");
+  const [specificResults, setSpecificResults] = useState([]);
+  const [specificSearching, setSpecificSearching] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState(null); // { user_id, first_name, last_name, user_type, registration_no }
+
+  // Live search against real users as the coordinator types
+  useEffect(() => {
+    if (broadcastType !== "specific" || specificSearch.trim().length < 2) {
+      setSpecificResults([]);
+      return;
+    }
+    setSpecificSearching(true);
+    const t = setTimeout(() => {
+      fetch(`http://localhost:5000/api/coordinator/notifications/recipients?search=${encodeURIComponent(specificSearch.trim())}`)
+        .then(res => res.json())
+        .then(data => { if (data.status === "success") setSpecificResults(data.users); })
+        .catch(() => setSpecificResults([]))
+        .finally(() => setSpecificSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [specificSearch, broadcastType]);
+
+  function targetLabel(u) {
+    if (!u) return "";
+    const name = `${u.first_name} ${u.last_name}`;
+    const tag = u.user_type === "student" && u.registration_no ? u.registration_no : u.user_type;
+    return `${name} (${tag})`;
+  }
 
   function sendNotif() {
     if (!notifSubject.trim() || !notifMsg.trim()) return;
-    fetch("http://localhost:5000/api/notifications/broadcast", {
+    if (broadcastType === "specific" && !selectedTarget) {
+      alert("Please select a user to message.");
+      return;
+    }
+    fetch("http://localhost:5000/api/coordinator/notifications/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: user?.userId || 1,
         subject: notifSubject.trim(),
         message: notifMsg.trim(),
-        audience_type: broadcastType === "all" ? notifAudience.replace(" ", "") : "Specific",
+        audience_type: broadcastType === "all" ? notifAudience : "Specific",
+        target_user_id: broadcastType === "specific" ? selectedTarget.user_id : null,
       }),
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
           setNotifSent(true);
-          setNotifSubject(""); setNotifMsg(""); setSpecificUser(""); setCustomUser("");
+          setNotifSubject(""); setNotifMsg("");
+          setSpecificSearch(""); setSpecificResults([]); setSelectedTarget(null);
           setTimeout(() => setNotifSent(false), 3200);
         } else {
           alert(data.message || "Failed to broadcast notification.");
@@ -83,35 +161,81 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
       .catch(err => alert("Connection error to notifications api."));
   }
 
+  function openScheduleModal() {
+    setEditingScheduleId(null);
+    setSchedExam(""); setSchedDate(""); setSchedLab("");
+    setSchedStartTime("09:00"); setSchedEndTime("10:30");
+    setShowSchedule(true);
+  }
+
+  function openEditSchedule(s) {
+    setEditingScheduleId(s?.schedule_id ?? s?.id);
+    setSchedExam(s?.exam_id != null ? String(s.exam_id) : "");
+    setSchedDate(s?.exam_date ? String(s.exam_date).substring(0, 10) : "");
+    setSchedLab(s?.lab_id != null ? String(s.lab_id) : "");
+    setSchedStartTime((s?.start_time || "09:00:00").substring(0, 5));
+    setSchedEndTime((s?.end_time || "10:30:00").substring(0, 5));
+    setShowSchedule(true);
+  }
+
+  function closeScheduleModal() {
+    setShowSchedule(false);
+    setEditingScheduleId(null);
+  }
+
   function confirmSchedule() {
     if (!schedExam || !schedLab || !schedDate || !schedStartTime || !schedEndTime) {
       alert("Please fill all scheduling fields.");
       return;
     }
-    fetch("http://localhost:5000/api/schedule", {
-      method: "POST",
+
+    const payload = {
+      exam_id: parseInt(schedExam),
+      lab_id: parseInt(schedLab),
+      user_id: user?.userId || 1,
+      exam_date: schedDate,
+      start_time: schedStartTime + ":00",
+      end_time: schedEndTime + ":00",
+    };
+
+    const isEdit = editingScheduleId != null;
+    const url = isEdit
+      ? `http://localhost:5000/api/coordinator/schedule/${editingScheduleId}`
+      : "http://localhost:5000/api/coordinator/schedule";
+
+    fetch(url, {
+      method: isEdit ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        exam_id: parseInt(schedExam),
-        lab_id: parseInt(schedLab),
-        user_id: user?.userId || 1,
-        exam_date: schedDate,
-        start_time: schedStartTime + ":00",
-        end_time: schedEndTime + ":00",
-      }),
+      body: JSON.stringify(payload),
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          alert("Exam scheduled successfully!");
-          setShowSchedule(false);
-          setSchedExam(""); setSchedDate(""); setSchedLab("");
+          alert(isEdit ? "Exam schedule updated!" : "Exam scheduled successfully!");
+          closeScheduleModal();
           fetchData();
         } else {
-          alert(data.message || "Failed to schedule exam.");
+          alert(data.message || "Failed to save schedule.");
         }
       })
       .catch(err => alert("Network error. Failed to save schedule."));
+  }
+
+  function deleteSchedule(s) {
+    const label = `${s?.course_code || ""} ${s?.exam_type || ""}`.trim() || "this exam";
+    if (!window.confirm(`Remove the scheduled slot for ${label}?`)) return;
+
+    const id = s?.schedule_id ?? s?.id;
+    fetch(`http://localhost:5000/api/coordinator/schedule/${id}`, { method: "DELETE" })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          fetchData();
+        } else {
+          alert(data.message || "Failed to delete schedule.");
+        }
+      })
+      .catch(err => alert("Network error. Failed to delete schedule."));
   }
 
   function exportDateSheet() {
@@ -124,11 +248,11 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
   return (
     <PageWrap title={activeTab === "rooms" ? "Lab Rooms" : "Scheduling & Date Sheets"} subtitle={activeTab === "rooms" ? "Current lab availability and network details" : "Manage exam timetables, lab assignments, and invigilators"}
-      actions={activeTab === "schedule" ? <><Btn variant="ghost" size="sm" onClick={exportDateSheet}>Export Date Sheet</Btn><Btn variant="primary" onClick={() => setShowSchedule(true)}>+ Schedule Exam</Btn></> : undefined}>
+      actions={activeTab === "schedule" ? <><Btn variant="ghost" size="sm" onClick={exportDateSheet}>Export Date Sheet</Btn><Btn variant="primary" onClick={openScheduleModal}>+ Schedule Exam</Btn></> : undefined}>
       {showSchedule && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowSchedule(false)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={closeScheduleModal}>
           <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
-            <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: C.navy }}>Schedule Exam</h2>
+            <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: C.navy }}>{editingScheduleId != null ? "Edit Scheduled Exam" : "Schedule Exam"}</h2>
             <Select label="Approved Exam" value={schedExam} onChange={(e) => setSchedExam(e.target.value)}>
               <option value="">Select an approved exam...</option>
               {safeApproved.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} ({e.section_name})</option>)}
@@ -136,15 +260,15 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
             <Input label="Date" type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} />
             <Select label="Lab" value={schedLab} onChange={(e) => setSchedLab(e.target.value)}>
               <option value="">Select a lab…</option>
-              {safeLabs.filter(l => l.status === "Available").map(l => <option key={l.lab_id} value={l.lab_id}>{l.lab_name} (Cap: {l.capacity})</option>)}
+              {safeLabs.filter(l => l.status === "Available" || String(l.lab_id) === String(schedLab)).map(l => <option key={l.lab_id} value={l.lab_id}>{l.lab_name} (Cap: {l.capacity})</option>)}
             </Select>
             <div style={{ display: "flex", gap: 12, marginBottom: 18 }}>
               <div style={{ flex: 1 }}><Input label="Start Time" type="time" value={schedStartTime} onChange={(e) => setSchedStartTime(e.target.value)} /></div>
               <div style={{ flex: 1 }}><Input label="End Time" type="time" value={schedEndTime} onChange={(e) => setSchedEndTime(e.target.value)} /></div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowSchedule(false)}>Cancel</Btn>
-              <Btn variant="navy" style={{ flex: 1, justifyContent: "center" }} onClick={confirmSchedule}>Confirm Schedule</Btn>
+              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={closeScheduleModal}>Cancel</Btn>
+              <Btn variant="navy" style={{ flex: 1, justifyContent: "center" }} onClick={confirmSchedule}>{editingScheduleId != null ? "Save Changes" : "Confirm Schedule"}</Btn>
             </div>
           </div>
         </div>
@@ -160,7 +284,6 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
       {/* ── DATE SHEETS ── */}
       {activeTab === "schedule" && <>
-        {/* Changed grid layout to 3-column and removed Pending Assignment stat card */}
         <div className="resp-grid-3" style={{ marginBottom: 28 }}>
           <StatCard label="Scheduled Exams" value={safeSchedule.length} icon={Icon.calendar} />
           <StatCard label="Labs Available" value={safeLabs.filter(l => l?.status === "Available").length} icon={Icon.server} />
@@ -172,16 +295,26 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
             <Badge>Spring 2026</Badge>
           </div>
           <Table
-            columns={["Exam", "Section", "Date", "Time", "Lab", "Invigilator", "Lab Capacity", "Status"]}
+            columns={["Course", "Section", "Exam", "Date", "Time", "Lab", "Invigilator", "Actions"]}
             rows={safeSchedule.map((s) => [
-              <span style={{ fontWeight: 700, color: C.navy }}>{s?.course_code} {s?.exam_type}</span>,
+              <span style={{ fontWeight: 700, color: C.navy }}>
+                {s?.course_code}
+                {s?.course_title ? <span style={{ fontWeight: 500, color: C.grey500 }}> - {s.course_title}</span> : null}
+              </span>,
               <Badge>{s?.section_name}</Badge>,
-              s?.exam_date ? new Date(s.exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "TBD",
-              `${(s?.start_time || "--:--").substring(0, 5)} - ${(s?.end_time || "--:--").substring(0, 5)}`,
+              s?.exam_type || "—",
+              s?.exam_date ? new Date(s.exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD",
+              `${(s?.start_time || "--:--").substring(0, 5)}–${(s?.end_time || "--:--").substring(0, 5)}`,
               s?.lab_name || "N/A",
               s?.invigilator_name || <span style={{ color: C.grey500, fontWeight: 600 }}>Unassigned</span>,
-              s?.capacity || 0,
-              statusBadge(s?.status),
+              <div style={{ display: "flex", gap: 4 }}>
+                <RowActionBtn title="Edit" hoverColor={C.teal} onClick={() => openEditSchedule(s)}>
+                  <EditIcon />
+                </RowActionBtn>
+                <RowActionBtn title="Delete" hoverColor="#e5484d" onClick={() => deleteSchedule(s)}>
+                  <TrashIcon />
+                </RowActionBtn>
+              </div>,
             ])} />
         </Card>
 
@@ -190,7 +323,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
           <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Broadcast Notification</h3>
           {notifSent && (
             <div style={{ marginBottom: 14, padding: "10px 14px", background: C.tealLight, borderRadius: 8, fontSize: 13, color: C.navy, fontWeight: 700 }}>
-              Notification sent to {broadcastType === "all" ? notifAudience : (specificUser === "custom" ? customUser : specificUser)}.
+              Notification sent to {broadcastType === "all" ? notifAudience : targetLabel(selectedTarget)}.
             </div>
           )}
 
@@ -226,22 +359,47 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
                 <option>All Teachers & Faculty</option>
               </Select>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <Select label="Select User" value={specificUser} onChange={(e) => setSpecificUser(e.target.value)}>
-                  <option value="">Choose a user...</option>
-                  <option value="Ali Hassan (Student - 2021-CS-101)">Ali Hassan (Student - 2021-CS-101)</option>
-                  <option value="Sara Malik (Student - F21-302)">Sara Malik (Student - F21-302)</option>
-                  <option value="Dr. Sana Mir (Teacher)">Dr. Sana Mir (Teacher)</option>
-                  <option value="Prof. Arif (Teacher)">Prof. Arif (Teacher)</option>
-                  <option value="custom">Type Custom Roll No / Email...</option>
-                </Select>
-                {specificUser === "custom" && (
-                  <Input
-                    label="Enter Custom Roll No / Email"
-                    placeholder="e.g. F21-123 or name@university.edu"
-                    value={customUser}
-                    onChange={(e) => setCustomUser(e.target.value)}
-                  />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+                {selectedTarget ? (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: C.tealLight, borderRadius: 8, border: `1.5px solid ${C.teal}` }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>{targetLabel(selectedTarget)}</span>
+                    <button
+                      onClick={() => { setSelectedTarget(null); setSpecificSearch(""); }}
+                      style={{ border: "none", background: "none", cursor: "pointer", color: C.grey500, fontSize: 16, lineHeight: 1, padding: 4 }}
+                      title="Clear selection"
+                    >×</button>
+                  </div>
+                ) : (
+                  <>
+                    <Input
+                      label="Search User"
+                      placeholder="Type a name, email, or roll no…"
+                      value={specificSearch}
+                      onChange={(e) => setSpecificSearch(e.target.value)}
+                    />
+                    {specificSearch.trim().length >= 2 && (
+                      <div style={{ border: `1px solid ${C.grey200}`, borderRadius: 8, maxHeight: 180, overflowY: "auto", background: C.white }}>
+                        {specificSearching ? (
+                          <div style={{ padding: "10px 14px", fontSize: 13, color: C.grey500 }}>Searching…</div>
+                        ) : specificResults.length === 0 ? (
+                          <div style={{ padding: "10px 14px", fontSize: 13, color: C.grey500 }}>No matching users found.</div>
+                        ) : (
+                          specificResults.map((u) => (
+                            <div
+                              key={u.user_id}
+                              onClick={() => { setSelectedTarget(u); setSpecificSearch(""); setSpecificResults([]); }}
+                              style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: `1px solid ${C.grey100}` }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = C.grey50)}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            >
+                              <span style={{ fontWeight: 700, color: C.navy }}>{u.first_name} {u.last_name}</span>
+                              <span style={{ color: C.grey500 }}> — {u.user_type === "student" && u.registration_no ? u.registration_no : u.user_type}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

@@ -3,14 +3,54 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import pool from './db.js';
+import coordinatorRoutes from "./routes/coordinatorRoutes.js";
+import notificationsRoutes from "./routes/notificationsRoutes.js";
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+
+// =====================================================================
+// FILE UPLOAD SETUP (exam papers — PDF / DOCX)
+// =====================================================================
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+// Serve uploaded files back out at http://localhost:5000/uploads/<filename>
+app.use('/uploads', express.static(uploadDir));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    const allowedExt = ['.pdf', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExt.includes(ext)) cb(null, true);
+    else cb(new Error('Only PDF and DOCX files are allowed.'));
+  },
+});
+
+app.use("/api/coordinator", coordinatorRoutes);
+app.use("/api/notifications", notificationsRoutes);
 
 // =====================================================================
 // HEALTH & VERIFICATION ENDPOINTS
@@ -67,7 +107,6 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(403).json({ status: 'error', message: 'Your account is currently disabled.' });
     }
 
-    // Verify password with bcrypt
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
       return res.status(401).json({ status: 'error', message: 'Incorrect password.' });
@@ -75,7 +114,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     await pool.query('UPDATE users SET last_login_at = NOW() WHERE user_id = $1', [user.user_id]);
 
-    // ── Build role-specific extra fields ──────────────────────────────
     let extra = {};
 
     if (user_type === 'teacher') {
@@ -224,103 +262,9 @@ app.post('/api/auth/change-password', async (req, res) => {
 });
 
 // =====================================================================
-// B. LAB ALLOCATION ENDPOINTS
-// =====================================================================
-
-app.get('/api/labs', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT lab_id, lab_name, total_pcs, capacity, network_range, status FROM lab ORDER BY lab_name ASC');
-    res.status(200).json({ status: 'success', labs: result.rows });
-  } catch (error) {
-    console.error('Error fetching labs:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch labs.' });
-  }
-});
-
-// =====================================================================
-// C. DATE SHEET & SCHEDULING ENDPOINTS
-// =====================================================================
-
-// Get HOD-approved exams ready to be scheduled
-app.get('/api/exams/approved', async (req, res) => {
-  try {
-    const query = `
-      SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, 
-             c.course_code, c.course_title, s.section_name 
-      FROM exam e 
-      JOIN course_offering co ON e.course_offering_id = co.course_offering_id
-      JOIN course c ON co.course_id = c.course_id
-      JOIN section s ON co.section_id = s.section_id
-      WHERE e.status = 'Approved'
-    `;
-    const result = await pool.query(query);
-    res.status(200).json({ status: 'success', exams: result.rows });
-  } catch (error) {
-    console.error('Error fetching approved exams:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch approved exams.' });
-  }
-});
-
-// Get complete exam schedule / Date Sheet
-app.get('/api/schedule', async (req, res) => {
-  try {
-    const query = `
-      SELECT es.schedule_id, es.exam_date, es.start_time, es.end_time, es.status,
-             e.exam_type, e.total_marks, e.duration,
-             c.course_code, c.course_title,
-             s.section_name,
-             l.lab_name, l.capacity,
-             u.first_name || ' ' || u.last_name as invigilator_name,
-             ia.assignment_status
-      FROM exam_schedule es
-      JOIN exam e ON es.exam_id = e.exam_id
-      JOIN course_offering co ON e.course_offering_id = co.course_offering_id
-      JOIN course c ON co.course_id = c.course_id
-      JOIN section s ON co.section_id = s.section_id
-      JOIN lab l ON es.lab_id = l.lab_id
-      LEFT JOIN invigilator_assignment ia ON es.schedule_id = ia.schedule_id
-      LEFT JOIN teacher t ON ia.teacher_id = t.teacher_id
-      LEFT JOIN users u ON t.user_id = u.user_id
-      ORDER BY es.exam_date ASC, es.start_time ASC
-    `;
-    const result = await pool.query(query);
-    res.status(200).json({ status: 'success', schedule: result.rows });
-  } catch (error) {
-    console.error('Error fetching exam schedule:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch schedule.' });
-  }
-});
-
-// Create new exam schedule record (Allocate lab)
-app.post('/api/schedule', async (req, res) => {
-  const { exam_id, lab_id, user_id, exam_date, start_time, end_time } = req.body;
-  try {
-    // 1. Get coordinator_id from user_id
-    const coordQuery = await pool.query('SELECT coordinator_id FROM coordinator WHERE user_id = $1', [user_id]);
-    if (coordQuery.rows.length === 0) {
-      return res.status(403).json({ status: 'error', message: 'Only coordinators can schedule exams.' });
-    }
-    const coordinator_id = coordQuery.rows[0].coordinator_id;
-
-    // 2. Insert schedule
-    const insertQuery = `
-      INSERT INTO exam_schedule (exam_id, lab_id, coordinator_id, exam_date, start_time, end_time, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'Published')
-      RETURNING schedule_id
-    `;
-    const result = await pool.query(insertQuery, [exam_id, lab_id, coordinator_id, exam_date, start_time, end_time]);
-    res.status(200).json({ status: 'success', message: 'Exam scheduled successfully.', scheduleId: result.rows[0].schedule_id });
-  } catch (error) {
-    console.error('Error scheduling exam:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to schedule exam.' });
-  }
-});
-
-// =====================================================================
 // D. INVIGILATOR ASSIGNMENTS & SWAPS ENDPOINTS
 // =====================================================================
 
-// Get available invigilators pool
 app.get('/api/teachers', async (req, res) => {
   try {
     const query = `
@@ -338,21 +282,17 @@ app.get('/api/teachers', async (req, res) => {
   }
 });
 
-// Assign invigilator (DEC panel)
 app.post('/api/invigilator/assign', async (req, res) => {
   const { schedule_id, teacher_id, user_id } = req.body;
   try {
-    // 1. Get dec_member_id from user_id
     const decQuery = await pool.query('SELECT dec_member_id FROM dec_member WHERE user_id = $1', [user_id]);
     if (decQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Only DEC members can assign invigilators.' });
     }
     const dec_member_id = decQuery.rows[0].dec_member_id;
 
-    // 2. Clear any existing assignment for this schedule to avoid duplicates
     await pool.query('DELETE FROM invigilator_assignment WHERE schedule_id = $1', [schedule_id]);
 
-    // 3. Insert new assignment
     const insertQuery = `
       INSERT INTO invigilator_assignment (schedule_id, teacher_id, assigned_by, assignment_status)
       VALUES ($1, $2, $3, 'Confirmed')
@@ -370,14 +310,12 @@ app.post('/api/invigilator/assign', async (req, res) => {
 app.post('/api/swap-request', async (req, res) => {
   const { schedule_id, user_id, replacement_teacher_id, reason } = req.body;
   try {
-    // 1. Get teacher_id from user_id
     const teacherQuery = await pool.query('SELECT teacher_id FROM teacher WHERE user_id = $1', [user_id]);
     if (teacherQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Only teachers can request duty swaps.' });
     }
     const requester_teacher_id = teacherQuery.rows[0].teacher_id;
 
-    // 2. Get invigilator_assignment_id for this schedule and teacher
     const assignQuery = await pool.query(
       'SELECT invigilator_assignment_id FROM invigilator_assignment WHERE schedule_id = $1 AND teacher_id = $2',
       [schedule_id, requester_teacher_id]
@@ -387,7 +325,6 @@ app.post('/api/swap-request', async (req, res) => {
     }
     const invigilator_assignment_id = assignQuery.rows[0].invigilator_assignment_id;
 
-    // 3. Insert swap request
     const insertQuery = `
       INSERT INTO duty_swap_request (invigilator_assignment_id, requester_teacher_id, replacement_teacher_id, reason, replacement_status, dec_status)
       VALUES ($1, $2, $3, $4, 'Pending', 'Pending')
@@ -400,7 +337,6 @@ app.post('/api/swap-request', async (req, res) => {
   }
 });
 
-// Get swap requests list (DEC panel)
 app.get('/api/swap-requests/dec', async (req, res) => {
   try {
     const query = `
@@ -434,7 +370,6 @@ app.get('/api/swap-requests/dec', async (req, res) => {
 app.post('/api/swap-requests/dec/review', async (req, res) => {
   const { request_id, user_id, status } = req.body; // status: Approved / Rejected
   try {
-    // 1. Update the request status
     const updateRequestQuery = `
       UPDATE duty_swap_request
       SET dec_status = $1, approved_by_user_id = $2, processed_at = NOW()
@@ -442,14 +377,13 @@ app.post('/api/swap-requests/dec/review', async (req, res) => {
       RETURNING invigilator_assignment_id, replacement_teacher_id
     `;
     const requestResult = await pool.query(updateRequestQuery, [status, user_id, request_id]);
-    
+
     if (requestResult.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Swap request not found.' });
     }
 
     const { invigilator_assignment_id, replacement_teacher_id } = requestResult.rows[0];
 
-    // 2. If approved, swap the teacher in the invigilator_assignment table
     if (status === 'Approved') {
       await pool.query(
         `UPDATE invigilator_assignment 
@@ -457,6 +391,42 @@ app.post('/api/swap-requests/dec/review', async (req, res) => {
          WHERE invigilator_assignment_id = $2`,
         [replacement_teacher_id, invigilator_assignment_id]
       );
+
+      // Notify the new invigilator. They automatically gain visibility into the
+      // exam paper via /api/teacher/:userId/schedule (it already joins question_paper
+      // for anyone matching invigilator_assignment.teacher_id) — no extra grant needed,
+      // just let them know a duty landed on their plate.
+      try {
+        const infoRes = await pool.query(
+          `SELECT u.user_id, c.course_code, e.exam_type, qp.file_path
+           FROM invigilator_assignment ia
+           JOIN exam_schedule es ON ia.schedule_id = es.schedule_id
+           JOIN exam e ON es.exam_id = e.exam_id
+           JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+           JOIN course c ON co.course_id = c.course_id
+           JOIN teacher t ON t.teacher_id = $2
+           JOIN users u ON t.user_id = u.user_id
+           LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
+           WHERE ia.invigilator_assignment_id = $1`,
+          [invigilator_assignment_id, replacement_teacher_id]
+        );
+
+        if (infoRes.rows.length > 0) {
+          const { user_id: newInvigilatorUserId, course_code, exam_type, file_path } = infoRes.rows[0];
+          const message = file_path
+            ? `You are now the invigilator for ${course_code} ${exam_type}. The exam paper is available in your schedule.`
+            : `You are now the invigilator for ${course_code} ${exam_type}.`;
+
+          await pool.query(
+            `INSERT INTO user_notification (user_id, title, message, notification_type)
+             VALUES ($1, $2, $3, 'Invigilation')`,
+            [newInvigilatorUserId, 'New Invigilation Duty Assigned', message]
+          );
+        }
+      } catch (notifyErr) {
+        // Don't fail the whole swap approval just because the notification insert failed
+        console.error('Failed to notify new invigilator:', notifyErr);
+      }
     }
 
     res.status(200).json({ status: 'success', message: `Swap request has been ${status.toLowerCase()}.` });
@@ -470,24 +440,6 @@ app.post('/api/swap-requests/dec/review', async (req, res) => {
 // E. BROADCAST NOTIFICATIONS ENDPOINTS
 // =====================================================================
 
-// Create announcement broadcast (Coordinator panel)
-app.post('/api/notifications/broadcast', async (req, res) => {
-  const { user_id, subject, message, audience_type } = req.body;
-  try {
-    const insertQuery = `
-      INSERT INTO broadcast_announcement (sender_user_id, subject, message, audience_type)
-      VALUES ($1, $2, $3, $4)
-      RETURNING announcement_id
-    `;
-    await pool.query(insertQuery, [user_id, subject, message, audience_type]);
-    res.status(200).json({ status: 'success', message: 'Broadcast announcement sent successfully.' });
-  } catch (error) {
-    console.error('Error creating broadcast:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to send broadcast announcement.' });
-  }
-});
-
-// Get broadcast notifications list
 app.get('/api/notifications', async (req, res) => {
   try {
     const query = `
@@ -519,6 +471,7 @@ app.get('/api/teacher/:userId/schedule', async (req, res) => {
       SELECT es.schedule_id, es.exam_date, es.start_time, es.end_time, es.status,
              e.exam_id, e.exam_type, e.status as exam_status,
              qp.file_path AS exam_paper_url,
+             qp.shared_with_dec_at,
              c.course_code, c.course_title, s.section_name, l.lab_name, l.capacity,
              COALESCE(u_inv.first_name || ' ' || u_inv.last_name, 'Unassigned') as invigilator_name,
              ia.assignment_status,
@@ -545,49 +498,108 @@ app.get('/api/teacher/:userId/schedule', async (req, res) => {
   }
 });
 
-// Upload exam paper URL (Teacher panel) — stores in question_paper table
-app.post('/api/exams/upload', async (req, res) => {
-  const { exam_id, paper_url, teacher_id } = req.body;
+// Upload exam paper (Teacher panel) — real file, stored on disk, tracked in question_paper
+app.post('/api/exams/upload', upload.single('file'), async (req, res) => {
+  const { exam_id } = req.body;
   try {
-    // Get teacher_id from exam if not provided
-    let tid = teacher_id;
-    if (!tid) {
-      const tRes = await pool.query('SELECT teacher_id FROM exam WHERE exam_id = $1', [exam_id]);
-      if (tRes.rows.length) tid = tRes.rows[0].teacher_id;
+    if (!exam_id) {
+      return res.status(400).json({ status: 'error', message: 'exam_id is required.' });
     }
-    // Upsert into question_paper table
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
+    }
+
+    const fileUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+
+    // Look up teacher_id via course_offering (exam has no teacher_id column directly)
+    const teacherRes = await pool.query(
+      `SELECT co.teacher_id
+       FROM exam e
+       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       WHERE e.exam_id = $1`,
+      [exam_id]
+    );
+    const teacherId = teacherRes.rows[0]?.teacher_id || null;
+
     await pool.query(
       `INSERT INTO question_paper (exam_id, uploaded_by, file_path, version)
        VALUES ($1, $2, $3, 1)
        ON CONFLICT DO NOTHING`,
-      [exam_id, tid, paper_url]
+      [exam_id, teacherId, fileUrl]
     );
-    // Update exam status to PendingHOD
-    await pool.query("UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1", [exam_id]);
-    res.status(200).json({ status: 'success', message: 'Exam paper uploaded successfully.' });
+
+    // NOTE: standardized to 'Pending HOD' (with space) to match the string
+    // the HOD queue and submit-hod endpoint both already use — the old
+    // 'PendingHOD' (no space) here meant uploaded exams never showed up
+    // in the HOD's review queue.
+    await pool.query(
+      "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1",
+      [exam_id]
+    );
+
+    res.status(200).json({ status: 'success', message: 'Exam paper uploaded successfully.', fileUrl });
   } catch (error) {
     console.error('Error uploading exam paper:', error);
     res.status(500).json({ status: 'error', message: 'Failed to upload paper.' });
   }
 });
 
+// Teacher shares an HOD-approved paper with the DEC
+app.post('/api/exams/:examId/share-dec', async (req, res) => {
+  const { examId } = req.params;
+  try {
+    const examRes = await pool.query(
+      `SELECT e.status, c.course_code, e.exam_type
+       FROM exam e
+       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       JOIN course c ON co.course_id = c.course_id
+       WHERE e.exam_id = $1`,
+      [examId]
+    );
+
+    if (examRes.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Exam not found.' });
+    }
+
+    const { status, course_code, exam_type } = examRes.rows[0];
+    if (status !== 'Approved') {
+      return res.status(400).json({ status: 'error', message: 'Exam must be HOD-approved before sharing with DEC.' });
+    }
+
+    await pool.query(
+      `UPDATE question_paper SET shared_with_dec_at = NOW() WHERE exam_id = $1`,
+      [examId]
+    );
+
+    const decMembers = await pool.query(`SELECT user_id FROM dec_member`);
+    for (const row of decMembers.rows) {
+      await pool.query(
+        `INSERT INTO user_notification (user_id, title, message, notification_type)
+         VALUES ($1, $2, $3, 'Exam')`,
+        [row.user_id, 'Exam Paper Shared', `${course_code} ${exam_type} paper has been shared with the DEC for review.`]
+      );
+    }
+
+    res.status(200).json({ status: 'success', message: 'Exam paper shared with DEC.' });
+  } catch (error) {
+    console.error('Error sharing exam with DEC:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to share exam paper.' });
+  }
+});
 
 // =====================================================================
 // F. TEACHER EXAM MANAGEMENT ENDPOINTS
 // =====================================================================
 
-// Create a new exam draft (Teacher)
 app.post('/api/exams', async (req, res) => {
   const { user_id, exam_type, course_code, proposed_date } = req.body;
   try {
-    // Get teacher_id
     const teacherQuery = await pool.query('SELECT teacher_id FROM teacher WHERE user_id = $1', [user_id]);
     if (teacherQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Only teachers can create exams.' });
     }
     const teacher_id = teacherQuery.rows[0].teacher_id;
 
-    // Find course_offering_id by course_code and teacher_id
     const coQuery = await pool.query(`
       SELECT co.course_offering_id FROM course_offering co
       JOIN course c ON co.course_id = c.course_id
@@ -613,12 +625,11 @@ app.post('/api/exams', async (req, res) => {
   }
 });
 
-// Teacher submits exam to HOD (changes status from Draft -> Pending HOD)
 app.post('/api/exams/submit-hod', async (req, res) => {
   const { exam_id } = req.body;
   try {
     const result = await pool.query(
-      "UPDATE exam SET status = 'Pending HOD' WHERE exam_id = $1 AND status = 'Draft' RETURNING exam_id",
+      "UPDATE exam SET status = 'PendingHOD' WHERE exam_id = $1 AND status = 'Draft' RETURNING exam_id",
       [exam_id]
     );
     if (result.rows.length === 0) {
@@ -635,11 +646,11 @@ app.post('/api/exams/submit-hod', async (req, res) => {
 // H. HOD EXAM REVIEW ENDPOINTS
 // =====================================================================
 
-// Get exams pending HOD review
 app.get('/api/hod/queue', async (req, res) => {
   try {
     const query = `
-      SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, e.status, e.submitted_at, e.exam_paper_url,
+      SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, e.status, e.submitted_at,
+             qp.file_path AS exam_paper_url,
              c.course_code, c.course_title, s.section_name,
              u.first_name || ' ' || u.last_name as teacher_name
       FROM exam e
@@ -648,7 +659,8 @@ app.get('/api/hod/queue', async (req, res) => {
       JOIN section s ON co.section_id = s.section_id
       JOIN teacher t ON co.teacher_id = t.teacher_id
       JOIN users u ON t.user_id = u.user_id
-      WHERE e.status = 'Pending HOD'
+      LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
+      WHERE e.status = 'PendingHOD'
       ORDER BY e.submitted_at DESC NULLS LAST
     `;
     const result = await pool.query(query);
@@ -664,17 +676,50 @@ app.post('/api/hod/review', async (req, res) => {
   const { exam_id, decision, comment } = req.body;
   try {
     const newStatus = decision === 'Approved' ? 'Approved' : 'Rejected';
+    const approvedAt = newStatus === 'Approved' ? new Date() : null;
+
     const result = await pool.query(
       `UPDATE exam
-       SET status = $1, hod_comment = $2, approved_at = CASE WHEN $1 = 'Approved' THEN NOW() ELSE NULL END
-       WHERE exam_id = $3
+       SET status = $1, hod_comment = $2, approved_at = $3
+       WHERE exam_id = $4
        RETURNING exam_id`,
-      [newStatus, comment || null, exam_id]
+      [newStatus, comment || null, approvedAt, exam_id]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Exam paper not found.' });
     }
+
+    // Notify the teacher who owns this exam
+    try {
+      const teacherRes = await pool.query(
+        `SELECT u.user_id, c.course_code, e.exam_type
+         FROM exam e
+         JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+         JOIN teacher t ON co.teacher_id = t.teacher_id
+         JOIN users u ON t.user_id = u.user_id
+         JOIN course c ON co.course_id = c.course_id
+         WHERE e.exam_id = $1`,
+        [exam_id]
+      );
+
+      if (teacherRes.rows.length > 0) {
+        const { user_id, course_code, exam_type } = teacherRes.rows[0];
+        const title = newStatus === 'Approved' ? 'Exam Paper Approved' : 'Exam Paper Rejected';
+        const message = newStatus === 'Approved'
+          ? `Your ${course_code} ${exam_type} paper has been approved by the HOD. You can now share it with the DEC.`
+          : `Your ${course_code} ${exam_type} paper was rejected.${comment ? ` HOD note: ${comment}` : ''}`;
+
+        await pool.query(
+          `INSERT INTO user_notification (user_id, title, message, notification_type)
+           VALUES ($1, $2, $3, $4)`,
+          [user_id, title, message, newStatus === 'Approved' ? 'Approved' : 'Exam']
+        );
+      }
+    } catch (notifyErr) {
+      console.error('Failed to notify teacher of HOD decision:', notifyErr);
+    }
+
     res.status(200).json({ status: 'success', message: `Exam paper ${newStatus.toLowerCase()} successfully.` });
   } catch (error) {
     console.error('Error updating exam review:', error);
@@ -682,7 +727,6 @@ app.post('/api/hod/review', async (req, res) => {
   }
 });
 
-// Get HOD decision history
 app.get('/api/hod/decisions', async (req, res) => {
   try {
     const query = `
@@ -709,11 +753,9 @@ app.get('/api/hod/decisions', async (req, res) => {
 // G. STUDENT ENDPOINTS
 // =====================================================================
 
-// Get student exam schedule
 app.get('/api/student/:userId/schedule', async (req, res) => {
   const { userId } = req.params;
   try {
-    // Get student_id
     const studentQuery = await pool.query('SELECT student_id, registration_no FROM student WHERE user_id = $1', [userId]);
     if (studentQuery.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Student profile not found.' });
@@ -752,6 +794,16 @@ app.get('/api/student/:userId/schedule', async (req, res) => {
     console.error('Error fetching student schedule:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch student schedule.' });
   }
+});
+
+// =====================================================================
+// Upload error handler (multer file-type/size errors land here)
+// =====================================================================
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || (err && err.message && err.message.includes('PDF and DOCX'))) {
+    return res.status(400).json({ status: 'error', message: err.message });
+  }
+  next(err);
 });
 
 app.listen(PORT, () => {

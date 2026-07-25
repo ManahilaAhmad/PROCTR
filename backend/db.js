@@ -1,22 +1,22 @@
-import pg from 'pg';
-import dotenv from 'dotenv';
+import pg from "pg";
+import dotenv from "dotenv";
 
 dotenv.config();
 
 const { Pool } = pg;
 
-// Initialize connection pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // required for Neon
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
-pool.on('connect', () => {
-  console.log('Connected to Neon PostgreSQL Database successfully.');
-});
-
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle database client:', err);
-  process.exit(-1);
+// Without this, a dropped idle connection in the pool can crash the whole
+// process instead of just failing the one request that was using it.
+pool.on("error", (err) => {
+  console.error("Unexpected error on idle Postgres client:", err.message);
 });
 
 export default pool;

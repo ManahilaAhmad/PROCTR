@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -10,6 +10,8 @@ import Select from "../components/common/Select";
 import StatCard from "../components/common/StatCard";
 import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
+import NotificationBell from "../components/common/NotificationBell";
+
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function TeacherPage({ activePage, setPage, user }) {
@@ -33,33 +35,93 @@ export default function TeacherPage({ activePage, setPage, user }) {
   const [toast,     setToast]     = useState(null);
   const [selectedExamForUpload, setSelectedExamForUpload] = useState("");
 
+  // File upload state
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotes, setUploadNotes] = useState("");
+  const fileInputRef = useRef(null);
+
   // Swap state
   const [swapModal,  setSwapModal]  = useState(null); // duty to swap
   const [swapFor,    setSwapFor]    = useState("");
   const [swapReason, setSwapReason] = useState("");
   const [viewSwap,   setViewSwap]   = useState(null);
 
+  const ALLOWED_EXTENSIONS = [".pdf", ".docx"];
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+  function validateAndSetFile(file) {
+    if (!file) return;
+    const ext = "." + file.name.split(".").pop().toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      alert("Only PDF and DOCX files are allowed.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      alert("File is too large. Max size is 10 MB.");
+      return;
+    }
+    setSelectedFile(file);
+  }
+
+  function handleFileInputChange(e) {
+    validateAndSetFile(e.target.files?.[0]);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setIsDragging(false);
+    validateAndSetFile(e.dataTransfer.files?.[0]);
+  }
+
   function handlePaperUpload() {
     if (!selectedExamForUpload) { alert("Please select an exam first."); return; }
+    if (!selectedFile) { alert("Please choose a file to upload."); return; }
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    formData.append("exam_id", selectedExamForUpload);
+    if (uploadNotes.trim()) formData.append("notes", uploadNotes.trim());
+
+    setUploading(true);
     fetch("http://localhost:5000/api/exams/upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        exam_id: parseInt(selectedExamForUpload),
-        paper_url: "http://university-portal.edu/uploads/exam_paper_" + selectedExamForUpload + ".pdf"
+      body: formData, // no Content-Type header — browser sets multipart boundary automatically
+    })
+      .then(res => res.json())
+      .then(data => {
+        setUploading(false);
+        if (data.status === "success") {
+          showToast("Exam paper uploaded successfully!");
+          setSelectedExamForUpload("");
+          setSelectedFile(null);
+          setUploadNotes("");
+          fetchData();
+        } else {
+          alert(data.message || "Failed to upload exam paper.");
+        }
       })
+      .catch(() => {
+        setUploading(false);
+        alert("Network error. Upload failed.");
+      });
+  }
+
+  function shareWithDEC(examId) {
+    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
+      method: "POST",
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          showToast("Exam paper uploaded successfully!");
-          setSelectedExamForUpload("");
+          showToast("Exam paper shared with DEC!");
           fetchData();
         } else {
-          alert("Failed to upload exam paper.");
+          alert(data.message || "Failed to share with DEC.");
         }
       })
-      .catch(err => alert("Network error. Upload failed."));
+      .catch(() => alert("Network error. Failed to share with DEC."));
   }
 
   const fetchData = () => {
@@ -185,8 +247,11 @@ export default function TeacherPage({ activePage, setPage, user }) {
     return <Badge color={c} bg={bg}>{s}</Badge>;
   };
 
+  // NOTE: key changed from "Pending HOD" (with space) to "PendingHOD"
+  // (no space) to match the actual status string stored in the DB
+  // (exam.status CHECK constraint only allows 'PendingHOD').
   const examBadge = (s) => {
-    const map = { Draft: [C.grey500, C.grey100], "Pending HOD": [C.navy, C.grey200], Approved: [C.teal, C.tealLight], Rejected: [C.grey800, C.grey200] };
+    const map = { Draft: [C.grey500, C.grey100], PendingHOD: [C.navy, C.grey200], Approved: [C.teal, C.tealLight], Rejected: [C.grey800, C.grey200] };
     const [c, bg] = map[s] || [C.grey500, C.grey100];
     return <Badge color={c} bg={bg}>{s}</Badge>;
   };
@@ -204,7 +269,14 @@ export default function TeacherPage({ activePage, setPage, user }) {
     <PageWrap
       title={titleMap[activeTab]}
       subtitle={subtitleMap[activeTab]}
-      actions={activeTab === "exams" ? <Btn variant="primary" onClick={() => setShowCreate(true)}>+ Create Exam</Btn> : undefined}
+      actions={
+  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+    <NotificationBell userId={user?.userId} />
+    {activeTab === "exams" && (
+      <Btn variant="primary" onClick={() => setShowCreate(true)}>+ Create Exam</Btn>
+    )}
+  </div>
+}
     >
       {/* Toast */}
       {toast && (
@@ -326,9 +398,9 @@ export default function TeacherPage({ activePage, setPage, user }) {
         </div>
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
           <StatCard label="Total Exams"      value={exams.length}                                          icon={Icon.clipboardList} delay={0}   />
-          <StatCard label="Pending HOD"       value={exams.filter(e => e.status === "Pending HOD").length} icon={Icon.bell}          delay={80}  />
-          <StatCard label="Approved"          value={exams.filter(e => e.status === "Approved").length}    icon={Icon.check}         delay={160} />
-          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + e.students, 0)}            icon={Icon.users}         delay={240} />
+          <StatCard label="Pending HOD"       value={exams.filter(e => e.exam_status === "PendingHOD").length}  icon={Icon.bell}          delay={80}  />
+          <StatCard label="Approved"          value={exams.filter(e => e.exam_status === "Approved").length}    icon={Icon.check}         delay={160} />
+          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + (e.students || 0), 0)}      icon={Icon.users}         delay={240} />
         </div>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>Exam Papers</div>
@@ -338,11 +410,17 @@ export default function TeacherPage({ activePage, setPage, user }) {
               <Badge>{e.section_name}</Badge>,
               new Date(e.exam_date).toLocaleDateString(),
               e.lab_name,
-              examBadge(e.status),
-              <div style={{ display: "flex", gap: 8 }}>
-                {e.status === "Draft" && <Btn variant="navy" size="sm" onClick={() => submitToHOD(e.exam_id)}>Submit to HOD</Btn>}
-                {e.status === "Approved" && <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>Forwarded to Invigilator</span>}
-                {e.status === "Pending HOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
+              examBadge(e.exam_status),
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {e.exam_status === "Draft" && <Btn variant="navy" size="sm" onClick={() => submitToHOD(e.exam_id)}>Submit to HOD</Btn>}
+                {e.exam_status === "Approved" && !e.shared_with_dec_at && (
+                  <Btn variant="navy" size="sm" onClick={() => shareWithDEC(e.exam_id)}>Share with DEC</Btn>
+                )}
+                {e.exam_status === "Approved" && e.shared_with_dec_at && (
+                  <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>✓ Shared with DEC</span>
+                )}
+                {e.exam_status === "PendingHOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
+                {e.exam_status === "Rejected" && <span style={{ fontSize: 12, color: C.red, padding: "7px 0" }}>Rejected — see notifications</span>}
               </div>,
             ])} />
         </Card>
@@ -357,14 +435,70 @@ export default function TeacherPage({ activePage, setPage, user }) {
               <option value="">Choose exam…</option>
               {exams.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} – {e.section_name}</option>)}
             </Select>
-            <div style={{ border: `2px dashed ${C.grey200}`, borderRadius: 10, padding: "36px 24px", textAlign: "center", background: C.grey50, marginBottom: 18 }}>
-              <div style={{ color: C.grey400, display: "flex", justifyContent: "center", marginBottom: 12 }}>{Icon.upload}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Drag and drop file here</div>
-              <div style={{ fontSize: 12, color: C.grey400, marginBottom: 16 }}>PDF, DOCX — Max 10 MB</div>
-              <Btn variant="ghost" size="sm">Browse Files</Btn>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx"
+              onChange={handleFileInputChange}
+              style={{ display: "none" }}
+            />
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: `2px dashed ${isDragging ? C.teal : selectedFile ? C.teal : C.grey200}`,
+                borderRadius: 10,
+                padding: "36px 24px",
+                textAlign: "center",
+                background: isDragging ? C.tealLight : selectedFile ? C.tealLight : C.grey50,
+                marginBottom: 18,
+                cursor: "pointer",
+                transition: "background .15s, border-color .15s",
+              }}
+            >
+              <div style={{ color: selectedFile ? C.teal : C.grey400, display: "flex", justifyContent: "center", marginBottom: 12 }}>
+                {selectedFile ? Icon.fileText : Icon.upload}
+              </div>
+              {selectedFile ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.navy, marginBottom: 4 }}>{selectedFile.name}</div>
+                  <div style={{ fontSize: 12, color: C.grey500, marginBottom: 16 }}>
+                    {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB — click to change
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Drag and drop file here</div>
+                  <div style={{ fontSize: 12, color: C.grey400, marginBottom: 16 }}>PDF, DOCX — Max 10 MB</div>
+                </>
+              )}
+              <Btn
+                variant="ghost"
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+              >
+                {selectedFile ? "Choose a Different File" : "Browse Files"}
+              </Btn>
             </div>
-            <Input label="Notes for HOD (optional)" placeholder="e.g. Review question 4 rubric" />
-            <Btn variant="navy" style={{ width: "100%", justifyContent: "center" }} onClick={handlePaperUpload}>Upload and Attach</Btn>
+
+            <Input
+              label="Notes for HOD (optional)"
+              placeholder="e.g. Review question 4 rubric"
+              value={uploadNotes}
+              onChange={e => setUploadNotes(e.target.value)}
+            />
+            <Btn
+              variant="navy"
+              style={{ width: "100%", justifyContent: "center", opacity: uploading ? 0.7 : 1 }}
+              onClick={handlePaperUpload}
+              disabled={uploading}
+            >
+              {uploading ? "Uploading…" : "Upload and Attach"}
+            </Btn>
           </Card>
           <Card>
             <h3 style={{ margin: "0 0 20px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Previously Uploaded</h3>
@@ -398,15 +532,11 @@ export default function TeacherPage({ activePage, setPage, user }) {
             <p style={{ margin: "0 auto", color: C.grey500, fontSize: 14, maxWidth: 380, lineHeight: 1.65 }}>You have not been assigned any invigilator duties this semester. Duties are assigned by the Departmental Exam Committee (DEC).</p>
           </Card>
         ) : <>
-          {/* No pending incoming invitations — handled at DEC level */}
-
-          {/* Duty banner */}
           <div style={{ padding: "12px 20px", background: C.tealLight, border: `1.5px solid ${C.tealMid}`, borderRadius: 10, marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ color: C.teal, display: "flex" }}>{Icon.userCheck}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>You have <strong>{invigilatorAssignments.length}</strong> invigilator {invigilatorAssignments.length === 1 ? "duty" : "duties"} assigned this semester.</span>
           </div>
 
-          {/* Stats */}
           <div className="resp-grid-4" style={{ marginBottom: 28 }}>
             <StatCard label="Assigned Exams" value={invigilatorAssignments.length} icon={Icon.clipboard} />
             <StatCard label="Total Capacity" value={invigilatorAssignments.reduce((s,a) => s + (a.capacity || 0), 0)} icon={Icon.users} />
@@ -414,7 +544,6 @@ export default function TeacherPage({ activePage, setPage, user }) {
             <StatCard label="Next Exam"      value={invigilatorAssignments.length > 0 ? new Date(invigilatorAssignments[0].exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None"} icon={Icon.calendar} />
           </div>
 
-          {/* Assignment cards */}
           <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 800, color: C.navy }}>My Schedule</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
             {invigilatorAssignments.map((a, ai) => {
@@ -428,6 +557,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{a.course_code} {a.exam_type}</h3>
                         <Badge>{a.section_name}</Badge>
                         {alreadyRequested && <Badge color={C.amber} bg={C.amberLight}>Swap Requested</Badge>}
+                        {a.exam_paper_url && <Badge color={C.teal} bg={C.tealLight}>Paper Available</Badge>}
                       </div>
                       <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap" }}>
                         <span>{new Date(a.exam_date).toLocaleDateString()} · {a.start_time?.substring(0,5)}</span>
@@ -437,16 +567,20 @@ export default function TeacherPage({ activePage, setPage, user }) {
                         <span>Status: <strong style={{ color: C.navy }}>{a.assignment_status || "Confirmed"}</strong></span>
                       </div>
                     </div>
-                    <Btn variant="ghost" size="sm" style={alreadyRequested ? { borderColor: C.amber, color: C.amber } : {}} onClick={() => !alreadyRequested && setSwapModal(a)}>
-                      {alreadyRequested ? "Swap Pending" : "Request Swap"}
-                    </Btn>
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {a.exam_paper_url && (
+                        <Btn variant="ghost" size="sm" onClick={() => window.open(a.exam_paper_url, "_blank")}>View Paper</Btn>
+                      )}
+                      <Btn variant="ghost" size="sm" style={alreadyRequested ? { borderColor: C.amber, color: C.amber } : {}} onClick={() => !alreadyRequested && setSwapModal(a)}>
+                        {alreadyRequested ? "Swap Pending" : "Request Swap"}
+                      </Btn>
+                    </div>
                   </div>
                 </Card>
               );
             })}
           </div>
 
-          {/* My Swap Requests */}
           <Card>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Swap Requests</h3>
