@@ -27,8 +27,11 @@ export default function TeacherPage({ activePage, setPage, user }) {
   const [invigilatorAssignments, setInvigilatorAssignments] = useState([]);
   const [teachersPool, setTeachersPool] = useState([]);
   const [mySwaps, setMySwaps] = useState([]);
+  const [incomingSwaps, setIncomingSwaps] = useState([]);
+  const [myCourses, setMyCourses] = useState([]);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedCourseOffering, setSelectedCourseOffering] = useState("");
   const [newTitle,  setNewTitle]  = useState("");
   const [newCourse, setNewCourse] = useState("");
   const [newDate,   setNewDate]   = useState("");
@@ -115,13 +118,13 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          showToast("Exam paper shared with DEC!");
+          showToast("Exam paper shared with Director Exam!");
           fetchData();
         } else {
-          alert(data.message || "Failed to share with DEC.");
+          alert(data.message || "Failed to share with Director Exam.");
         }
       })
-      .catch(() => alert("Network error. Failed to share with DEC."));
+      .catch(() => alert("Network error. Failed to share with Director Exam."));
   }
 
   const fetchData = () => {
@@ -139,14 +142,24 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .then(res => res.json())
       .then(data => { if (data.status === "success") setTeachersPool(data.teachers); });
 
-    fetch("http://localhost:5000/api/swap-requests/dec")
+    // Fetch swap requests created by this teacher
+    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/outgoing`)
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          const filtered = data.requests.filter(r => r.requester_name === user.name);
-          setMySwaps(filtered);
+          setMySwaps(data.requests);
         }
       });
+
+    // Fetch courses this teacher is teaching (for exam creation dropdown)
+    fetch(`http://localhost:5000/api/teacher/${user.userId}/courses`)
+      .then(res => res.json())
+      .then(data => { if (data.status === "success") setMyCourses(data.courses); });
+
+    // Fetch incoming swap requests for this teacher
+    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/incoming`)
+      .then(res => res.json())
+      .then(data => { if (data.status === "success") setIncomingSwaps(data.incoming); });
   };
 
   useEffect(() => {
@@ -174,8 +187,16 @@ export default function TeacherPage({ activePage, setPage, user }) {
       })
       .catch(() => alert("Connection error."));
   }
+  function handleCourseSelect(e) {
+    const coId = e.target.value;
+    setSelectedCourseOffering(coId);
+    if (!coId) { setNewCourse(""); return; }
+    const found = myCourses.find(c => String(c.course_offering_id) === String(coId));
+    if (found) setNewCourse(found.course_code);
+  }
+
   function createExam() {
-    if (!newTitle || !newCourse || !newDate) {
+    if (!selectedCourseOffering || !newTitle || !newDate) {
       alert("Please fill in all fields.");
       return;
     }
@@ -184,6 +205,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: user?.userId,
+        course_offering_id: parseInt(selectedCourseOffering),
         exam_type: newTitle,
         course_code: newCourse,
         proposed_date: newDate,
@@ -193,7 +215,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .then(data => {
         if (data.status === "success") {
           setShowCreate(false);
-          setNewTitle(""); setNewCourse(""); setNewDate("");
+          setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate("");
           showToast("Exam draft created!");
           fetchData();
         } else {
@@ -226,8 +248,22 @@ export default function TeacherPage({ activePage, setPage, user }) {
       })
       .catch(err => alert("Connection error to swap api."));
   }
-  function respondIncoming(id, decision) {
-    showToast(decision === "Accepted" ? "Accepted — DEC will review." : "Swap declined.");
+  function respondIncoming(requestId, decision) {
+    fetch(`http://localhost:5000/api/teacher/swap-requests/${requestId}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user?.userId, decision }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          showToast(decision === "Accepted" ? "Agreed to swap — sent to DEC for final approval." : "Swap request declined.");
+          fetchData();
+        } else {
+          alert(data.message || "Failed to process response.");
+        }
+      })
+      .catch(() => alert("Network error."));
   }
   function cancelSwap(id) {
     showToast("Swap cancellation requires DEC review.", "warn");
@@ -288,14 +324,53 @@ export default function TeacherPage({ activePage, setPage, user }) {
       {/* Create Exam Modal */}
       {showCreate && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowCreate(false)}>
-          <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 460, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
             <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: C.navy }}>Create New Exam</h2>
             <p style={{ margin: "0 0 22px", fontSize: 13, color: C.grey500 }}>Saved as draft. Submit to HOD when ready.</p>
-            <Input label="Exam Title"         placeholder="e.g. Networks Lab Final" value={newTitle}  onChange={e => setNewTitle(e.target.value)} />
-            <Input label="Course Code"        placeholder="e.g. CS-415"            value={newCourse} onChange={e => setNewCourse(e.target.value)} />
-            <Input label="Proposed Exam Date" type="date"                           value={newDate}   onChange={e => setNewDate(e.target.value)} />
+
+            {/* Course dropdown — only shows courses this teacher teaches */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Course Title *</label>
+              <select
+                value={selectedCourseOffering}
+                onChange={handleCourseSelect}
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${selectedCourseOffering ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: selectedCourseOffering ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
+              >
+                <option value="">Select a course you teach…</option>
+                {myCourses.map(c => (
+                  <option key={c.course_offering_id} value={c.course_offering_id}>
+                    {c.course_title} — {c.section_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Course Code — auto-filled, read-only */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Course Code</label>
+              <div style={{ padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${C.grey200}`, fontSize: 13, fontWeight: 700, color: newCourse ? C.navy : C.grey400, background: C.grey50, minHeight: 40 }}>
+                {newCourse || "Auto-filled when you select a course"}
+              </div>
+            </div>
+
+            {/* Exam Type */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Exam Type *</label>
+              <select
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${newTitle ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: newTitle ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
+              >
+                <option value="">Select exam type…</option>
+                <option value="LabMid">Lab Mid</option>
+                <option value="LabFinal">Lab Final</option>
+                <option value="LabPractical">Lab Practical</option>
+              </select>
+            </div>
+
+            <Input label="Proposed Exam Date" type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowCreate(false)}>Cancel</Btn>
+              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => { setShowCreate(false); setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate(""); }}>Cancel</Btn>
               <Btn variant="navy"  style={{ flex: 1, justifyContent: "center" }} onClick={createExam}>Save Draft</Btn>
             </div>
           </div>
@@ -414,13 +489,15 @@ export default function TeacherPage({ activePage, setPage, user }) {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {e.exam_status === "Draft" && <Btn variant="navy" size="sm" onClick={() => submitToHOD(e.exam_id)}>Submit to HOD</Btn>}
                 {e.exam_status === "Approved" && !e.shared_with_dec_at && (
-                  <Btn variant="navy" size="sm" onClick={() => shareWithDEC(e.exam_id)}>Share with DEC</Btn>
+                  <Btn variant="navy" size="sm" onClick={() => shareWithDEC(e.exam_id)}>Share with Director Exam</Btn>
                 )}
                 {e.exam_status === "Approved" && e.shared_with_dec_at && (
-                  <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>✓ Shared with DEC</span>
+                  <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>✓ Shared with Director Exam</span>
                 )}
                 {e.exam_status === "PendingHOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
-                {e.exam_status === "Rejected" && <span style={{ fontSize: 12, color: C.red, padding: "7px 0" }}>Rejected — see notifications</span>}
+                {e.exam_status === "Rejected" && (
+                  <Btn variant="primary" size="sm" onClick={() => submitToHOD(e.exam_id)}>Resubmit to HOD</Btn>
+                )}
               </div>,
             ])} />
         </Card>
@@ -525,7 +602,43 @@ export default function TeacherPage({ activePage, setPage, user }) {
 
       {/* ═══════════════ INVIGILATION DUTY ═══════════════ */}
       {activeTab === "invigilation" && <>
-        {!hasDuty ? (
+        {/* Incoming Swap Requests Section */}
+        {incomingSwaps.length > 0 && (
+          <Card style={{ marginBottom: 24, border: `2px solid ${C.amber}`, background: C.amberLight }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <div style={{ color: C.amber, display: "flex" }}>{Icon.bell}</div>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Incoming Swap Requests</h3>
+              <Badge color={C.amber} bg={C.white}>{incomingSwaps.length} pending</Badge>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {incomingSwaps.map(req => (
+                <div key={req.request_id} style={{ padding: "14px 18px", borderRadius: 10, background: C.white, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 3 }}>
+                      {req.requester_name} requests you to cover: {req.course_code} {req.exam_type}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.grey500, marginBottom: 2 }}>
+                      Date: <strong style={{ color: C.navy }}>{new Date(req.exam_date).toLocaleDateString()}</strong> · Lab: <strong style={{ color: C.navy }}>{req.lab_name}</strong> · Section: <strong style={{ color: C.navy }}>{req.section_name}</strong>
+                    </div>
+                    <div style={{ fontSize: 12, color: C.grey500 }}>
+                      Reason: <em>"{req.reason}"</em>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn variant="primary" size="sm" onClick={() => respondIncoming(req.request_id, "Accepted")}>
+                      Accept Swap
+                    </Btn>
+                    <Btn variant="ghost" size="sm" style={{ color: C.red, borderColor: C.redLight }} onClick={() => respondIncoming(req.request_id, "Declined")}>
+                      Decline
+                    </Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {!hasDuty && incomingSwaps.length === 0 ? (
           <Card style={{ textAlign: "center", padding: "64px 24px" }}>
             <div style={{ width: 64, height: 64, borderRadius: 18, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 20px" }}>{Icon.clipboard}</div>
             <h3 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: C.navy }}>No Invigilation Duty Assigned</h3>

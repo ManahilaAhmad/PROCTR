@@ -48,13 +48,6 @@ router.patch("/schedule/:schedule_id/publish", publishSchedule);
 =========================================================== */
 router.get("/notifications/recipients", getRecipients);
 
-router.post(
-    "/notifications/broadcast",
-    broadcastAnnouncement
-);
-router.post(
-    "/notifications/broadcast",
-    broadcastAnnouncement
-);
+router.post("/notifications/broadcast", broadcastAnnouncement);
 
-export default router;
+export default router;
