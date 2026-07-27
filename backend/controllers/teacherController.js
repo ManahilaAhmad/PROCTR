@@ -375,6 +375,35 @@ export const respondToSwapRequest = async (req, res) => {
 };
 
 /* ===========================================================
+   GET PAPERS SHARED WITH DIRECTOR EXAM
+=========================================================== */
+export const getSharedPapers = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, e.status, e.approved_at,
+             qp.file_path AS exam_paper_url, qp.shared_with_dec_at,
+             c.course_code, c.course_title, s.section_name,
+             u.first_name || ' ' || u.last_name AS teacher_name,
+             d.department_name, d.department_code
+      FROM exam e
+      JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+      JOIN course c ON co.course_id = c.course_id
+      JOIN section s ON co.section_id = s.section_id
+      JOIN teacher t ON co.teacher_id = t.teacher_id
+      JOIN users u ON t.user_id = u.user_id
+      JOIN department d ON t.department_id = d.department_id
+      JOIN question_paper qp ON qp.exam_id = e.exam_id
+      WHERE qp.shared_with_dec_at IS NOT NULL
+      ORDER BY qp.shared_with_dec_at DESC
+    `);
+    res.status(200).json({ status: 'success', papers: result.rows });
+  } catch (error) {
+    console.error('Error fetching shared papers for Director Exam:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch shared papers.' });
+  }
+};
+
+/* ===========================================================
    GET OUTGOING SWAP REQUESTS (for requester teacher)
 =========================================================== */
 export const getOutgoingSwapRequests = async (req, res) => {

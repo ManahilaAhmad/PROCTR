@@ -30,6 +30,8 @@ export default function DirectorPage({ activePage, setPage }) {
   const [sectionFilter, setSectionFilter] = useState("All");
   const [selectedSection, setSelectedSection] = useState(null);
 
+  const [sharedPapers, setSharedPapers] = useState([]);
+
   useEffect(() => {
     fetch("http://localhost:5000/api/schedule")
       .then(res => res.json())
@@ -38,6 +40,10 @@ export default function DirectorPage({ activePage, setPage }) {
     fetch("http://localhost:5000/api/labs")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setLabs(data.labs); });
+
+    fetch("http://localhost:5000/api/director/papers")
+      .then(res => res.json())
+      .then(data => { if (data.status === "success") setSharedPapers(data.papers); });
   }, []);
 
   // Derive unique sections from schedule
@@ -60,6 +66,7 @@ export default function DirectorPage({ activePage, setPage }) {
       <Tabs
         tabs={[
           { id: "overview", label: "Overview" },
+          { id: "papers", label: `Question Papers ${sharedPapers.length > 0 ? `(${sharedPapers.length})` : ""}` },
           { id: "timetable", label: "Timetable" },
           { id: "labs", label: "Labs" },
           { id: "results", label: "Section Summary" },
@@ -70,6 +77,7 @@ export default function DirectorPage({ activePage, setPage }) {
           if (setPage) {
             const pageMap = {
               overview: "director",
+              papers: "dir-papers",
               timetable: "dir-timetable",
               labs: "dir-labs",
               results: "dir-results"
@@ -126,6 +134,52 @@ export default function DirectorPage({ activePage, setPage }) {
 
         <div style={{ height: 48 }} />
       </>}
+
+      {/* ── QUESTION PAPERS ──────────────────────────────────────── */}
+      {tab === "papers" && (
+        <>
+          <div className="resp-grid-3" style={{ marginBottom: 28 }}>
+            <StatCard label="Shared Papers"    value={sharedPapers.length} icon={Icon.fileText} />
+            <StatCard label="HOD Approved"     value={sharedPapers.filter(p => p.status === 'Approved').length} icon={Icon.check} />
+            <StatCard label="Departments"      value={[...new Set(sharedPapers.map(p => p.department_code).filter(Boolean))].length} icon={Icon.building} />
+          </div>
+
+          <Card style={{ padding: 0, overflow: "hidden", marginBottom: 28 }}>
+            <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: C.navy }}>Exam Papers Shared with Director Examination</span>
+              <Badge color={C.teal} bg={C.tealLight}>{sharedPapers.length} papers</Badge>
+            </div>
+            {sharedPapers.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: C.grey400, fontSize: 14 }}>
+                No exam papers have been shared by teachers yet.
+              </div>
+            ) : (
+              <Table
+                columns={["Course & Section", "Department", "Exam Type", "Teacher", "HOD Approved On", "Shared On", "Action"]}
+                rows={sharedPapers.map((p) => [
+                  <div key={p.exam_id}>
+                    <span style={{ fontWeight: 800, color: C.navy, display: "block" }}>{p.course_code} — {p.section_name}</span>
+                    <span style={{ fontSize: 12, color: C.grey500 }}>{p.course_title}</span>
+                  </div>,
+                  <Badge key={p.exam_id + "dept"} color={C.navy} bg={C.grey100}>{p.department_code || "CS"}</Badge>,
+                  <Badge key={p.exam_id + "type"} color={C.teal} bg={C.tealLight}>{p.exam_type}</Badge>,
+                  <span key={p.exam_id + "teacher"} style={{ fontWeight: 600, color: C.navy }}>{p.teacher_name}</span>,
+                  p.approved_at ? new Date(p.approved_at).toLocaleDateString() : "—",
+                  p.shared_with_dec_at ? new Date(p.shared_with_dec_at).toLocaleDateString() : "—",
+                  p.exam_paper_url ? (
+                    <Btn key={p.exam_id + "btn"} variant="primary" size="sm" onClick={() => window.open(p.exam_paper_url, "_blank")}>
+                      View Paper
+                    </Btn>
+                  ) : (
+                    <span key={p.exam_id + "nofile"} style={{ fontSize: 12, color: C.grey400 }}>No File</span>
+                  )
+                ])}
+              />
+            )}
+          </Card>
+          <div style={{ height: 48 }} />
+        </>
+      )}
 
       {/* ── TIMETABLE ────────────────────────────────────────────── */}
       {tab === "timetable" && <>

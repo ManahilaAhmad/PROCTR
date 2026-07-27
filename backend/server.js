@@ -16,7 +16,7 @@ import coordinatorRoutes   from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
 
 // Controllers (for legacy flat-path aliases)
-import { listTeachers }                                                      from './controllers/teacherController.js';
+import { listTeachers, getSharedPapers }                                         from './controllers/teacherController.js';
 import { assignInvigilator, createSwapRequest, listSwapRequests, reviewSwapRequest } from './controllers/decController.js';
 import { getSchedule as coordGetSchedule, getLabs }                          from './controllers/coordinatorController.js';
 
@@ -90,8 +90,9 @@ app.get('/api/swap-requests/dec',         listSwapRequests);
 app.post('/api/swap-requests/dec/review', reviewSwapRequest);
 
 // Director + DEC use these flat paths
-app.get('/api/schedule', coordGetSchedule);
-app.get('/api/labs',     getLabs);
+app.get('/api/schedule',        coordGetSchedule);
+app.get('/api/labs',            getLabs);
+app.get('/api/director/papers', getSharedPapers);
 
 // ── Multer Error Handler ────────────────────────────────────
 app.use((err, req, res, next) => {

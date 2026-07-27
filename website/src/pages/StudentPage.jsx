@@ -357,11 +357,6 @@ export default function StudentPage({ activePage, user }) {
                       </div>
                     )}
                   </div>
-
-                  {/* View Paper Button */}
-                  {e.exam_paper_url && (
-                    <Btn variant="ghost" size="sm" onClick={() => window.open(`http://localhost:5000${e.exam_paper_url}`, "_blank")}>View Paper</Btn>
-                  )}
                 </div>
               </Card>
             );

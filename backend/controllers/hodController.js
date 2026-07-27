@@ -63,7 +63,7 @@ export const reviewExam = async (req, res) => {
         const { user_id, course_code, exam_type } = teacherRes.rows[0];
         const title = newStatus === 'Approved' ? 'Exam Paper Approved' : 'Exam Paper Rejected';
         const message = newStatus === 'Approved'
-          ? `Your ${course_code} ${exam_type} paper has been approved by the HOD. You can now share it with the DEC.`
+          ? `Your ${course_code} ${exam_type} paper has been approved by the HOD. You can now share it with the Director Examination.`
           : `Your ${course_code} ${exam_type} paper was rejected.${comment ? ` HOD note: ${comment}` : ''}`;
 
         await pool.query(`
