@@ -50,7 +50,7 @@ export default function DirectorPage({ activePage, setPage }) {
       section: sec,
       exams: rows.length,
       labs: [...new Set(rows.map(r => r.lab_name))].join(", "),
-      capacity: rows.reduce((sum, r) => sum + (r.capacity || 0), 0),
+      capacity: rows.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0),
       confirmed: rows.filter(r => r.status === "Published").length,
     };
   });
@@ -82,10 +82,10 @@ export default function DirectorPage({ activePage, setPage }) {
       {/* ── OVERVIEW ─────────────────────────────────────────────── */}
       {tab === "overview" && <>
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-          <StatCard label="Exams Scheduled"    value={schedule.length}                                     icon={Icon.clipboardList} />
-          <StatCard label="Total Capacity"     value={schedule.reduce((s, e) => s + (e.capacity || 0), 0)} icon={Icon.users} />
-          <StatCard label="Published Exams"    value={schedule.filter(e => e.status === "Published").length} icon={Icon.check} />
-          <StatCard label="Labs in System"     value={labs.length}                                         icon={Icon.server} />
+          <StatCard label="Exams Scheduled"    value={schedule.length}                                                                                                                 icon={Icon.clipboardList} />
+          <StatCard label="Total Capacity"     value={schedule.length > 0 ? schedule.reduce((s, e) => s + (Number(e.capacity) || 0), 0) : labs.reduce((s, l) => s + (Number(l.capacity) || 0), 0)} icon={Icon.users} />
+          <StatCard label="Published Exams"    value={schedule.filter(e => e.status === "Published").length}                                                                           icon={Icon.check} />
+          <StatCard label="Labs in System"     value={labs.length}                                                                                                                     icon={Icon.server} />
         </div>
 
         <div className="director-overview-grid" style={{ marginBottom: 22 }}>
@@ -238,7 +238,7 @@ export default function DirectorPage({ activePage, setPage }) {
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
           <StatCard label="Sections"        value={allSections.length}                                    icon={Icon.clipboardList} />
           <StatCard label="Total Exams"     value={schedule.length}                                       icon={Icon.calendar} />
-          <StatCard label="Total Capacity"  value={schedule.reduce((s, e) => s + (e.capacity || 0), 0)}  icon={Icon.users} />
+          <StatCard label="Total Capacity"  value={schedule.length > 0 ? schedule.reduce((s, e) => s + (Number(e.capacity) || 0), 0) : labs.reduce((s, l) => s + (Number(l.capacity) || 0), 0)}  icon={Icon.users} />
           <StatCard label="Published"       value={schedule.filter(e => e.status === "Published").length} icon={Icon.check} />
         </div>
 

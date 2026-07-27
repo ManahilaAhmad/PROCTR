@@ -172,7 +172,8 @@ CREATE TABLE course_offering (
     course_id           INT NOT NULL REFERENCES course(course_id),
     term_id             INT NOT NULL REFERENCES academic_term(term_id),
     teacher_id          INT NOT NULL REFERENCES teacher(teacher_id),
-    offering_type       VARCHAR(10) NOT NULL CHECK (offering_type IN ('Theory','Lab'))
+    offering_type       VARCHAR(10) NOT NULL CHECK (offering_type IN ('Theory','Lab')),
+    CONSTRAINT unique_section_course_offering UNIQUE (section_id, course_id, term_id, offering_type)
 );
 
 CREATE TABLE enrollment (

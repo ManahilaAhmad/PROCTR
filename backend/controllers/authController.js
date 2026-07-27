@@ -12,7 +12,7 @@ export const login = async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active FROM users WHERE email = $1 AND user_type = $2',
+      'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active, profile_picture_url FROM users WHERE email = $1 AND user_type = $2',
       [email, user_type]
     );
 
@@ -144,6 +144,7 @@ export const login = async (req, res) => {
         name: `${user.first_name} ${user.last_name}`,
         email: user.email,
         userType: user.user_type,
+        profilePictureUrl: user.profile_picture_url,
         ...extra,
       }
     });
@@ -179,5 +180,36 @@ export const changePassword = async (req, res) => {
   } catch (error) {
     console.error('Error changing password:', error);
     res.status(500).json({ status: 'error', message: 'Failed to update password.' });
+  }
+};
+
+/* ===========================================================
+   UPDATE PROFILE PICTURE (Multer Image Upload)
+=========================================================== */
+export const updateProfilePicture = async (req, res) => {
+  const { user_id } = req.body;
+  try {
+    if (!user_id) {
+      return res.status(400).json({ status: 'error', message: 'user_id is required.' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
+    }
+
+    const fileUrl = `http://localhost:${process.env.PORT || 5000}/uploads/${req.file.filename}`;
+
+    // Ensure profile_picture_url column exists on users table
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_url TEXT NULL');
+
+    await pool.query('UPDATE users SET profile_picture_url = $1 WHERE user_id = $2', [fileUrl, user_id]);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Profile picture updated successfully.',
+      profilePictureUrl: fileUrl,
+    });
+  } catch (error) {
+    console.error('Error updating profile picture:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to update profile picture.' });
   }
 };

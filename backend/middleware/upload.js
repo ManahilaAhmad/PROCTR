@@ -29,4 +29,15 @@ const upload = multer({
   },
 });
 
-export { upload, uploadDir };
+const uploadImage = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (req, file, cb) => {
+    const allowedExt = ['.png', '.jpg', '.jpeg', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExt.includes(ext)) cb(null, true);
+    else cb(new Error('Only PNG, JPG, JPEG, and WEBP image files are allowed.'));
+  },
+});
+
+export { upload, uploadImage, uploadDir };

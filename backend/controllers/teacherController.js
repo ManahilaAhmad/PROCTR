@@ -21,7 +21,7 @@ export const listTeachers = async (req, res) => {
 };
 
 /* ===========================================================
-   GET COURSES TAUGHT BY A SPECIFIC TEACHER (for exam creation dropdown)
+   GET COURSES TAUGHT BY A SPECIFIC TEACHER (only courses WITHOUT an exam created yet)
 =========================================================== */
 export const getTeacherCourses = async (req, res) => {
   const { userId } = req.params;
@@ -32,12 +32,14 @@ export const getTeacherCourses = async (req, res) => {
     }
     const teacherId = teacherQuery.rows[0].teacher_id;
 
+    // Returns ONLY course offerings for which NO EXAM has been created yet
     const result = await pool.query(`
       SELECT co.course_offering_id, c.course_code, c.course_title, s.section_name
       FROM course_offering co
       JOIN course c ON co.course_id = c.course_id
       JOIN section s ON co.section_id = s.section_id
-      WHERE co.teacher_id = $1
+      LEFT JOIN exam e ON co.course_offering_id = e.course_offering_id
+      WHERE co.teacher_id = $1 AND e.exam_id IS NULL
       ORDER BY c.course_title ASC
     `, [teacherId]);
 
@@ -64,7 +66,7 @@ export const getSchedule = async (req, res) => {
       SELECT es.schedule_id, 
              COALESCE(es.exam_date, e.proposed_date, e.created_at) AS exam_date, 
              es.start_time, es.end_time, es.status,
-             e.exam_id, e.exam_type, e.status AS exam_status,
+             e.exam_id, e.exam_type, e.status AS exam_status, e.course_offering_id,
              qp.file_path AS exam_paper_url,
              qp.shared_with_dec_at,
              c.course_code, c.course_title, s.section_name, 
@@ -124,6 +126,18 @@ export const createExam = async (req, res) => {
         return res.status(404).json({ status: 'error', message: `No course offering found for course code "${course_code}" assigned to you.` });
       }
       targetCourseOfferingId = coQuery.rows[0].course_offering_id;
+    }
+
+    const result_check = await pool.query(
+      'SELECT exam_id, status FROM exam WHERE course_offering_id = $1 LIMIT 1',
+      [targetCourseOfferingId]
+    );
+    if (result_check.rows.length > 0) {
+      const existing = result_check.rows[0];
+      return res.status(409).json({
+        status: 'error',
+        message: `An exam already exists for this course (Status: ${existing.status}). You cannot create another exam for the same course offering.`,
+      });
     }
 
     const result = await pool.query(`

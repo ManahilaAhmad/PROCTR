@@ -34,7 +34,7 @@ const navItems = {
   ],
 };
 
-export default function Sidebar({ role, activePage, setPage, setRole, sidebarOpen, setSidebarOpen }) {
+export default function Sidebar({ role, activePage, setPage, onLogout, sidebarOpen, setSidebarOpen }) {
   const items = navItems[role] || [];
   return (
     <aside className={`resp-sidebar ${sidebarOpen ? "open" : ""}`} style={{ background: C.navy, minHeight: "100%", display: "flex", flexDirection: "column" }}>
@@ -78,7 +78,7 @@ export default function Sidebar({ role, activePage, setPage, setRole, sidebarOpe
         })}
       </nav>
       <div style={{ padding: "14px 10px", borderTop: "1px solid rgba(255,255,255,.08)" }}>
-        <button onClick={() => { setRole(null); setPage("login"); }}
+        <button onClick={onLogout || (() => setPage("login"))}
           style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", borderRadius: 8, border: "none", cursor: "pointer", background: "transparent", color: "rgba(255,255,255,.4)", fontSize: 13, fontWeight: 600 }}>
           <span style={{ display: "flex" }}>{Icon.logout}</span> Log out
         </button>

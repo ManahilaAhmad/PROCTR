@@ -88,16 +88,43 @@ export default function StudentPage({ activePage, user }) {
   }
 
   function handleAvatarChange(e) {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        showToast("Image size must be less than 2MB.", "warn");
-        return;
-      }
-      setAvatarImg(URL.createObjectURL(file));
-      showToast("Profile picture updated!");
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Image size must be less than 5MB.", "warn");
+      return;
     }
+    const userId = user?.userId || user?.user_id;
+    if (!userId) {
+      showToast("Session error. Please log in again.", "warn");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("avatar", file);
+    formData.append("user_id", userId);
+
+    fetch("http://localhost:5000/api/auth/profile-picture", {
+      method: "POST",
+      body: formData,
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          setAvatarImg(data.profilePictureUrl);
+          if (user) {
+            const updatedUser = { ...user, profilePictureUrl: data.profilePictureUrl };
+            localStorage.setItem("proctr_user", JSON.stringify(updatedUser));
+          }
+          showToast("Profile picture saved!");
+        } else {
+          showToast(data.message || "Failed to upload image.", "warn");
+        }
+      })
+      .catch(() => showToast("Network error. Upload failed.", "warn"));
   }
+
+  const currentAvatar = avatarImg || user?.profilePictureUrl || user?.profile_picture_url;
 
   function gradeColor(g) {
     if (g === "A+" || g === "A") return [C.navy, C.tealLight];
@@ -124,8 +151,8 @@ export default function StudentPage({ activePage, user }) {
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 {/* Avatar with click-to-upload option */}
                 <div style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", overflow: "hidden", cursor: "pointer", border: `2px solid ${C.teal}` }} onClick={() => document.getElementById("avatar-upload-input").click()}>
-                  {avatarImg ? (
-                    <img src={avatarImg} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  {currentAvatar ? (
+                    <img src={currentAvatar} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
                     <div style={{ width: "100%", height: "100%", background: C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: C.teal, fontSize: 24, fontWeight: 800 }}>
                       {studentInfo.name.split(" ").map(w => w[0]).join("")}
@@ -180,26 +207,38 @@ export default function StudentPage({ activePage, user }) {
           </Card>
         </div>
 
-        {/* Upcoming Lab Exams quick-view */}
+        {/* Enrolled Courses quick-view on dashboard */}
         {schedule.length > 0 && (
           <Card style={{ marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <div style={{ color: C.teal, display: "flex" }}>{Icon.calendar}</div>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Upcoming Lab Exams</h3>
-              <Badge color={C.teal} bg={C.tealLight}>{schedule.filter(e => new Date(e.exam_date) >= new Date()).length} upcoming</Badge>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Lab Courses</h3>
+              <Badge color={C.teal} bg={C.tealLight}>{schedule.filter(e => e.exam_date).length} scheduled</Badge>
+              {schedule.filter(e => !e.exam_date).length > 0 && (
+                <Badge color={C.grey500} bg={C.grey100}>{schedule.filter(e => !e.exam_date).length} not scheduled</Badge>
+              )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {schedule.filter(e => new Date(e.exam_date) >= new Date()).slice(0, 3).map(e => (
-                <div key={e.schedule_id} style={{ padding: "12px 16px", borderRadius: 10, background: C.tealLight, border: `1px solid ${C.tealMid}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy }}>{e.course_code} — {e.exam_type}</div>
-                    <div style={{ fontSize: 12, color: C.grey500, marginTop: 2 }}>
-                      📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} at {e.start_time?.substring(0,5)} · Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong>
+              {schedule.slice(0, 4).map((e, i) => {
+                const hasSchedule = !!e.exam_date;
+                return (
+                  <div key={e.course_offering_id + (e.exam_id || i)} style={{ padding: "12px 16px", borderRadius: 10, background: hasSchedule ? C.tealLight : C.grey50, border: `1px solid ${hasSchedule ? C.tealMid : C.grey200}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14, color: C.navy }}>{e.course_code} — {e.course_title}</div>
+                      <div style={{ fontSize: 12, color: C.grey500, marginTop: 2 }}>
+                        {hasSchedule
+                          ? <>📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} at {e.start_time?.substring(0,5)} · Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></>
+                          : e.exam_id ? `Exam created (${e.exam_type}) — awaiting schedule` : "No exam created yet"
+                        }
+                      </div>
                     </div>
+                    {hasSchedule
+                      ? <Badge color={C.teal} bg="white">Scheduled</Badge>
+                      : <Badge color={C.grey500} bg={C.grey100}>Not Scheduled</Badge>
+                    }
                   </div>
-                  <Badge color={C.teal} bg="white">Upcoming</Badge>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         )}
@@ -239,46 +278,89 @@ export default function StudentPage({ activePage, user }) {
   return (
     <PageWrap title="My Exam Schedule" subtitle="Upcoming lab exams assigned to your section">
       <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-        <StatCard label="Scheduled Exams"  value={schedule.length}                                                  icon={Icon.clipboardList} delay={0} />
-        <StatCard label="Upcoming"         value={schedule.filter(e => new Date(e.exam_date) >= new Date()).length} icon={Icon.calendar}     delay={80} />
-        <StatCard label="Completed"        value={schedule.filter(e => new Date(e.exam_date) < new Date()).length}  icon={Icon.check}        delay={160} />
-        <StatCard label="Published"        value={schedule.filter(e => e.status === "Published").length}            icon={Icon.trendingUp}   delay={240} />
+        <StatCard label="Enrolled Courses"  value={schedule.length}                                                                    icon={Icon.clipboardList} delay={0} />
+        <StatCard label="Scheduled"         value={schedule.filter(e => !!e.exam_date).length}                                        icon={Icon.calendar}     delay={80} />
+        <StatCard label="Not Scheduled"     value={schedule.filter(e => !e.exam_date).length}                                         icon={Icon.clipboard}    delay={160} />
+        <StatCard label="Upcoming"          value={schedule.filter(e => e.exam_date && new Date(e.exam_date) >= new Date()).length}    icon={Icon.trendingUp}   delay={240} />
       </div>
 
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: C.navy, margin: "0 0 18px", letterSpacing: -0.2 }}>My Lab Exam Schedule</h2>
+      <h2 style={{ fontSize: 17, fontWeight: 800, color: C.navy, margin: "0 0 18px", letterSpacing: -0.2 }}>My Enrolled Lab Courses</h2>
 
       {schedule.length === 0 ? (
         <Card style={{ textAlign: "center", padding: "56px 24px" }}>
           <div style={{ width: 60, height: 60, borderRadius: 16, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 16px" }}>{Icon.clipboard}</div>
-          <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 800, color: C.navy }}>No Exams Scheduled Yet</h3>
-          <p style={{ margin: 0, color: C.grey500, fontSize: 14, maxWidth: 340, margin: "0 auto" }}>Your section's exam schedule will appear here once the coordinator publishes it.</p>
+          <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 800, color: C.navy }}>No Enrolled Courses Found</h3>
+          <p style={{ margin: "0 auto", color: C.grey500, fontSize: 14, maxWidth: 340 }}>Your enrolled courses will appear here. Contact your department if this seems incorrect.</p>
         </Card>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {schedule.map((e, i) => {
-            const isPast = new Date(e.exam_date) < new Date();
+            const hasSchedule = !!e.exam_date;
+            const isPast = hasSchedule && new Date(e.exam_date) < new Date();
+            const hasExam = !!e.exam_id;
+
+            // Determine card accent color
+            const borderColor = !hasSchedule ? C.grey200 : isPast ? C.grey300 : C.tealMid;
+            const iconBg = !hasSchedule ? C.grey100 : isPast ? C.grey100 : C.tealLight;
+            const iconColor = !hasSchedule ? C.grey400 : isPast ? C.grey400 : C.teal;
+
             return (
-              <Card key={e.schedule_id} style={{ border: isPast ? `1px solid ${C.grey200}` : `1.5px solid ${C.tealMid}`, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${i * 80}ms both` }}>
-                <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ width: 50, height: 50, borderRadius: 13, background: isPast ? C.grey100 : C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: isPast ? C.grey400 : C.teal, flexShrink: 0 }}>{Icon.clipboard}</div>
+              <Card key={`${e.course_offering_id}-${e.exam_id || i}`} style={{ border: `1.5px solid ${borderColor}`, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${i * 60}ms both` }}>
+                <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+
+                  {/* Icon */}
+                  <div style={{ width: 50, height: 50, borderRadius: 13, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", color: iconColor, flexShrink: 0 }}>{Icon.clipboard}</div>
+
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
-                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{e.course_code} — {e.exam_type}</h3>
+                    {/* Course header */}
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{e.course_code}</h3>
+                      <span style={{ fontSize: 13, color: C.grey600, fontWeight: 600 }}>{e.course_title}</span>
                       <Badge>{e.section_name}</Badge>
-                      <Badge color={isPast ? C.grey500 : C.teal} bg={isPast ? C.grey100 : C.tealLight}>{isPast ? "Completed" : "Upcoming"}</Badge>
                     </div>
-                    <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap" }}>
-                      <span>{new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} · {e.start_time?.substring(0,5)}</span>
-                      <span>Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></span>
-                      <span>Capacity: <strong style={{ color: C.navy }}>{e.capacity}</strong></span>
-                      <span>Duration: <strong style={{ color: C.navy }}>{e.duration} min</strong></span>
+
+                    {/* Teacher */}
+                    <div style={{ fontSize: 12, color: C.grey400, marginBottom: 8 }}>
+                      Teacher: <strong style={{ color: C.navy }}>{e.teacher_name}</strong>
                     </div>
-                    <div style={{ marginTop: 5, fontSize: 12, color: C.grey400 }}>
-                      Invigilator: <strong style={{ color: C.navy }}>{e.invigilator_name || "Not yet assigned"}</strong>
-                    </div>
+
+                    {/* Exam & Schedule Info */}
+                    {!hasExam ? (
+                      <div style={{ fontSize: 13, color: C.grey400, fontStyle: "italic" }}>No exam created for this course yet.</div>
+                    ) : !hasSchedule ? (
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                        <Badge color={C.amber} bg="#fffbeb">{e.exam_type}</Badge>
+                        <span style={{ fontSize: 12, color: C.grey500 }}>Exam created</span>
+                        {e.proposed_date && (
+                          <span style={{ fontSize: 12, color: C.grey500 }}>· Proposed Date: <strong style={{ color: C.navy }}>{new Date(e.proposed_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong></span>
+                        )}
+                        <Badge color={C.grey500} bg={C.grey100}>Awaiting Schedule</Badge>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                          <Badge color={isPast ? C.grey500 : C.teal} bg={isPast ? C.grey100 : C.tealLight}>
+                            {isPast ? "Completed" : "Upcoming"}
+                          </Badge>
+                          <Badge color={C.navy} bg={C.grey50}>{e.exam_type}</Badge>
+                        </div>
+                        <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap", marginTop: 4 }}>
+                          <span>📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+                          <span>🕐 {e.start_time?.substring(0,5)} – {e.end_time?.substring(0,5)}</span>
+                          <span>🏛 Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></span>
+                          {e.duration && <span>⏱ {e.duration} min</span>}
+                          {e.total_marks && <span>📊 Total Marks: <strong style={{ color: C.navy }}>{e.total_marks}</strong></span>}
+                        </div>
+                        <div style={{ fontSize: 12, color: C.grey400, marginTop: 2 }}>
+                          Invigilator: <strong style={{ color: C.navy }}>{e.invigilator_name || "Not yet assigned"}</strong>
+                        </div>
+                      </div>
+                    )}
                   </div>
+
+                  {/* View Paper Button */}
                   {e.exam_paper_url && (
-                    <Btn variant="ghost" size="sm" onClick={() => window.open(e.exam_paper_url, "_blank")}>View Paper</Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => window.open(`http://localhost:5000${e.exam_paper_url}`, "_blank")}>View Paper</Btn>
                   )}
                 </div>
               </Card>

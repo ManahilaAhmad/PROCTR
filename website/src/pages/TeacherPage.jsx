@@ -328,21 +328,27 @@ export default function TeacherPage({ activePage, setPage, user }) {
             <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: C.navy }}>Create New Exam</h2>
             <p style={{ margin: "0 0 22px", fontSize: 13, color: C.grey500 }}>Saved as draft. Submit to HOD when ready.</p>
 
-            {/* Course dropdown — only shows courses this teacher teaches */}
+            {/* Course dropdown — backend returns only courses without an existing exam */}
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Course Title *</label>
-              <select
-                value={selectedCourseOffering}
-                onChange={handleCourseSelect}
-                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${selectedCourseOffering ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: selectedCourseOffering ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
-              >
-                <option value="">Select a course you teach…</option>
-                {myCourses.map(c => (
-                  <option key={c.course_offering_id} value={c.course_offering_id}>
-                    {c.course_title} — {c.section_name}
-                  </option>
-                ))}
-              </select>
+              {myCourses.length === 0 ? (
+                <div style={{ padding: "10px 14px", borderRadius: 8, background: C.grey100, border: `1px solid ${C.grey200}`, fontSize: 13, color: C.grey500, fontWeight: 600 }}>
+                  ✓ All of your assigned courses already have an exam created.
+                </div>
+              ) : (
+                <select
+                  value={selectedCourseOffering}
+                  onChange={handleCourseSelect}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${selectedCourseOffering ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: selectedCourseOffering ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
+                >
+                  <option value="">Select a course you teach…</option>
+                  {myCourses.map(c => (
+                    <option key={c.course_offering_id} value={c.course_offering_id}>
+                      {c.course_title} — {c.section_name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Course Code — auto-filled, read-only */}

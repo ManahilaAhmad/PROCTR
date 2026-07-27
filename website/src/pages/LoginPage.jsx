@@ -108,7 +108,11 @@ export default function LoginPage({ setPage, setRole, setUser }) {
             coordinator: "coordinator",
             dec: "dec",
           };
-          setPage(dest[selectedRole]);
+          const targetPage = dest[selectedRole] || "student";
+          localStorage.setItem("proctr_user", JSON.stringify(data.user));
+          localStorage.setItem("proctr_role", data.user.userType);
+          localStorage.setItem("proctr_page", targetPage);
+          setPage(targetPage);
         } else {
           setShake(true);
           setTimeout(() => setShake(false), 600);

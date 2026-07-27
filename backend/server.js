@@ -52,6 +52,20 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
+// Auto-enforce unique course offering per section constraint on database startup
+pool.query(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'unique_section_course_offering'
+    ) THEN
+      ALTER TABLE course_offering 
+      ADD CONSTRAINT unique_section_course_offering 
+      UNIQUE (section_id, course_id, term_id, offering_type);
+    END IF;
+  END $$;
+`).catch(err => console.log("Database constraint check:", err.message));
+
 // ── Primary Namespaced Routes ───────────────────────────────
 app.use('/api/auth',          authRoutes);           // POST /api/auth/login, /api/auth/change-password
 app.use('/api/teacher',       teacherRoutes);        // GET  /api/teacher/:userId/schedule

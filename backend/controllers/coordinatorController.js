@@ -133,6 +133,8 @@ export const getSchedule = async (req, res) => {
 
                 l.lab_name,
 
+                l.capacity,
+
                 COALESCE(
                     u.first_name || ' ' || u.last_name,
                     'Unassigned'
@@ -280,18 +282,24 @@ export const createSchedule = async (req, res) => {
 
         const labConflict = await pool.query(
             `
-            SELECT schedule_id
-            FROM exam_schedule
-            WHERE
-                lab_id = $1
-                AND exam_date = $2
-                AND (
-                    ($3 BETWEEN start_time AND end_time)
-                    OR
-                    ($4 BETWEEN start_time AND end_time)
-                    OR
-                    (start_time BETWEEN $3 AND $4)
-                )
+            SELECT
+                l.lab_name,
+                c.course_code,
+                c.course_title,
+                s.section_name,
+                e.exam_type,
+                es.start_time,
+                es.end_time,
+                es.exam_date
+            FROM exam_schedule es
+            JOIN lab l ON es.lab_id = l.lab_id
+            JOIN exam e ON es.exam_id = e.exam_id
+            JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+            JOIN course c ON co.course_id = c.course_id
+            JOIN section s ON co.section_id = s.section_id
+            WHERE es.lab_id = $1
+              AND es.exam_date = $2
+              AND (es.start_time < $4 AND es.end_time > $3)
             `,
             [
                 lab_id,
@@ -302,9 +310,14 @@ export const createSchedule = async (req, res) => {
         );
 
         if (labConflict.rows.length > 0) {
+            const conflict = labConflict.rows[0];
+            const startTimeStr = String(conflict.start_time).substring(0, 5);
+            const endTimeStr = String(conflict.end_time).substring(0, 5);
+            const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+
             return res.status(409).json({
                 status: "error",
-                message: "Selected lab is already booked during this time."
+                message: `Lab Conflict: ${conflict.lab_name} is already booked on ${dateStr} from ${startTimeStr} to ${endTimeStr} for ${conflict.course_code} ${conflict.exam_type} (${conflict.section_name}). This lab is not available during this time slot.`
             });
         }
 
@@ -441,19 +454,25 @@ export const updateSchedule = async (req, res) => {
 
         const labConflict = await pool.query(
             `
-            SELECT schedule_id
-            FROM exam_schedule
-            WHERE
-                lab_id = $1
-                AND exam_date = $2
-                AND schedule_id <> $3
-                AND (
-                    ($4 BETWEEN start_time AND end_time)
-                    OR
-                    ($5 BETWEEN start_time AND end_time)
-                    OR
-                    (start_time BETWEEN $4 AND $5)
-                )
+            SELECT
+                l.lab_name,
+                c.course_code,
+                c.course_title,
+                s.section_name,
+                e.exam_type,
+                es.start_time,
+                es.end_time,
+                es.exam_date
+            FROM exam_schedule es
+            JOIN lab l ON es.lab_id = l.lab_id
+            JOIN exam e ON es.exam_id = e.exam_id
+            JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+            JOIN course c ON co.course_id = c.course_id
+            JOIN section s ON co.section_id = s.section_id
+            WHERE es.lab_id = $1
+              AND es.exam_date = $2
+              AND es.schedule_id <> $3
+              AND (es.start_time < $5 AND es.end_time > $4)
             `,
             [
                 lab_id,
@@ -465,15 +484,15 @@ export const updateSchedule = async (req, res) => {
         );
 
         if (labConflict.rows.length > 0) {
+            const conflict = labConflict.rows[0];
+            const startTimeStr = String(conflict.start_time).substring(0, 5);
+            const endTimeStr = String(conflict.end_time).substring(0, 5);
+            const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
 
             return res.status(409).json({
-
                 status: "error",
-
-                message: "Lab is already occupied during this time."
-
+                message: `Lab Conflict: ${conflict.lab_name} is already booked on ${dateStr} from ${startTimeStr} to ${endTimeStr} for ${conflict.course_code} ${conflict.exam_type} (${conflict.section_name}). This lab is not available during this time slot.`
             });
-
         }
 
         const update = await pool.query(
@@ -699,31 +718,11 @@ export const getAvailableLabs = async (req, res) => {
             FROM lab
 
             WHERE lab_id NOT IN (
-
                 SELECT lab_id
-
                 FROM exam_schedule
-
-                WHERE
-
-                    exam_date=$1
-
-                    AND (
-
-                        ($2 BETWEEN start_time AND end_time)
-
-                        OR
-
-                        ($3 BETWEEN start_time AND end_time)
-
-                        OR
-
-                        (start_time BETWEEN $2 AND $3)
-
-                    )
-
+                WHERE exam_date = $1
+                  AND (start_time < $3 AND end_time > $2)
             )
-
             ORDER BY lab_name
             `,
 

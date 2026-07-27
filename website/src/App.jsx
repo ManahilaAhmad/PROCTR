@@ -18,14 +18,45 @@ import { ErrorBoundary } from "./components/common/ErrorBoundary";
 const dashboardPages = ["teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
 
 export default function App() {
-  const [page, setPage] = useState("login");
-  const [role, setRole] = useState(null);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("proctr_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [role, setRole] = useState(() => {
+    return localStorage.getItem("proctr_role") || null;
+  });
+
+  const [page, setPage] = useState(() => {
+    const savedUser = localStorage.getItem("proctr_user");
+    const savedPage = localStorage.getItem("proctr_page");
+    if (savedUser && savedPage) {
+      return savedPage;
+    }
+    return "login";
+  });
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const navigateTo = (p) => {
     setPage(p);
     setSidebarOpen(false);
+    if (p !== "login") {
+      localStorage.setItem("proctr_page", p);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("proctr_user");
+    localStorage.removeItem("proctr_role");
+    localStorage.removeItem("proctr_page");
+    setUser(null);
+    setRole(null);
+    navigateTo("login");
   };
 
   function renderDashboardContent() {
@@ -107,7 +138,7 @@ export default function App() {
               <span style={{ background: "rgba(0,180,166,.15)", color: C.teal, fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, textTransform: "uppercase" }}>{role}</span>
             </div>
             <button
-              onClick={() => { setRole(null); navigateTo("login"); }}
+              onClick={handleLogout}
               style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", cursor: "pointer", display: "flex", alignItems: "center", padding: "6px" }}
               aria-label="Logout"
             >
@@ -125,7 +156,7 @@ export default function App() {
             role={role}
             activePage={page}
             setPage={navigateTo}
-            setRole={setRole}
+            onLogout={handleLogout}
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
           />
