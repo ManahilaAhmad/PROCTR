@@ -88,6 +88,8 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   const [notifMsg, setNotifMsg] = useState("");
   const [notifAudience, setNotifAudience] = useState("All Students");
   const [notifSent, setNotifSent] = useState(false);
+  const [notifSentTo, setNotifSentTo] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
 
   const [schedExam, setSchedExam] = useState("");
@@ -131,11 +133,16 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   }
 
   function sendNotif() {
-    if (!notifSubject.trim() || !notifMsg.trim()) return;
+    if (!notifSubject.trim() || !notifMsg.trim()) {
+      alert("Please fill in both the subject and message fields.");
+      return;
+    }
     if (broadcastType === "specific" && !selectedTarget) {
       alert("Please select a user to message.");
       return;
     }
+    setIsSending(true);
+    const recipientLabel = broadcastType === "all" ? notifAudience : targetLabel(selectedTarget);
     fetch("http://localhost:5000/api/coordinator/notifications/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -149,16 +156,18 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     })
       .then(res => res.json())
       .then(data => {
+        setIsSending(false);
         if (data.status === "success") {
+          setNotifSentTo(recipientLabel);
           setNotifSent(true);
           setNotifSubject(""); setNotifMsg("");
           setSpecificSearch(""); setSpecificResults([]); setSelectedTarget(null);
-          setTimeout(() => setNotifSent(false), 3200);
+          setTimeout(() => setNotifSent(false), 5000);
         } else {
           alert(data.message || "Failed to broadcast notification.");
         }
       })
-      .catch(err => alert("Connection error to notifications api."));
+      .catch(err => { setIsSending(false); alert("Connection error to notifications api."); });
   }
 
   function openScheduleModal() {
@@ -183,11 +192,16 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     setEditingScheduleId(null);
   }
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   function confirmSchedule() {
+    if (isSubmitting) return;
     if (!schedExam || !schedLab || !schedDate || !schedStartTime || !schedEndTime) {
       alert("Please fill all scheduling fields.");
       return;
     }
+
+    setIsSubmitting(true);
 
     const payload = {
       exam_id: parseInt(schedExam),
@@ -210,6 +224,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     })
       .then(res => res.json())
       .then(data => {
+        setIsSubmitting(false);
         if (data.status === "success") {
           alert(isEdit ? "Exam schedule updated!" : "Exam scheduled successfully!");
           closeScheduleModal();
@@ -218,7 +233,10 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
           alert(data.message || "Failed to save schedule.");
         }
       })
-      .catch(err => alert("Network error. Failed to save schedule."));
+      .catch(err => {
+        setIsSubmitting(false);
+        alert("Network error. Failed to save schedule.");
+      });
   }
 
   function deleteSchedule(s) {
@@ -253,11 +271,35 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
         <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={closeScheduleModal}>
           <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
             <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: C.navy }}>{editingScheduleId != null ? "Edit Scheduled Exam" : "Schedule Exam"}</h2>
-            <Select label="Approved Exam" value={schedExam} onChange={(e) => setSchedExam(e.target.value)}>
-              <option value="">Select an approved exam...</option>
-              {safeApproved.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} ({e.section_name})</option>)}
+            <Select label="Approved Exam" value={schedExam} onChange={(e) => {
+              const selectedId = e.target.value;
+              setSchedExam(selectedId);
+              if (selectedId) {
+                const found = safeApproved.find(ex => String(ex.exam_id) === String(selectedId));
+                if (found?.proposed_date) {
+                  setSchedDate(new Date(found.proposed_date).toISOString().split('T')[0]);
+                }
+              }
+            }}>
+              <option value="">
+                {safeApproved.filter(e => !safeSchedule.some(s => String(s.exam_id) === String(e.exam_id)) || String(e.exam_id) === String(schedExam)).length === 0
+                  ? "No unscheduled approved exams available"
+                  : "Select an approved exam..."}
+              </option>
+              {safeApproved
+                .filter(e => !safeSchedule.some(s => String(s.exam_id) === String(e.exam_id)) || String(e.exam_id) === String(schedExam))
+                .map(e => {
+                  const propDateStr = e.proposed_date
+                    ? ` — Proposed: ${new Date(e.proposed_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                    : "";
+                  return (
+                    <option key={e.exam_id} value={e.exam_id}>
+                      {e.course_code} {e.exam_type} ({e.section_name}){propDateStr}
+                    </option>
+                  );
+                })}
             </Select>
-            <Input label="Date" type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} />
+            <Input label="Date" type="date" min={new Date().toISOString().split('T')[0]} value={schedDate} onChange={(e) => setSchedDate(e.target.value)} />
             <Select label="Lab" value={schedLab} onChange={(e) => setSchedLab(e.target.value)}>
               <option value="">Select a lab…</option>
               {safeLabs.filter(l => l.status === "Available" || String(l.lab_id) === String(schedLab)).map(l => <option key={l.lab_id} value={l.lab_id}>{l.lab_name} (Cap: {l.capacity})</option>)}
@@ -267,8 +309,10 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
               <div style={{ flex: 1 }}><Input label="End Time" type="time" value={schedEndTime} onChange={(e) => setSchedEndTime(e.target.value)} /></div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={closeScheduleModal}>Cancel</Btn>
-              <Btn variant="navy" style={{ flex: 1, justifyContent: "center" }} onClick={confirmSchedule}>{editingScheduleId != null ? "Save Changes" : "Confirm Schedule"}</Btn>
+              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={closeScheduleModal} disabled={isSubmitting}>Cancel</Btn>
+              <Btn variant="navy" style={{ flex: 1, justifyContent: "center", opacity: isSubmitting ? 0.6 : 1 }} onClick={confirmSchedule} disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : (editingScheduleId != null ? "Save Changes" : "Confirm Schedule")}
+              </Btn>
             </div>
           </div>
         </div>
@@ -322,8 +366,22 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
         <Card>
           <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Broadcast Notification</h3>
           {notifSent && (
-            <div style={{ marginBottom: 14, padding: "10px 14px", background: C.tealLight, borderRadius: 8, fontSize: 13, color: C.navy, fontWeight: 700 }}>
-              Notification sent to {broadcastType === "all" ? notifAudience : targetLabel(selectedTarget)}.
+            <div style={{
+              marginBottom: 16,
+              padding: "14px 18px",
+              background: "linear-gradient(135deg, #0d9488, #14b8a6)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              boxShadow: "0 4px 16px rgba(20,184,166,0.3)",
+              animation: "slideDown 0.3s ease",
+            }}>
+              <span style={{ fontSize: 20 }}>✅</span>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 2 }}>Notification Sent Successfully!</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)" }}>Your message has been delivered to <strong>{notifSentTo}</strong>.</div>
+              </div>
             </div>
           )}
 
@@ -410,7 +468,16 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Message</label>
             <textarea value={notifMsg} onChange={(e) => setNotifMsg(e.target.value)} placeholder="Write your notification here..." style={{ width: "100%", padding: "11px 14px", borderRadius: 8, border: `1.5px solid ${C.grey200}`, fontSize: 14, color: C.grey800, background: C.grey50, minHeight: 80, resize: "vertical", boxSizing: "border-box", outline: "none", fontFamily: "inherit" }} />
           </div>
-          <Btn variant="primary" onClick={sendNotif}>Send Notification</Btn>
+          <Btn
+            variant="primary"
+            onClick={sendNotif}
+            disabled={isSending}
+            style={{ opacity: isSending ? 0.7 : 1, cursor: isSending ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 8 }}
+          >
+            {isSending ? (
+              <><span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Sending…</>
+            ) : "📤 Send Notification"}
+          </Btn>
         </Card>
       </>}
 

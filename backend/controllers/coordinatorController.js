@@ -47,6 +47,7 @@ export const getApprovedExams = async (req, res) => {
                 e.exam_type,
                 e.total_marks,
                 e.duration,
+                e.proposed_date,
                 c.course_code,
                 c.course_title,
                 s.section_name
@@ -61,7 +62,11 @@ export const getApprovedExams = async (req, res) => {
             JOIN section s
                 ON co.section_id = s.section_id
 
+            LEFT JOIN exam_schedule es
+                ON e.exam_id = es.exam_id
+
             WHERE e.status='Approved'
+              AND es.schedule_id IS NULL
 
             ORDER BY c.course_code;
         `;
@@ -234,6 +239,24 @@ export const createSchedule = async (req, res) => {
             });
         }
 
+        if (end_time <= start_time) {
+            return res.status(400).json({
+                status: "error",
+                message: "Invalid Time Slot: End time must be strictly after start time."
+            });
+        }
+
+        if (exam_date) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const examDateStr = new Date(exam_date).toISOString().split('T')[0];
+            if (examDateStr < todayStr) {
+                return res.status(400).json({
+                    status: "error",
+                    message: "Invalid Date: Exam date cannot be scheduled in the past."
+                });
+            }
+        }
+
         // ==========================
         // Get coordinator
         // ==========================
@@ -322,6 +345,57 @@ export const createSchedule = async (req, res) => {
         }
 
         // ==========================
+        // Check section/class timetable conflict
+        // ==========================
+
+        const sectionConflict = await pool.query(
+            `
+            SELECT
+                s.section_name,
+                c.course_code,
+                c.course_title,
+                e.exam_type,
+                es.start_time,
+                es.end_time,
+                es.exam_date,
+                l.lab_name
+            FROM exam_schedule es
+            JOIN exam e ON es.exam_id = e.exam_id
+            JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+            JOIN course c ON co.course_id = c.course_id
+            JOIN section s ON co.section_id = s.section_id
+            JOIN lab l ON es.lab_id = l.lab_id
+            WHERE co.section_id = (
+                SELECT co_target.section_id
+                FROM exam e_target
+                JOIN course_offering co_target ON e_target.course_offering_id = co_target.course_offering_id
+                WHERE e_target.exam_id = $1
+            )
+              AND es.exam_id <> $1
+              AND es.exam_date = $2
+              AND (es.start_time < $4 AND es.end_time > $3)
+            `,
+            [
+                exam_id,
+                exam_date,
+                start_time,
+                end_time
+            ]
+        );
+
+        if (sectionConflict.rows.length > 0) {
+            const conflict = sectionConflict.rows[0];
+            const startTimeStr = String(conflict.start_time).substring(0, 5);
+            const endTimeStr = String(conflict.end_time).substring(0, 5);
+            const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+
+            return res.status(409).json({
+                status: "error",
+                message: `Student Section Conflict: Section ${conflict.section_name} already has an exam scheduled for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. Students of section ${conflict.section_name} cannot take two exams at the same time.`
+            });
+        }
+
+        // ==========================
         // Create Schedule
         // ==========================
 
@@ -398,7 +472,59 @@ export const createSchedule = async (req, res) => {
                     teacherResult.rows[0].teacher_id
                 ]
             );
+        }
 
+        // Notify Teacher and Enrolled Students of the new exam timetable slot
+        try {
+            const infoRes = await pool.query(`
+                SELECT u.user_id AS teacher_user_id, c.course_code, e.exam_type, s.section_name, l.lab_name
+                FROM exam e
+                JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+                JOIN course c ON co.course_id = c.course_id
+                JOIN section s ON co.section_id = s.section_id
+                JOIN teacher t ON co.teacher_id = t.teacher_id
+                JOIN users u ON t.user_id = u.user_id
+                LEFT JOIN lab l ON l.lab_id = $2
+                WHERE e.exam_id = $1
+            `, [exam_id, lab_id]);
+
+            if (infoRes.rows.length > 0) {
+                const { teacher_user_id, course_code, exam_type, section_name, lab_name } = infoRes.rows[0];
+                const startTimeStr = String(start_time).substring(0, 5);
+                const endTimeStr = String(end_time).substring(0, 5);
+
+                await pool.query(`
+                    INSERT INTO user_notification (user_id, title, message, notification_type)
+                    VALUES ($1, $2, $3, 'Exam')
+                `, [
+                    teacher_user_id,
+                    'Exam Scheduled',
+                    `Your exam for ${course_code} ${exam_type} (${section_name}) has been scheduled on ${exam_date} from ${startTimeStr} to ${endTimeStr} in ${lab_name || 'Lab'}.`
+                ]);
+
+                // Notify all enrolled students
+                const studentsRes = await pool.query(`
+                    SELECT u.user_id
+                    FROM enrollment en
+                    JOIN exam e ON en.course_offering_id = e.course_offering_id
+                    JOIN student st ON en.student_id = st.student_id
+                    JOIN users u ON st.user_id = u.user_id
+                    WHERE e.exam_id = $1
+                `, [exam_id]);
+
+                for (const stRow of studentsRes.rows) {
+                    await pool.query(`
+                        INSERT INTO user_notification (user_id, title, message, notification_type)
+                        VALUES ($1, $2, $3, 'Exam')
+                    `, [
+                        stRow.user_id,
+                        'Exam Timetable Released',
+                        `${course_code} ${exam_type} has been scheduled on ${exam_date} from ${startTimeStr} to ${endTimeStr} in ${lab_name || 'Lab'}.`
+                    ]);
+                }
+            }
+        } catch (notifErr) {
+            console.error("Error creating notifications for schedule:", notifErr);
         }
 
         return res.status(201).json({
@@ -435,6 +561,23 @@ export const updateSchedule = async (req, res) => {
     } = req.body;
 
     try {
+        if (start_time && end_time && end_time <= start_time) {
+            return res.status(400).json({
+                status: "error",
+                message: "Invalid Time Slot: End time must be strictly after start time."
+            });
+        }
+
+        if (exam_date) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const examDateStr = new Date(exam_date).toISOString().split('T')[0];
+            if (examDateStr < todayStr) {
+                return res.status(400).json({
+                    status: "error",
+                    message: "Invalid Date: Exam date cannot be scheduled in the past."
+                });
+            }
+        }
 
         const scheduleResult = await pool.query(
             `
@@ -492,6 +635,54 @@ export const updateSchedule = async (req, res) => {
             return res.status(409).json({
                 status: "error",
                 message: `Lab Conflict: ${conflict.lab_name} is already booked on ${dateStr} from ${startTimeStr} to ${endTimeStr} for ${conflict.course_code} ${conflict.exam_type} (${conflict.section_name}). This lab is not available during this time slot.`
+            });
+        }
+
+        const sectionConflict = await pool.query(
+            `
+            SELECT
+                s.section_name,
+                c.course_code,
+                c.course_title,
+                e.exam_type,
+                es.start_time,
+                es.end_time,
+                es.exam_date,
+                l.lab_name
+            FROM exam_schedule es
+            JOIN exam e ON es.exam_id = e.exam_id
+            JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+            JOIN course c ON co.course_id = c.course_id
+            JOIN section s ON co.section_id = s.section_id
+            JOIN lab l ON es.lab_id = l.lab_id
+            WHERE co.section_id = (
+                SELECT co_target.section_id
+                FROM exam_schedule es_target
+                JOIN exam e_target ON es_target.exam_id = e_target.exam_id
+                JOIN course_offering co_target ON e_target.course_offering_id = co_target.course_offering_id
+                WHERE es_target.schedule_id = $1
+            )
+              AND es.schedule_id <> $1
+              AND es.exam_date = $2
+              AND (es.start_time < $4 AND es.end_time > $3)
+            `,
+            [
+                schedule_id,
+                exam_date,
+                start_time,
+                end_time
+            ]
+        );
+
+        if (sectionConflict.rows.length > 0) {
+            const conflict = sectionConflict.rows[0];
+            const startTimeStr = String(conflict.start_time).substring(0, 5);
+            const endTimeStr = String(conflict.end_time).substring(0, 5);
+            const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+
+            return res.status(409).json({
+                status: "error",
+                message: `Student Section Conflict: Section ${conflict.section_name} already has an exam scheduled for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. Students of section ${conflict.section_name} cannot take two exams at the same time.`
             });
         }
 
@@ -564,21 +755,30 @@ export const updateSchedule = async (req, res) => {
 =========================================================== */
 
 export const deleteSchedule = async (req, res) => {
-
     const { schedule_id } = req.params;
 
     try {
+        // Delete any duty swap requests for this schedule
+        await pool.query(`
+            DELETE FROM duty_swap_request 
+            WHERE invigilator_assignment_id IN (
+                SELECT invigilator_assignment_id FROM invigilator_assignment WHERE schedule_id = $1
+            )
+        `, [schedule_id]);
 
+        // Delete invigilator assignments for this schedule
+        await pool.query(`
+            DELETE FROM invigilator_assignment WHERE schedule_id = $1
+        `, [schedule_id]);
+
+        // Delete the schedule entry
         const result = await pool.query(
-
             `
             DELETE FROM exam_schedule
             WHERE schedule_id=$1
             RETURNING *
             `,
-
             [schedule_id]
-
         );
 
         if (result.rows.length === 0) {
@@ -857,7 +1057,6 @@ export const broadcastAnnouncement = async (req, res) => {
         }
 
         const result = await pool.query(
-
             `
             INSERT INTO broadcast_announcement
             (
@@ -866,33 +1065,62 @@ export const broadcastAnnouncement = async (req, res) => {
                 message,
                 audience_type,
                 target_user_id,
-                department_id
+                department_id,
+                is_published
             )
-
             VALUES
-
-            ($1,$2,$3,$4,$5,$6)
-
+            ($1, $2, $3, $4, $5, $6, TRUE)
             RETURNING announcement_id, subject, message, audience_type, created_at
             `,
-
             [
-
                 user_id,
-
                 subject.trim(),
-
                 message.trim(),
-
                 resolvedAudience,
-
                 resolvedAudience === "Specific" ? target_user_id : null,
-
                 department_id
-
             ]
-
         );
+
+        // Deliver directly to user_notification for real-time delivery
+        try {
+          if (resolvedAudience === "Specific" && target_user_id) {
+            await pool.query(`
+              INSERT INTO user_notification (user_id, title, message, notification_type)
+              VALUES ($1, $2, $3, 'Exam')
+            `, [target_user_id, subject.trim(), message.trim()]);
+          } else if (resolvedAudience === "AllStudents") {
+            const stUsers = await pool.query("SELECT user_id FROM student");
+            for (const r of stUsers.rows) {
+              await pool.query(`
+                INSERT INTO user_notification (user_id, title, message, notification_type)
+                VALUES ($1, $2, $3, 'Exam')
+              `, [r.user_id, subject.trim(), message.trim()]);
+            }
+          } else if (resolvedAudience === "AllTeachers") {
+            const tUsers = await pool.query("SELECT user_id FROM teacher");
+            for (const r of tUsers.rows) {
+              await pool.query(`
+                INSERT INTO user_notification (user_id, title, message, notification_type)
+                VALUES ($1, $2, $3, 'Exam')
+              `, [r.user_id, subject.trim(), message.trim()]);
+            }
+          } else if (resolvedAudience === "Department" && department_id) {
+            const deptUsers = await pool.query(`
+              SELECT user_id FROM teacher WHERE department_id = $1
+              UNION
+              SELECT user_id FROM coordinator WHERE department_id = $1
+            `, [department_id]);
+            for (const r of deptUsers.rows) {
+              await pool.query(`
+                INSERT INTO user_notification (user_id, title, message, notification_type)
+                VALUES ($1, $2, $3, 'Exam')
+              `, [r.user_id, subject.trim(), message.trim()]);
+            }
+          }
+        } catch (directNotifErr) {
+          console.error("Error inserting direct notifications:", directNotifErr);
+        }
 
         return res.status(200).json({
 

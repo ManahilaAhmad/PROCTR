@@ -247,7 +247,8 @@ CREATE TABLE exam_schedule (
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     published_at    TIMESTAMP NULL,
-    CHECK (end_time > start_time)
+    CHECK (end_time > start_time),
+    CONSTRAINT unique_exam_schedule_exam UNIQUE (exam_id)
 );
 
 CREATE TABLE invigilator_assignment (
@@ -353,7 +354,7 @@ CREATE TABLE user_notification (
     title               VARCHAR(200) NOT NULL,
     message             TEXT NOT NULL,
     notification_type   VARCHAR(20) NOT NULL
-                        CHECK (notification_type IN ('Exam','Schedule','Approved','AI','MOSS','Invigilation')),
+                        CHECK (notification_type IN ('Exam','Schedule','Approved','AI','MOSS','Invigilation','System')),
     is_read             BOOLEAN NOT NULL DEFAULT FALSE,
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );

@@ -1,4 +1,37 @@
-import pool from '../db.js';
+/* ===========================================================
+   HELPER: Check Teacher Invigilation Overlap Conflict
+=========================================================== */
+const checkTeacherInvigilationConflict = async (teacherId, scheduleId) => {
+  const schedRes = await pool.query(
+    'SELECT exam_date, start_time, end_time FROM exam_schedule WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  if (schedRes.rows.length === 0) return null;
+  const { exam_date, start_time, end_time } = schedRes.rows[0];
+
+  const conflictRes = await pool.query(`
+    SELECT ia.invigilator_assignment_id, c.course_code, e.exam_type, l.lab_name,
+           es.exam_date, es.start_time, es.end_time,
+           u.first_name || ' ' || u.last_name AS teacher_name
+    FROM invigilator_assignment ia
+    JOIN exam_schedule es ON ia.schedule_id = es.schedule_id
+    JOIN exam e ON es.exam_id = e.exam_id
+    JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+    JOIN course c ON co.course_id = c.course_id
+    JOIN lab l ON es.lab_id = l.lab_id
+    JOIN teacher t ON ia.teacher_id = t.teacher_id
+    JOIN users u ON t.user_id = u.user_id
+    WHERE ia.teacher_id = $1
+      AND ia.schedule_id <> $2
+      AND es.exam_date = $3
+      AND (es.start_time < $5 AND es.end_time > $4)
+  `, [teacherId, scheduleId, exam_date, start_time, end_time]);
+
+  if (conflictRes.rows.length > 0) {
+    return conflictRes.rows[0];
+  }
+  return null;
+};
 
 /* ===========================================================
    ASSIGN INVIGILATOR (DEC panel)
@@ -11,6 +44,18 @@ export const assignInvigilator = async (req, res) => {
       return res.status(403).json({ status: 'error', message: 'Only DEC members can assign invigilators.' });
     }
     const dec_member_id = decQuery.rows[0].dec_member_id;
+
+    // Check if teacher has another invigilation duty during this time slot
+    const conflict = await checkTeacherInvigilationConflict(teacher_id, schedule_id);
+    if (conflict) {
+      const startTimeStr = String(conflict.start_time).substring(0, 5);
+      const endTimeStr = String(conflict.end_time).substring(0, 5);
+      const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+      return res.status(409).json({
+        status: 'error',
+        message: `Invigilation Conflict: Prof. ${conflict.teacher_name} is already assigned as invigilator for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. They cannot invigilate two labs simultaneously.`
+      });
+    }
 
     await pool.query('DELETE FROM invigilator_assignment WHERE schedule_id = $1', [schedule_id]);
 
@@ -38,6 +83,18 @@ export const createSwapRequest = async (req, res) => {
       return res.status(403).json({ status: 'error', message: 'Only teachers can request duty swaps.' });
     }
     const requester_teacher_id = teacherQuery.rows[0].teacher_id;
+
+    // Check if nominated replacement teacher has another invigilation duty during this time slot
+    const conflict = await checkTeacherInvigilationConflict(replacement_teacher_id, schedule_id);
+    if (conflict) {
+      const startTimeStr = String(conflict.start_time).substring(0, 5);
+      const endTimeStr = String(conflict.end_time).substring(0, 5);
+      const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+      return res.status(409).json({
+        status: 'error',
+        message: `Schedule Conflict: Prof. ${conflict.teacher_name} is already assigned as invigilator for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. They cannot be nominated for another duty during the same time slot.`
+      });
+    }
 
     const assignQuery = await pool.query(
       'SELECT invigilator_assignment_id FROM invigilator_assignment WHERE schedule_id = $1 AND teacher_id = $2',
@@ -145,6 +202,24 @@ export const reviewSwapRequest = async (req, res) => {
     const { invigilator_assignment_id, replacement_teacher_id } = requestResult.rows[0];
 
     if (status === 'Approved') {
+      const assignRes = await pool.query(
+        'SELECT schedule_id FROM invigilator_assignment WHERE invigilator_assignment_id = $1',
+        [invigilator_assignment_id]
+      );
+      if (assignRes.rows.length > 0) {
+        const schedId = assignRes.rows[0].schedule_id;
+        const conflict = await checkTeacherInvigilationConflict(replacement_teacher_id, schedId);
+        if (conflict) {
+          const startTimeStr = String(conflict.start_time).substring(0, 5);
+          const endTimeStr = String(conflict.end_time).substring(0, 5);
+          const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+          return res.status(409).json({
+            status: 'error',
+            message: `Cannot approve swap: Prof. ${conflict.teacher_name} is already assigned as invigilator for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. They cannot invigilate two labs simultaneously.`
+          });
+        }
+      }
+
       await pool.query(`
         UPDATE invigilator_assignment
         SET teacher_id = $1, assignment_status = 'Swapped', updated_at = NOW()

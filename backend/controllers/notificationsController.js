@@ -44,13 +44,17 @@ async function resolveUserContext(userId) {
         );
         departmentId = dept.rows[0]?.department_id || null;
 
-    } else if (userType === "coordinator" || userType === "hod") {
+    } else if (userType === "coordinator" || userType === "hod" || userType === "director" || userType === "dec") {
 
-        const dept = await pool.query(
-            `SELECT department_id FROM ${userType} WHERE user_id = $1`,
-            [userId]
-        );
-        departmentId = dept.rows[0]?.department_id || null;
+        audienceTypes = ["AllTeachers", "InvigilatorsOnly"];
+
+        if (userType === "coordinator" || userType === "hod") {
+            const dept = await pool.query(
+                `SELECT department_id FROM ${userType} WHERE user_id = $1`,
+                [userId]
+            );
+            departmentId = dept.rows[0]?.department_id || null;
+        }
     }
 
     return { userType, departmentId, audienceTypes };

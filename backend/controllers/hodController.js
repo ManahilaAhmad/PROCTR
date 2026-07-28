@@ -70,9 +70,31 @@ export const reviewExam = async (req, res) => {
           INSERT INTO user_notification (user_id, title, message, notification_type)
           VALUES ($1, $2, $3, $4)
         `, [user_id, title, message, newStatus === 'Approved' ? 'Approved' : 'Exam']);
+
+        if (newStatus === 'Approved') {
+          const coordRes = await pool.query(`
+            SELECT c.user_id
+            FROM coordinator c
+            JOIN teacher t ON t.teacher_id = (
+              SELECT co.teacher_id FROM exam e JOIN course_offering co ON e.course_offering_id = co.course_offering_id WHERE e.exam_id = $1
+            )
+            WHERE c.department_id = t.department_id
+          `, [exam_id]);
+
+          for (const row of coordRes.rows) {
+            await pool.query(`
+              INSERT INTO user_notification (user_id, title, message, notification_type)
+              VALUES ($1, $2, $3, 'Exam')
+            `, [
+              row.user_id,
+              'Exam Approved — Ready to Schedule',
+              `${course_code} ${exam_type} has been approved by HOD and is ready for exam scheduling.`
+            ]);
+          }
+        }
       }
     } catch (notifyErr) {
-      console.error('Failed to notify teacher of HOD decision:', notifyErr);
+      console.error('Failed to notify teacher/coordinator of HOD decision:', notifyErr);
     }
 
     res.status(200).json({ status: 'success', message: `Exam paper ${newStatus.toLowerCase()} successfully.` });

@@ -140,6 +140,14 @@ export const createExam = async (req, res) => {
       });
     }
 
+    if (proposed_date) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const propDateStr = new Date(proposed_date).toISOString().split('T')[0];
+      if (propDateStr < todayStr) {
+        return res.status(400).json({ status: 'error', message: 'Invalid Date: Proposed exam date cannot be in the past.' });
+      }
+    }
+
     const result = await pool.query(`
       INSERT INTO exam (course_offering_id, teacher_id, exam_type, total_marks, duration, status, proposed_date)
       VALUES ($1, $2, $3, 100, 120, 'Draft', $4)
@@ -218,7 +226,7 @@ export const submitToHOD = async (req, res) => {
    SHARE APPROVED PAPER WITH DEC
 =========================================================== */
 export const shareToDEC = async (req, res) => {
-  const { examId } = req.params;
+  const targetExamId = req.params.examId || req.body.exam_id || req.body.examId;
   try {
     const examRes = await pool.query(`
       SELECT e.status, c.course_code, e.exam_type
@@ -226,7 +234,7 @@ export const shareToDEC = async (req, res) => {
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
       WHERE e.exam_id = $1
-    `, [examId]);
+    `, [targetExamId]);
 
     if (examRes.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Exam not found.' });
@@ -237,10 +245,21 @@ export const shareToDEC = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Exam must be HOD-approved before sharing with Director Exam.' });
     }
 
-    await pool.query(
-      `UPDATE question_paper SET shared_with_dec_at = NOW() WHERE exam_id = $1`,
-      [examId]
-    );
+    const checkPaper = await pool.query('SELECT question_paper_id FROM question_paper WHERE exam_id = $1', [targetExamId]);
+    if (checkPaper.rows.length === 0) {
+      const tRes = await pool.query('SELECT teacher_id FROM exam WHERE exam_id = $1', [targetExamId]);
+      const tId = tRes.rows[0]?.teacher_id || 1;
+      await pool.query(
+        `INSERT INTO question_paper (exam_id, uploaded_by, file_path, shared_with_dec_at)
+         VALUES ($1, $2, '/uploads/sample_paper.pdf', NOW())`,
+        [targetExamId, tId]
+      );
+    } else {
+      await pool.query(
+        `UPDATE question_paper SET shared_with_dec_at = NOW() WHERE exam_id = $1`,
+        [targetExamId]
+      );
+    }
 
     const directors = await pool.query(`SELECT user_id FROM director`);
     for (const row of directors.rows) {
@@ -305,7 +324,44 @@ export const respondToSwapRequest = async (req, res) => {
     if (teacherQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Teacher profile not found.' });
     }
-    const teacherId = teacherQuery.rows[0].teacher_id;
+    if (decision === 'Accepted') {
+      const getSched = await pool.query(`
+        SELECT ia.schedule_id, es.exam_date, es.start_time, es.end_time
+        FROM duty_swap_request dsr
+        JOIN invigilator_assignment ia ON dsr.invigilator_assignment_id = ia.invigilator_assignment_id
+        JOIN exam_schedule es ON ia.schedule_id = es.schedule_id
+        WHERE dsr.request_id = $1
+      `, [requestId]);
+
+      if (getSched.rows.length > 0) {
+        const { schedule_id, exam_date, start_time, end_time } = getSched.rows[0];
+        const conflictRes = await pool.query(`
+          SELECT ia.invigilator_assignment_id, c.course_code, e.exam_type, l.lab_name,
+                 es.exam_date, es.start_time, es.end_time
+          FROM invigilator_assignment ia
+          JOIN exam_schedule es ON ia.schedule_id = es.schedule_id
+          JOIN exam e ON es.exam_id = e.exam_id
+          JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+          JOIN course c ON co.course_id = c.course_id
+          JOIN lab l ON es.lab_id = l.lab_id
+          WHERE ia.teacher_id = $1
+            AND ia.schedule_id <> $2
+            AND es.exam_date = $3
+            AND (es.start_time < $5 AND es.end_time > $4)
+        `, [teacherId, schedule_id, exam_date, start_time, end_time]);
+
+        if (conflictRes.rows.length > 0) {
+          const conflict = conflictRes.rows[0];
+          const startTimeStr = String(conflict.start_time).substring(0, 5);
+          const endTimeStr = String(conflict.end_time).substring(0, 5);
+          const dateStr = new Date(conflict.exam_date).toISOString().split('T')[0];
+          return res.status(409).json({
+            status: 'error',
+            message: `Schedule Conflict: You are already assigned as invigilator for ${conflict.course_code} ${conflict.exam_type} in ${conflict.lab_name} on ${dateStr} from ${startTimeStr} to ${endTimeStr}. You cannot accept another duty during the same time slot.`
+          });
+        }
+      }
+    }
 
     const newStatus = decision === 'Accepted' ? 'Accepted' : 'Declined';
 

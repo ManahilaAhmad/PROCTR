@@ -63,6 +63,22 @@ pool.query(`
       ADD CONSTRAINT unique_section_course_offering 
       UNIQUE (section_id, course_id, term_id, offering_type);
     END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'unique_exam_schedule_exam'
+    ) THEN
+      ALTER TABLE exam_schedule 
+      ADD CONSTRAINT unique_exam_schedule_exam 
+      UNIQUE (exam_id);
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'user_notification_notification_type_check'
+    ) THEN
+      ALTER TABLE user_notification DROP CONSTRAINT user_notification_notification_type_check;
+      ALTER TABLE user_notification ADD CONSTRAINT user_notification_notification_type_check
+      CHECK (notification_type IN ('Exam','Schedule','Approved','AI','MOSS','Invigilation','System'));
+    END IF;
   END $$;
 `).catch(err => console.log("Database constraint check:", err.message));
 

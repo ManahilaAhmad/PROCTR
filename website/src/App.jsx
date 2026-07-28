@@ -77,6 +77,8 @@ export default function App() {
         return <HODPage activePage="reports" setPage={navigateTo} user={user} />;
       case "director":
         return <DirectorPage activePage="overview" setPage={navigateTo} user={user} />;
+      case "dir-papers":
+        return <DirectorPage activePage="dir-papers" setPage={navigateTo} user={user} />;
       case "dir-timetable":
         return <DirectorPage activePage="dir-timetable" setPage={navigateTo} user={user} />;
       case "dir-labs":
@@ -112,7 +114,7 @@ export default function App() {
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "inv-schedule", "results", "reports", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["upload", "inv-schedule", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (
@@ -195,6 +197,7 @@ export default function App() {
         @keyframes barGrow  { from{width:0} to{width:var(--w)} }
         @keyframes liveBlip { 0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(239,68,68,.5)} 50%{transform:scale(1.15);box-shadow:0 0 0 8px rgba(239,68,68,0)} }
         @keyframes cardHover{ to{transform:translateY(-4px);box-shadow:0 16px 40px rgba(26,43,75,.13)} }
+        @keyframes slideDown { from{opacity:0;transform:translateY(-12px)} to{opacity:1;transform:translateY(0)} }
         .page-enter { animation: pageIn .35s cubic-bezier(.22,.68,0,1.1) both; }
         .stat-card  { animation: countUp .5s cubic-bezier(.22,.68,0,1.2) both; transition: transform .2s ease, box-shadow .2s ease; }
         .stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(26,43,75,.1); }

@@ -12,16 +12,18 @@ import statusBadge from "../components/common/statusBadge";
 
 export default function DirectorPage({ activePage, setPage }) {
   const [tab, setTab] = useState(
+    activePage === "dir-papers" ? "papers" :
     activePage === "dir-timetable" ? "timetable" :
-      activePage === "dir-labs" ? "labs" :
-        activePage === "dir-results" ? "results" : "overview"
+    activePage === "dir-labs" ? "labs" :
+    activePage === "dir-results" ? "results" : "overview"
   );
 
   useEffect(() => {
     setTab(
+      activePage === "dir-papers" ? "papers" :
       activePage === "dir-timetable" ? "timetable" :
-        activePage === "dir-labs" ? "labs" :
-          activePage === "dir-results" ? "results" : "overview"
+      activePage === "dir-labs" ? "labs" :
+      activePage === "dir-results" ? "results" : "overview"
     );
   }, [activePage]);
 

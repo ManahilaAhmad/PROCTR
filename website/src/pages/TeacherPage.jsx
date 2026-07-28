@@ -187,6 +187,24 @@ export default function TeacherPage({ activePage, setPage, user }) {
       })
       .catch(() => alert("Connection error."));
   }
+
+  function shareWithDEC(examId) {
+    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user?.userId }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "success") {
+          showToast("Exam paper shared with Director Examination!");
+          fetchData();
+        } else {
+          alert(data.message || "Failed to share exam paper.");
+        }
+      })
+      .catch(() => alert("Connection error."));
+  }
   function handleCourseSelect(e) {
     const coId = e.target.value;
     setSelectedCourseOffering(coId);
@@ -195,11 +213,15 @@ export default function TeacherPage({ activePage, setPage, user }) {
     if (found) setNewCourse(found.course_code);
   }
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   function createExam() {
+    if (isSubmitting) return;
     if (!selectedCourseOffering || !newTitle || !newDate) {
       alert("Please fill in all fields.");
       return;
     }
+    setIsSubmitting(true);
     fetch("http://localhost:5000/api/exams", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -213,6 +235,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
     })
       .then(res => res.json())
       .then(data => {
+        setIsSubmitting(false);
         if (data.status === "success") {
           setShowCreate(false);
           setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate("");
@@ -222,7 +245,10 @@ export default function TeacherPage({ activePage, setPage, user }) {
           alert(data.message || "Failed to create exam.");
         }
       })
-      .catch(() => alert("Connection error."));
+      .catch(() => {
+        setIsSubmitting(false);
+        alert("Connection error.");
+      });
   }
   function submitSwap() {
     if (!swapFor || !swapReason.trim()) return;
@@ -374,10 +400,12 @@ export default function TeacherPage({ activePage, setPage, user }) {
               </select>
             </div>
 
-            <Input label="Proposed Exam Date" type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
+            <Input label="Proposed Exam Date" type="date" min={new Date().toISOString().split('T')[0]} value={newDate} onChange={e => setNewDate(e.target.value)} />
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => { setShowCreate(false); setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate(""); }}>Cancel</Btn>
-              <Btn variant="navy"  style={{ flex: 1, justifyContent: "center" }} onClick={createExam}>Save Draft</Btn>
+              <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => { setShowCreate(false); setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate(""); }} disabled={isSubmitting}>Cancel</Btn>
+              <Btn variant="navy"  style={{ flex: 1, justifyContent: "center", opacity: isSubmitting ? 0.6 : 1 }} onClick={createExam} disabled={isSubmitting}>
+                {isSubmitting ? "Creating..." : "Save Draft"}
+              </Btn>
             </div>
           </div>
         </div>

@@ -22,9 +22,11 @@ export default function StudentPage({ activePage, user }) {
   const [schedule, setSchedule] = useState([]);
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/notifications")
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setNotifications(data.notifications); });
+    if (user?.userId) {
+      fetch(`http://localhost:5000/api/notifications/${user.userId}`)
+        .then(res => res.json())
+        .then(data => { if (data.status === "success") setNotifications(data.notifications); });
+    }
 
     if (user?.userId) {
       fetch(`http://localhost:5000/api/student/${user.userId}/schedule`)
@@ -254,13 +256,13 @@ export default function StudentPage({ activePage, user }) {
             {notifications.length === 0 ? (
               <div style={{ textAlign: "center", padding: "20px 0", color: C.grey400, fontSize: 13 }}>No announcements yet.</div>
             ) : notifications.map(n => {
-              const isCritical = n.audience_type === "Critical" || n.audience_type === "Invigilators";
+              const isBroadcast = n.source === "broadcast";
               return (
-                <div key={n.announcement_id} style={{ padding: "16px 20px", borderRadius: 10, background: isCritical ? "rgba(225,29,72,.05)" : C.grey50, border: `1px solid ${isCritical ? "#f43f5e33" : C.grey200}` }}>
+                <div key={n.id} style={{ padding: "16px 20px", borderRadius: 10, background: !n.is_read ? "rgba(20,184,166,.06)" : C.grey50, border: `1px solid ${!n.is_read ? "#14b8a633" : C.grey200}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
                     <div>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: isCritical ? C.red : C.teal, textTransform: "uppercase", letterSpacing: 0.5 }}>{n.sender_name || "Faculty"}</span>
-                      <h4 style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 800, color: C.navy }}>{n.subject}</h4>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: isBroadcast ? C.teal : C.navy, textTransform: "uppercase", letterSpacing: 0.5 }}>{n.sender_name || "System"}{n.scope_label ? ` · ${n.scope_label}` : ""}</span>
+                      <h4 style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 800, color: C.navy }}>{n.title}</h4>
                     </div>
                     <span style={{ fontSize: 12, color: C.grey400 }}>{new Date(n.created_at).toLocaleDateString()}</span>
                   </div>
