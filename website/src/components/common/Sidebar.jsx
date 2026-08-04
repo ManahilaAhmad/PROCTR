@@ -5,6 +5,8 @@ const navItems = {
   teacher: [
     { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
     { id: "upload", icon: Icon.upload, label: "Upload Exam" },
+    { id: "live-monitor", icon: Icon.bell, label: "Live Monitor" },
+    { id: "exam-reports", icon: Icon.fileText, label: "Post-Exam Reports" },
     { id: "__divider__", icon: null, label: "Invigilation Duty", isDivider: true },
     { id: "inv-schedule", icon: Icon.clipboard, label: "My Schedule" },
   ],

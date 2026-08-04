@@ -5,6 +5,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+
 // Route files (namespaced)
 import authRoutes          from './routes/authRoutes.js';
 import teacherRoutes       from './routes/teacherRoutes.js';
@@ -14,9 +17,13 @@ import decRoutes           from './routes/decRoutes.js';
 import studentRoutes       from './routes/studentRoutes.js';
 import coordinatorRoutes   from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
+import proctoringRoutes    from './routes/proctoringRoutes.js';
+import whitelistRoutes     from './routes/whitelistRoutes.js';
+import examFileRoutes      from './routes/examFileRoutes.js';
 
-// Controllers (for legacy flat-path aliases)
-import { listTeachers, getSharedPapers }                                         from './controllers/teacherController.js';
+// Controllers & Services
+import { setIO }                                                               from './controllers/proctoringController.js';
+import { listTeachers, getSharedPapers }                                       from './controllers/teacherController.js';
 import { assignInvigilator, createSwapRequest, listSwapRequests, reviewSwapRequest } from './controllers/decController.js';
 import { getSchedule as coordGetSchedule, getLabs }                          from './controllers/coordinatorController.js';
 
@@ -25,7 +32,37 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const app  = express();
+const app    = express();
+const server = http.createServer(app);
+const io     = new SocketIOServer(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+setIO(io);
+
+// Socket.IO Room Management for Live Proctoring Dashboard
+io.on('connection', (socket) => {
+  console.log(`[Socket.IO] Client connected: ${socket.id}`);
+
+  socket.on('join_exam', (examId) => {
+    const room = `exam:${examId}`;
+    socket.join(room);
+    console.log(`[Socket.IO] Client ${socket.id} joined ${room}`);
+  });
+
+  socket.on('leave_exam', (examId) => {
+    const room = `exam:${examId}`;
+    socket.leave(room);
+    console.log(`[Socket.IO] Client ${socket.id} left ${room}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 
 // ── Core Middleware ─────────────────────────────────────────
@@ -91,6 +128,9 @@ app.use('/api/dec',           decRoutes);            // POST /api/dec/invigilato
 app.use('/api/student',       studentRoutes);        // GET  /api/student/:userId/schedule
 app.use('/api/coordinator',   coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
+app.use('/api/proctoring',    proctoringRoutes);     // Real-time events & fuzzy evaluation
+app.use('/api/whitelist',     whitelistRoutes);      // Exam whitelist & autocomplete
+app.use('/api/exam-files',    examFileRoutes);       // Multi-file exam attachments
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
@@ -119,6 +159,6 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start Server ────────────────────────────────────────────
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`PROCTR Backend Server is listening on port ${PORT}`);
 });

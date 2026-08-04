@@ -11,6 +11,7 @@ import StatCard from "../components/common/StatCard";
 import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
 import NotificationBell from "../components/common/NotificationBell";
+import WhitelistBuilder from "../components/common/WhitelistBuilder";
 
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -78,6 +79,8 @@ export default function TeacherPage({ activePage, setPage, user }) {
     validateAndSetFile(e.dataTransfer.files?.[0]);
   }
 
+  const [selectedFileType, setSelectedFileType] = useState("question_paper");
+
   function handlePaperUpload() {
     if (!selectedExamForUpload) { alert("Please select an exam first."); return; }
     if (!selectedFile) { alert("Please choose a file to upload."); return; }
@@ -85,24 +88,25 @@ export default function TeacherPage({ activePage, setPage, user }) {
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("exam_id", selectedExamForUpload);
+    formData.append("file_type", selectedFileType);
     if (uploadNotes.trim()) formData.append("notes", uploadNotes.trim());
 
     setUploading(true);
-    fetch("http://localhost:5000/api/exams/upload", {
+    fetch("http://localhost:5000/api/exam-files/upload", {
       method: "POST",
-      body: formData, // no Content-Type header — browser sets multipart boundary automatically
+      body: formData,
     })
       .then(res => res.json())
       .then(data => {
         setUploading(false);
         if (data.status === "success") {
-          showToast("Exam paper uploaded successfully!");
+          showToast(`${selectedFileType.replace("_", " ").toUpperCase()} uploaded successfully!`);
           setSelectedExamForUpload("");
           setSelectedFile(null);
           setUploadNotes("");
           fetchData();
         } else {
-          alert(data.message || "Failed to upload exam paper.");
+          alert(data.message || "Failed to upload file.");
         }
       })
       .catch(() => {
@@ -401,6 +405,9 @@ export default function TeacherPage({ activePage, setPage, user }) {
             </div>
 
             <Input label="Proposed Exam Date" type="date" min={new Date().toISOString().split('T')[0]} value={newDate} onChange={e => setNewDate(e.target.value)} />
+            
+            <WhitelistBuilder onChange={(domains) => console.log('Whitelist updated:', domains)} />
+
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => { setShowCreate(false); setSelectedCourseOffering(""); setNewTitle(""); setNewCourse(""); setNewDate(""); }} disabled={isSubmitting}>Cancel</Btn>
               <Btn variant="navy"  style={{ flex: 1, justifyContent: "center", opacity: isSubmitting ? 0.6 : 1 }} onClick={createExam} disabled={isSubmitting}>
@@ -525,8 +532,15 @@ export default function TeacherPage({ activePage, setPage, user }) {
                 {e.exam_status === "Approved" && !e.shared_with_dec_at && (
                   <Btn variant="navy" size="sm" onClick={() => shareWithDEC(e.exam_id)}>Share with Director Exam</Btn>
                 )}
-                {e.exam_status === "Approved" && e.shared_with_dec_at && (
-                  <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>✓ Shared with Director Exam</span>
+                {e.exam_status === "Approved" && (
+                  <>
+                    <Btn variant="primary" size="sm" onClick={() => setPage && setPage("live-monitor")}>
+                      📡 Live Monitor
+                    </Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => setPage && setPage("exam-reports")}>
+                      📊 Post-Exam Report
+                    </Btn>
+                  </>
                 )}
                 {e.exam_status === "PendingHOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
                 {e.exam_status === "Rejected" && (
@@ -545,6 +559,13 @@ export default function TeacherPage({ activePage, setPage, user }) {
             <Select label="Select Exam" value={selectedExamForUpload} onChange={e => setSelectedExamForUpload(e.target.value)}>
               <option value="">Choose exam…</option>
               {exams.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} – {e.section_name}</option>)}
+            </Select>
+
+            <Select label="File Attachment Type" value={selectedFileType} onChange={e => setSelectedFileType(e.target.value)}>
+              <option value="question_paper">Question Paper (PDF/DOCX)</option>
+              <option value="rubric">Rubric File (PDF/DOCX)</option>
+              <option value="starter_file">Starter Code Files (ZIP)</option>
+              <option value="word_template">Word Report Template (DOCX)</option>
             </Select>
 
             <input
