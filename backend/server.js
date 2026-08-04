@@ -14,6 +14,7 @@ import decRoutes           from './routes/decRoutes.js';
 import studentRoutes       from './routes/studentRoutes.js';
 import coordinatorRoutes   from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
+import desktopRoutes       from './routes/desktopRoutes.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers }                                         from './controllers/teacherController.js';
@@ -91,6 +92,7 @@ app.use('/api/dec',           decRoutes);            // POST /api/dec/invigilato
 app.use('/api/student',       studentRoutes);        // GET  /api/student/:userId/schedule
 app.use('/api/coordinator',   coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
+app.use('/api/desktop',       desktopRoutes);        // Desktop app sessions & violations
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,

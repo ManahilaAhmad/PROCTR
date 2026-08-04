@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PROCTR — Secure Exam Desktop Client</title>
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+
+  <!-- ─── LOGIN VIEW ─────────────────────────────────── -->
+  <div id="view-login" class="view active">
+    <div class="login-bg">
+      <div class="login-card">
+
+        <!-- Logo — exact match to website LoginPage.jsx -->
+        <div class="login-logo">
+          <div class="logo-badge">
+            <div class="logo-badge-ring"></div>
+            <div class="logo-badge-inner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+          </div>
+          <div>
+            <div class="login-logo-name">PROCTR</div>
+            <div class="login-logo-sub">Secure Lab Exams</div>
+          </div>
+        </div>
+
+        <h2 class="login-welcome">Welcome back</h2>
+        <p class="login-sub">Sign in with your university credentials</p>
+
+        <div id="login-error" class="error-banner" style="display:none;"></div>
+
+        <div class="role-tabs">
+          <button class="role-tab active" data-role="student" id="tab-student">Student</button>
+          <button class="role-tab" data-role="teacher" id="tab-teacher">Teacher / Invigilator</button>
+        </div>
+
+        <form id="login-form">
+          <div class="field-group">
+            <label id="login-label">Registration No / Email</label>
+            <input type="text" id="login-username" placeholder="e.g. 231593" autocomplete="off" required />
+          </div>
+          <div class="field-group">
+            <label>Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" required />
+          </div>
+          <button type="submit" class="btn-primary" id="login-btn">
+            <span id="login-btn-text">Sign in to PROCTR</span>
+          </button>
+        </form>
+
+        <div class="login-footer">Need access? Contact your department administrator</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── STUDENT DASHBOARD VIEW ────────────────────── -->
+  <div id="view-student" class="view">
+    <div class="app-shell">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-badge-sm">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="sidebar-brand-text">
+            <span class="sidebar-brand-name">PROCTR</span>
+            <span class="sidebar-brand-role">Student</span>
+          </div>
+        </div>
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-section="s-dashboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span>Dashboard</span>
+          </button>
+          <button class="nav-item" data-section="s-profile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>My Profile</span>
+          </button>
+          <button class="nav-item" data-section="s-violations">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            <span>Security Log</span>
+          </button>
+          <button class="nav-item" data-section="s-submission">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <span>Submit Work</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="user-chip" id="student-chip">
+            <div class="user-avatar" id="student-avatar">S</div>
+            <div>
+              <div class="user-name" id="student-name">Student</div>
+              <div class="user-role">Exam Candidate</div>
+            </div>
+          </div>
+          <button class="btn-logout" id="student-logout">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Log out
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content">
+
+        <!-- ── DASHBOARD SECTION ── -->
+        <section id="section-s-dashboard" class="content-section active">
+          <div class="page-header">
+            <div>
+              <h2><span id="greeting-text">Good morning</span>, <span id="student-first-name">Student</span> 👋</h2>
+              <p class="subtitle">Here's your exam schedule and enrolled courses</p>
+            </div>
+            <div class="timer-badge" id="student-timer" style="display:none;">01:30:00</div>
+          </div>
+
+          <!-- Join Exam Session Card -->
+          <div class="card" id="join-exam-card" style="margin-bottom:20px; border-left:4px solid var(--teal);">
+            <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+              <span>🔑 Join Exam Session</span>
+            </div>
+            <p style="font-size:13px; color:var(--grey-500); margin-bottom:16px;">
+              Enter the Exam ID and Passcode provided by your invigilator to join the exam session and create your local exam workspace folder.
+            </p>
+            <div id="join-exam-error" class="error-banner" style="display:none;"></div>
+            <form id="join-exam-form" style="display:flex; gap:12px; align-items:flex-end;">
+              <div style="flex:1;">
+                <label style="display:block; font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase; margin-bottom:6px;">Exam ID / Course Code</label>
+                <input type="text" id="join-exam-id" placeholder="e.g. CS601" class="field-input" required />
+              </div>
+              <div style="flex:1;">
+                <label style="display:block; font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase; margin-bottom:6px;">Exam Passcode</label>
+                <input type="password" id="join-exam-key" placeholder="Enter passcode" class="field-input" required />
+              </div>
+              <button type="submit" class="btn-primary" id="btn-join-exam" style="padding:11px 20px; width:auto; white-space:nowrap;">
+                Join &amp; Create Exam Folder
+              </button>
+            </form>
+          </div>
+
+          <!-- Active Exam Banner (Shown after joining) -->
+          <div class="exam-banner" id="exam-banner" style="display:none;">
+            <div class="exam-banner-left">
+              <div class="exam-banner-icon">📋</div>
+              <div>
+                <div class="exam-banner-course" id="active-exam-course">CS601 — Data Structures &amp; Algorithms</div>
+                <div class="exam-banner-meta" id="active-exam-meta">Exam Workspace Created &nbsp;•&nbsp; Room: CS-Lab-2</div>
+              </div>
+            </div>
+            <div class="exam-banner-right" style="display:flex; align-items:center; gap:12px;">
+              <button class="btn-secondary" id="btn-open-workspace" style="padding: 8px 16px; font-size: 12px; display:inline-block;">
+                📁 Open Exam Folder
+              </button>
+              <div class="exam-time-pill">
+                <span class="blip-dot"></span>
+                <span id="exam-status-text">Waiting for invigilator to start timer...</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Secure Read-Only Exam Document Viewer (Revealed by Invigilator) -->
+          <div class="card" id="exam-document-card" style="display:none; margin-bottom:20px; border-left:4px solid var(--navy);">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+              <span>📜 Exam Question Paper (Read-Only)</span>
+              <span class="status-pill active-pill" style="font-size:10px;">PROCTR SECURE VIEWER</span>
+            </div>
+            <div id="exam-doc-notice" style="font-size:12px; color:var(--grey-500); margin-bottom:12px; background:var(--grey-100); padding:10px 14px; border-radius:6px;">
+              🔒 <strong>Security Restriction:</strong> Downloading, printing, copying, or capturing this document is strictly monitored. Solve your code in your workspace folder.
+            </div>
+            <div class="exam-paper-body" id="exam-paper-content" style="user-select:none; -webkit-user-select:none; background:#fff; border:1px solid var(--grey-200); padding:20px; border-radius:8px; font-family:var(--font-mono); font-size:13px; line-height:1.6; max-height:350px; overflow-y:auto; position:relative;">
+              <div style="text-align:center; padding:30px; color:var(--grey-500);">
+                ⏳ Waiting for the invigilator to reveal the exam question paper...
+              </div>
+            </div>
+          </div>
+
+          <!-- Exam Schedule Table -->
+          <div class="card" style="margin-bottom:18px;">
+            <div class="card-title">📅 Exam Schedule</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Code</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Room</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="student-schedule-tbody">
+                  <tr>
+                    <td colspan="7" style="text-align:center; color:var(--grey-500); padding:24px;">Loading schedule from database...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Enrolled Courses -->
+          <div class="card">
+            <div class="card-title">📚 Enrolled Courses</div>
+            <div class="courses-grid" id="student-courses-grid">
+              <div class="empty-state" style="grid-column: 1 / -1; padding:24px;">Loading enrolled courses...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── PROFILE SECTION ── -->
+        <section id="section-s-profile" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>My Profile</h2>
+              <p class="subtitle">Your student information and academic details</p>
+            </div>
+          </div>
+
+          <!-- Profile Header Card -->
+          <div class="profile-header-card">
+            <div class="profile-avatar-large" id="profile-avatar-large">SR</div>
+            <div class="profile-header-info">
+              <div class="profile-name" id="profile-full-name">Shanawar Raza</div>
+              <div class="profile-reg">Registration No: <strong id="profile-reg-no">231593</strong></div>
+              <div class="profile-dept">Department of Computer Science &amp; IT</div>
+              <div class="profile-badges">
+                <span class="info-pill">6th Semester</span>
+                <span class="info-pill">BSCS</span>
+                <span class="info-pill">Air University Islamabad</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Profile Details Grid -->
+          <div class="profile-grid">
+            <div class="card">
+              <div class="card-title">Personal Information</div>
+              <div class="profile-fields">
+                <div class="profile-field">
+                  <div class="field-lbl">Full Name</div>
+                  <div class="field-val" id="pf-name">--</div>
+                </div>
+                <div class="profile-field">
+                  <div class="field-lbl">Registration No</div>
+                  <div class="field-val mono" id="pf-reg">--</div>
+                </div>
+                <div class="profile-field">
+                  <div class="field-lbl">Email Address</div>
+                  <div class="field-val" id="pf-email">--</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">Academic Information</div>
+              <div class="profile-fields">
+                <div class="profile-field">
+                  <div class="field-lbl">Program</div>
+                  <div class="field-val" id="pf-program">BS Computer Science</div>
+                </div>
+                <div class="profile-field">
+                  <div class="field-lbl">Department</div>
+                  <div class="field-val" id="pf-department">Computer Science</div>
+                </div>
+                <div class="profile-field">
+                  <div class="field-lbl">Semester</div>
+                  <div class="field-val" id="pf-semester">6th Semester</div>
+                </div>
+                <div class="profile-field">
+                  <div class="field-lbl">Batch / Section</div>
+                  <div class="field-val mono" id="pf-section">BSCS-2023</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Security & Change Password Card -->
+          <div class="card" style="margin-top:16px;">
+            <div class="card-title">🔒 Security &amp; Change Password</div>
+            <div id="change-pwd-error" class="error-banner" style="display:none; margin-bottom:14px;"></div>
+            <div id="change-pwd-success" class="submit-status" style="display:none; margin-bottom:14px;"></div>
+            <form id="change-pwd-form" style="display:flex; flex-direction:column; gap:14px; max-width:420px;">
+              <div>
+                <label style="display:block; font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase; margin-bottom:6px;">Current Password</label>
+                <input type="password" id="pwd-current" class="field-input" placeholder="Enter current password" required />
+              </div>
+              <div>
+                <label style="display:block; font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase; margin-bottom:6px;">New Password</label>
+                <input type="password" id="pwd-new" class="field-input" placeholder="Enter new password (min 6 characters)" required />
+              </div>
+              <div>
+                <label style="display:block; font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase; margin-bottom:6px;">Confirm New Password</label>
+                <input type="password" id="pwd-confirm" class="field-input" placeholder="Confirm new password" required />
+              </div>
+              <button type="submit" class="btn-primary" id="btn-change-pwd" style="padding:11px 20px; width:auto; align-self:flex-start;">
+                Update Password
+              </button>
+            </form>
+          </div>
+
+          <!-- Exam Session Info -->
+          <div class="card" style="margin-top:16px;">
+            <div class="card-title" style="display:flex;align-items:center;gap:8px;">
+              <span class="blip-dot"></span> Current Exam Session — Monitoring Status
+            </div>
+            <div class="sensor-grid">
+              <div class="sensor-item"><span class="sensor-dot active"></span>USB Insertion Guard (H1)</div>
+              <div class="sensor-item"><span class="sensor-dot active"></span>Clipboard Monitor (H4a)</div>
+              <div class="sensor-item"><span class="sensor-dot active"></span>Window Focus Tracker (H2, H3)</div>
+              <div class="sensor-item"><span class="sensor-dot active"></span>File System Watcher (H4b)</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── SECURITY LOG SECTION ── -->
+        <section id="section-s-violations" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>Security Event Log</h2>
+              <p class="subtitle">All behavioural violations detected in this exam session</p>
+            </div>
+            <span class="badge-count" id="violation-badge">0 Events</span>
+          </div>
+          <div class="feed-list" id="student-feed">
+            <div class="empty-state">No security events detected. All sensors are active and monitoring.</div>
+          </div>
+        </section>
+
+        <!-- ── SUBMIT SECTION ── -->
+        <section id="section-s-submission" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>Submit Your Work</h2>
+              <p class="subtitle">Submit your solution files to the invigilator's local server</p>
+            </div>
+          </div>
+          <div class="submit-card">
+            <div class="submit-icon">📤</div>
+            <p>Your solution files will be collected from your exam workspace folder and submitted to the invigilator's server. Make sure all files are saved before submitting.</p>
+            <button class="btn-primary" id="btn-submit-exam">Submit Exam Work</button>
+            <div id="submit-status" style="display:none;" class="submit-status"></div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ─── TEACHER DASHBOARD VIEW ─────────────────────── -->
+  <div id="view-teacher" class="view">
+    <div class="app-shell">
+      <!-- Sidebar -->
+      <aside class="sidebar teacher-sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-badge small">P</div>
+          <span>PROCTR</span>
+        </div>
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-section="t-overview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span>Overview</span>
+          </button>
+          <button class="nav-item" data-section="t-monitoring">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Live Monitoring</span>
+          </button>
+          <button class="nav-item" data-section="t-whitelist">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            <span>Software Whitelist</span>
+          </button>
+          <button class="nav-item" data-section="t-submissions">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Submissions</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="user-chip">
+            <div class="user-avatar teacher-av" id="teacher-avatar">T</div>
+            <div>
+              <div class="user-name" id="teacher-name">Teacher</div>
+              <div class="user-role">Invigilator</div>
+            </div>
+          </div>
+          <button class="btn-logout" id="teacher-logout">Sign Out</button>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Overview Section -->
+        <section id="section-t-overview" class="content-section active">
+          <div class="page-header">
+            <div>
+              <h2>Exam Control Centre</h2>
+              <p class="subtitle" id="teacher-exam-title">No active exam session</p>
+            </div>
+            <div class="live-badge"><span class="blip-dot"></span> LIVE</div>
+          </div>
+          <!-- Active Invigilation Session Control Card -->
+          <div class="card" id="invigilator-session-card" style="display:none; margin-bottom:20px; border-left:4px solid var(--teal); background:var(--teal-light, #f0fdfa);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+              <div>
+                <div style="font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase;">Active Invigilation Session</div>
+                <div style="font-size:20px; font-weight:800; color:var(--navy); margin-top:2px;" id="inv-session-code">CS601</div>
+              </div>
+              <div style="background:#fff; padding:8px 16px; border-radius:8px; border:1px solid var(--grey-200); text-align:center;">
+                <div style="font-size:10px; font-weight:700; color:var(--grey-500); text-transform:uppercase;">Student Passcode</div>
+                <div style="font-size:22px; font-weight:900; color:var(--teal); letter-spacing:4px;" id="inv-passcode">----</div>
+              </div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn-primary" id="btn-reveal-paper" style="padding:10px 16px; font-size:12px; width:auto;">
+                  📜 Reveal Paper to Students
+                </button>
+                <button class="btn-primary" id="btn-start-exam-timer" style="padding:10px 16px; font-size:12px; width:auto; background:var(--navy);">
+                  ⏱️ Start Exam Timer
+                </button>
+              </div>
+            </div>
+            <div id="inv-session-msg" style="margin-top:12px; font-size:12px; color:var(--grey-600); display:none;"></div>
+          </div>
+
+          <div class="stats-row">
+            <div class="stat-card teal">
+              <div class="stat-icon">👥</div>
+              <div>
+                <div class="stat-label">Connected Students</div>
+                <div class="stat-val" id="stat-connected">0</div>
+              </div>
+            </div>
+            <div class="stat-card red">
+              <div class="stat-icon">🚨</div>
+              <div>
+                <div class="stat-label">Total Violations</div>
+                <div class="stat-val" id="stat-total-violations">0</div>
+              </div>
+            </div>
+            <div class="stat-card amber">
+              <div class="stat-icon">⏱️</div>
+              <div>
+                <div class="stat-label">Exam Time Left</div>
+                <div class="stat-val" id="teacher-timer">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- My Assigned Exams Table -->
+          <div class="card" style="margin-top:18px;">
+            <div class="card-title">📅 My Course &amp; Invigilation Schedule</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Code</th>
+                    <th>Date &amp; Time</th>
+                    <th>Room</th>
+                    <th>My Role</th>
+                    <th>Invigilator</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="teacher-schedule-tbody">
+                  <tr>
+                    <td colspan="7" style="text-align:center; color:var(--grey-500); padding:24px;">Loading exam schedule from database...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Live Monitoring Section -->
+        <section id="section-t-monitoring" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>Live Security Alerts</h2>
+              <p class="subtitle">Real-time violation feed from all student PCs</p>
+            </div>
+            <span class="badge-count" id="teacher-alert-count">0 Alerts</span>
+          </div>
+          <div class="feed-list" id="teacher-feed">
+            <div class="empty-state">Monitoring is active. No violations detected yet.</div>
+          </div>
+        </section>
+
+        <!-- Software Whitelist Section -->
+        <section id="section-t-whitelist" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>Software Whitelist</h2>
+              <p class="subtitle">Configure which applications students are permitted to use</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="whitelist-add-row">
+              <input type="text" id="whitelist-input" placeholder="e.g. codeblocks.exe" class="field-input" />
+              <button class="btn-add" id="btn-add-whitelist">Add App</button>
+            </div>
+            <div class="whitelist-list" id="whitelist-items"></div>
+          </div>
+        </section>
+
+        <!-- Submissions Section -->
+        <section id="section-t-submissions" class="content-section">
+          <div class="page-header">
+            <div>
+              <h2>Student Submissions</h2>
+              <p class="subtitle">Submitted files from all students in this session</p>
+            </div>
+          </div>
+          <div class="submissions-list" id="submissions-list">
+            <div class="empty-state">No submissions received yet.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ─── CLOSE WARNING MODAL ────────────────────────── -->
+  <div class="modal-overlay" id="warning-modal">
+    <div class="modal-card danger">
+      <div class="modal-icon">⚠️</div>
+      <h2>Exam Session Active</h2>
+      <p>Closing PROCTR during an active exam is a violation and will be reported to the invigilator.</p>
+      <button class="btn-primary" id="modal-close-btn">Return to Exam</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

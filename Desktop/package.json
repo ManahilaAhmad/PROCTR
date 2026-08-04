@@ -1,0 +1,21 @@
+{
+  "name": "proctr-desktop",
+  "version": "1.0.0",
+  "description": "PROCTR Desktop Application - Intelligent Secure Lab Examination System",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": [
+    "proctr",
+    "exam-proctoring",
+    "electron",
+    "python"
+  ],
+  "author": "PROCTR Development Team",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.2.0"
+  }
+}
