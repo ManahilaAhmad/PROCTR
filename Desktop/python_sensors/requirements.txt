@@ -1,0 +1,6 @@
+# PROCTR Background OS Sensors Engine Dependencies
+psutil>=5.9.0
+watchdog>=3.0.0
+pynput>=1.7.6
+pywin32>=306; sys_platform == 'win32'
+wmi>=1.5.1; sys_platform == 'win32'

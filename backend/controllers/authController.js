@@ -11,13 +11,24 @@ export const login = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'All fields are required.' });
     }
 
-    const result = await pool.query(
-      'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active, profile_picture_url FROM users WHERE email = $1 AND user_type = $2',
-      [email, user_type]
-    );
+    let result;
+    if (user_type === 'student') {
+      result = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.email, u.password_hash, u.user_type, u.is_active, u.profile_picture_url 
+         FROM users u 
+         LEFT JOIN student s ON u.user_id = s.user_id 
+         WHERE (u.email = $1 OR s.registration_no = $1) AND u.user_type = $2`,
+        [email, user_type]
+      );
+    } else {
+      result = await pool.query(
+        'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active, profile_picture_url FROM users WHERE email = $1 AND user_type = $2',
+        [email, user_type]
+      );
+    }
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ status: 'error', message: 'Invalid email or user role.' });
+      return res.status(401).json({ status: 'error', message: 'Invalid email/registration number or user role.' });
     }
 
     const user = result.rows[0];

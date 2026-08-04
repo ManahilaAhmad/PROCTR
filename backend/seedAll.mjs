@@ -336,9 +336,9 @@ try {
   const bscs2023Id = batchIds['CS'][2023];
 
   const studentData = [
-    { key: 'shanawar',  uid: u.shanawar,  reg: '2023-CS-001' },
-    { key: 'manahil',   uid: u.manahil,   reg: '2023-CS-002' },
-    { key: 'sumaiyyah', uid: u.sumaiyyah, reg: '2023-CS-003' },
+    { key: 'shanawar',  uid: u.shanawar,  reg: '231593' },
+    { key: 'manahil',   uid: u.manahil,   reg: '231594' },
+    { key: 'sumaiyyah', uid: u.sumaiyyah, reg: '231595' },
   ];
   for (const s of studentData) {
     const r = await insert(

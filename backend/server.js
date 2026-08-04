@@ -20,6 +20,7 @@ import notificationsRoutes from './routes/notificationsRoutes.js';
 import proctoringRoutes    from './routes/proctoringRoutes.js';
 import whitelistRoutes     from './routes/whitelistRoutes.js';
 import examFileRoutes      from './routes/examFileRoutes.js';
+import desktopRoutes       from './routes/desktopRoutes.js';
 
 // Controllers & Services
 import { setIO }                                                               from './controllers/proctoringController.js';
@@ -131,6 +132,7 @@ app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoi
 app.use('/api/proctoring',    proctoringRoutes);     // Real-time events & fuzzy evaluation
 app.use('/api/whitelist',     whitelistRoutes);      // Exam whitelist & autocomplete
 app.use('/api/exam-files',    examFileRoutes);       // Multi-file exam attachments
+app.use('/api/desktop',       desktopRoutes);        // Desktop app sessions & violations
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
