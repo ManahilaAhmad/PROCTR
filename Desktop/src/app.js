@@ -17,6 +17,44 @@ const whitelist = [
   'devcpp.exe', 'notepad++.exe', 'python.exe', 'cmd.exe', 'powershell.exe'
 ];
 
+// ─── SESSION PERSISTENCE (survive normal + forced reloads) ─────────
+function saveSession() {
+  if (!currentUser) return;
+  localStorage.setItem('proctr_session', JSON.stringify({ role: currentRole, user: currentUser }));
+}
+
+function clearSession() {
+  localStorage.removeItem('proctr_session');
+}
+
+function restoreSession() {
+  try {
+    const saved = localStorage.getItem('proctr_session');
+    if (!saved) return;
+    const { role, user } = JSON.parse(saved);
+    if (!user || !role) return;
+
+    currentRole = role;
+    currentUser = user;
+
+    if (role === 'student') {
+      populateStudentProfile(user);
+      showView('view-student');
+      loadStudentData(user.userId);
+    } else {
+      populateTeacherHeader(user);
+      showView('view-teacher');
+      showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
+      renderWhitelist();
+      loadTeacherData(user.userId);
+    }
+    return true;
+  } catch (e) {
+    clearSession();
+    return false;
+  }
+}
+
 // ─── UTILITY ─────────────────────────────────────────────────────
 function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -90,7 +128,8 @@ loginForm.addEventListener('submit', async (e) => {
 
     if (res.ok && data.status === 'success') {
       currentUser = data.user;
-      
+      saveSession(); // Persist session so reloads don't drop back to login
+
       if (currentRole === 'student') {
         populateStudentProfile(currentUser);
         showView('view-student');
@@ -119,6 +158,9 @@ loginForm.addEventListener('submit', async (e) => {
 document.getElementById('student-logout').addEventListener('click', () => {
   currentUser = null;
   currentSessionId = null;
+  currentRole = 'student';
+  clearSession(); // Wipe saved session on explicit logout
+  if (studentSchedulePollInterval) clearInterval(studentSchedulePollInterval);
   showView('view-login');
   loginForm.reset();
   loginBtn.disabled = false;
@@ -127,6 +169,7 @@ document.getElementById('student-logout').addEventListener('click', () => {
 
 document.getElementById('teacher-logout').addEventListener('click', () => {
   currentUser = null;
+  clearSession(); // Wipe saved session on explicit logout
   showView('view-login');
   loginForm.reset();
 });
@@ -208,23 +251,36 @@ function populateTeacherHeader(user) {
   document.getElementById('teacher-exam-title').textContent = `${user.departmentName || 'Computer Science'} — Lab Session Active`;
 }
 
-// ─── FETCH LIVE STUDENT DATA FROM DB (WITH AUTO-REFRESH) ──────────────
+// ─── FETCH LIVE STUDENT DATA FROM DB (WITH SMART BACKOFF) ──────────────
 let studentSchedulePollInterval = null;
+let studentScheduleFailCount = 0;
 
 async function loadStudentData(userId) {
   fetchStudentScheduleData(userId);
 
-  // Auto-refresh student schedule table every 3 seconds so live session status updates instantly
+  // Start polling with smart backoff: starts at 5s, backs off to 30s on failures
+  scheduleStudentPoll(userId);
+}
+
+function scheduleStudentPoll(userId) {
   if (studentSchedulePollInterval) clearInterval(studentSchedulePollInterval);
-  studentSchedulePollInterval = setInterval(() => fetchStudentScheduleData(userId), 3000);
+  // Base interval: 5s when working, up to 30s after repeated failures
+  const interval = Math.min(5000 + studentScheduleFailCount * 5000, 30000);
+  studentSchedulePollInterval = setInterval(() => fetchStudentScheduleData(userId), interval);
 }
 
 async function fetchStudentScheduleData(userId) {
   try {
     const res = await fetch(`${API_BASE}/student/${userId}/schedule`);
-    if (!res.ok) throw new Error('Schedule API error');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const schedule = data.schedule || [];
+
+    // Reset fail count on success & tighten poll interval back to 5s
+    if (studentScheduleFailCount > 0) {
+      studentScheduleFailCount = 0;
+      scheduleStudentPoll(userId);
+    }
 
     renderStudentScheduleTable(schedule);
     renderEnrolledCoursesGrid(schedule);
@@ -242,9 +298,11 @@ async function fetchStudentScheduleData(userId) {
       if (statusEl) statusEl.textContent = 'No Active Exam';
     }
   } catch (err) {
-    console.warn('Backend schedule fetch error:', err.message);
-    renderStudentScheduleTable([]);
-    renderEnrolledCoursesGrid([]);
+    studentScheduleFailCount++;
+    scheduleStudentPoll(userId); // Slow down polling on failure
+    if (studentScheduleFailCount === 1) {
+      console.warn('[PROCTR] Database unreachable — retrying with backoff. Check internet / Neon status.');
+    }
   }
 }
 
@@ -267,13 +325,28 @@ function renderStudentScheduleTable(schedule) {
 
     const isLiveActive = item.live_session_status === 'ACTIVE';
 
-    const statusPill = isLiveActive
-      ? '<span class="status-pill active-pill">⚡ Live Active</span>'
-      : '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
+    // Check if the exam date+end_time has already passed
+    let examExpired = false;
+    if (item.exam_date) {
+      const examDateStr = item.exam_date.slice(0, 10);
+      const endTimeStr = item.end_time ? item.end_time.slice(0, 5) : '23:59';
+      const examEndDateTime = new Date(`${examDateStr}T${endTimeStr}:00`);
+      examExpired = Date.now() > examEndDateTime.getTime();
+    }
 
-    const actionBtn = isLiveActive
-      ? `<button class="btn-primary" style="padding:4px 10px; font-size:11px; width:auto;" onclick="selectExamToJoin('${item.course_code}')">⚡ Join Exam</button>`
-      : `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" onclick="alert('Session is not created yet. Please wait for your invigilator to create and start the live exam session.')">⏳ Waiting for Invigilator</button>`;
+    let statusPill, actionBtn;
+
+    if (examExpired) {
+      // Date passed — lock joining entirely
+      statusPill = '<span class="status-pill" style="background:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">📅 Exam Date Passed</span>';
+      actionBtn = '<span style="font-size:11px; color:#94a3b8; font-style:italic;">—</span>';
+    } else if (isLiveActive) {
+      statusPill = '<span class="status-pill active-pill">⚡ Live Active</span>';
+      actionBtn = `<button class="btn-primary" style="padding:4px 10px; font-size:11px; width:auto;" onclick="selectExamToJoin('${item.course_code}')">⚡ Join Exam</button>`;
+    } else {
+      statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
+      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" onclick="alert('Session is not created yet. Please wait for your invigilator to create and start the live exam session.')">⏳ Waiting for Invigilator</button>`;
+    }
 
     return `
       <tr>
@@ -382,15 +455,29 @@ function renderTeacherScheduleTable(schedule) {
 
     // Check permissions: Is current user the assigned Invigilator for this exam?
     const isInvigilator = item.is_invigilator || (item.invigilator_id && String(item.invigilator_id) === String(currentUser?.teacherId));
-    const isCompleted = item.status === 'Completed' || item.status === 'ENDED' || item.exam_status === 'Completed';
+    const isCompleted = item.status === 'Completed' || item.status === 'ENDED' || item.exam_status === 'Completed' || item.live_session_status === 'COMPLETED';
+    const hasSubmissions = item.submission_count > 0;
+
+    // Check if exam date+end_time has already passed
+    let examExpired = false;
+    if (item.exam_date) {
+      const examDateStr = item.exam_date.slice(0, 10);
+      const endTimeStr = item.end_time ? item.end_time.slice(0, 5) : '23:59';
+      const examEndDateTime = new Date(`${examDateStr}T${endTimeStr}:00`);
+      examExpired = Date.now() > examEndDateTime.getTime();
+    }
 
     let actionBtn = '';
-    if (isCompleted) {
+    if (isCompleted || (examExpired && hasSubmissions)) {
+      // Exam was conducted & submissions exist
       actionBtn = `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions & Logs</button>`;
+    } else if (examExpired && !hasSubmissions) {
+      // Date passed but exam was never conducted
+      actionBtn = `<span style="display:inline-flex; align-items:center; gap:5px; background:#fee2e2; color:#b91c1c; padding:5px 10px; border-radius:8px; font-size:11px; font-weight:700;">❌ Exam Not Conducted</span>`;
     } else if (isInvigilator) {
       actionBtn = `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
     } else {
-      // Course Instructor only (Not Invigilator)
+      // Course Instructor only (Not Invigilator) — exam not yet expired
       actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session. All student submissions, reports, and logs will be sent to your portal when the exam finishes.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
     }
 
@@ -459,12 +546,16 @@ async function createInvigilationSession(examId, courseCode) {
 }
 
 function formatSecondsToHMS(secs) {
-  if (secs === null || secs === undefined || secs < 0) return '00:00:00';
+  if (secs === null || secs === undefined || secs < 0) return '0h 0m 0s';
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
-  return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
+
+let teacherLocalCountdown = null; // client-side ticking interval for teacher timer
 
 function pollInvigilatorLiveRoom(sessionCode) {
   if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
@@ -478,10 +569,20 @@ function pollInvigilatorLiveRoom(sessionCode) {
         const connEl = document.getElementById('room-connected-count');
         if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
 
-        // Update Live Countdown Timer for Teacher
+        // Sync teacher countdown from server every 5s, tick locally every second
         if (data.session.secondsRemaining !== null && data.session.secondsRemaining !== undefined) {
+          if (teacherLocalCountdown) clearInterval(teacherLocalCountdown);
+          let secs = Math.max(0, data.session.secondsRemaining);
           const timerEl = document.getElementById('teacher-timer');
-          if (timerEl) timerEl.textContent = formatSecondsToHMS(data.session.secondsRemaining);
+          if (timerEl) {
+            timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+          }
+          teacherLocalCountdown = setInterval(() => {
+            secs = Math.max(0, secs - 1);
+            const el = document.getElementById('teacher-timer');
+            if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+            if (secs <= 0) clearInterval(teacherLocalCountdown);
+          }, 1000);
         }
 
         // Update connected student table
@@ -503,7 +604,19 @@ function pollInvigilatorLiveRoom(sessionCode) {
     } catch (err) {
       console.warn('Error polling invigilator room status:', err.message);
     }
-  }, 1000);
+  }, 5000); // Sync from server every 5s; local interval ticks every second
+  // Kick off first poll immediately
+  (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/desktop/session/${sessionCode}/status`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.session && data.session.connectedStudents !== undefined) {
+        const connEl = document.getElementById('room-connected-count');
+        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
+      }
+    } catch (_) {}
+  })();
 }
 
 // ─── REVEAL PAPER TO STUDENTS (Invigilator) ──────────────────────
@@ -788,21 +901,69 @@ function startStudentSessionPoll(sessionCode) {
         }
       }
 
-      // 2. Check if Invigilator Started Exam Timer
+      // 2. Check if Invigilator Started Exam Timer — smooth client-side countdown
       if (session.isTimerStarted && session.secondsRemaining !== null) {
-        const timerEl = document.getElementById('student-room-timer');
-        if (timerEl) {
-          if (session.secondsRemaining > 0) {
-            timerEl.textContent = `Exam Countdown: ${formatSecondsToHMS(session.secondsRemaining)}`;
-          } else {
-            timerEl.textContent = `00:00:00 — Time Expired (Submissions Closed)`;
-          }
+        if (!studentLocalCountdown) {
+          // Only initialize the client-side countdown once
+          let secs = Math.max(0, session.secondsRemaining);
+
+          const tick = () => {
+            const timerEl = document.getElementById('student-room-timer');
+            const warningEl = document.getElementById('five-min-warning');
+
+            if (secs <= 0) {
+              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              clearInterval(studentLocalCountdown);
+              studentLocalCountdown = null;
+              return;
+            }
+
+            if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
+
+            // 5-Minute Warning: show pulsing banner
+            if (warningEl) {
+              if (secs <= 300) {
+                warningEl.style.display = 'flex';
+              } else {
+                warningEl.style.display = 'none';
+              }
+            }
+
+            secs--;
+          };
+
+          tick(); // Run immediately
+          studentLocalCountdown = setInterval(tick, 1000);
+        } else {
+          // Re-sync seconds from server every poll cycle to prevent drift
+          clearInterval(studentLocalCountdown);
+          studentLocalCountdown = null;
+          let secs = Math.max(0, session.secondsRemaining);
+
+          const tick = () => {
+            const timerEl = document.getElementById('student-room-timer');
+            const warningEl = document.getElementById('five-min-warning');
+            if (secs <= 0) {
+              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              clearInterval(studentLocalCountdown);
+              studentLocalCountdown = null;
+              return;
+            }
+            if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
+            if (warningEl) {
+              warningEl.style.display = secs <= 300 ? 'flex' : 'none';
+            }
+            secs--;
+          };
+
+          tick();
+          studentLocalCountdown = setInterval(tick, 1000);
         }
       }
     } catch (err) {
       console.warn('Error polling session status:', err.message);
     }
-  }, 1000);
+  }, 10000); // Server sync every 10s; client-side ticking is local
 }
 
 if (btnOpenWs) {
@@ -996,21 +1157,30 @@ function addViolationCard(v, feedId, counterId) {
 }
 
 async function logViolationToDB(v) {
-  try {
-    await fetch(`${API_BASE}/desktop/violation`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: currentSessionId,
-        student_id: currentUser?.studentId || null,
-        violation_code: v.code || 'H0',
-        title: v.title || 'Security Violation',
-        description: v.description || '',
-        severity: v.severity || 'HIGH',
-      }),
-    });
-  } catch (err) {
-    console.warn('Failed to stream violation to DB:', err.message);
+  const payload = {
+    session_id: currentSessionId,
+    student_id: currentUser?.studentId || null,
+    violation_code: v.code || 'H0',
+    title: v.title || 'Security Violation',
+    description: v.description || '',
+    severity: v.severity || 'HIGH',
+  };
+
+  // Use offline-first safe post: logs locally first, queues for backend sync if offline
+  if (window.offlineQueue) {
+    window._API_BASE = API_BASE; // Make API_BASE accessible to offlineQueue
+    await window.offlineQueue.safePost(API_BASE, '/desktop/violation', payload);
+  } else {
+    // Fallback to direct fetch if offlineQueue not loaded
+    try {
+      await fetch(`${API_BASE}/desktop/violation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.warn('[PROCTR] Violation not synced (offline):', err.message);
+    }
   }
 }
 
@@ -1060,3 +1230,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ─── AUTO-RESTORE SESSION ON PAGE LOAD / RELOAD ──────────────────
+// This must run AFTER all functions are defined.
+restoreSession();

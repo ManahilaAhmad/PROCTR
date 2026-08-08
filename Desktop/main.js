@@ -190,4 +190,32 @@ ipcMain.handle('minimize-window', async () => {
   return { status: 'error' };
 });
 
+// IPC Handler — Write local log file (offline-first storage)
+// Logs are always written locally, even when backend is unreachable
+ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }) => {
+  try {
+    const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+    const logsDir = path.join(rootDir, 'offline_logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const logFile = path.join(logsDir, `offline_log_${date}.json`);
+
+    // Read existing log file
+    let logs = [];
+    if (fs.existsSync(logFile)) {
+      try { logs = JSON.parse(fs.readFileSync(logFile, 'utf8')); } catch { logs = []; }
+    }
+
+    logs.push({ endpoint, payload, timestamp, written_at: new Date().toISOString() });
+
+    // Keep last 2000 entries per file
+    if (logs.length > 2000) logs = logs.slice(-2000);
+
+    fs.writeFileSync(logFile, JSON.stringify(logs, null, 2), 'utf8');
+    return { status: 'success', path: logFile };
+  } catch (err) {
+    console.error('[Electron] Failed to write local log:', err.message);
+    return { status: 'error', message: err.message };
+  }
+});

@@ -1,5 +1,5 @@
 import pool from '../db.js';
-import { upload } from '../middleware/upload.js';
+import { upload, getFileUrl } from '../middleware/upload.js';
 
 /* ===========================================================
    LIST ALL TEACHERS (for swap / assignment dropdowns)
@@ -75,7 +75,10 @@ export const getSchedule = async (req, res) => {
              COALESCE(u_inv.first_name || ' ' || u_inv.last_name, 'Unassigned') AS invigilator_name,
              ia.assignment_status,
              CASE WHEN co.teacher_id = $1 OR e.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_instructor,
-             CASE WHEN ia.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_invigilator
+             CASE WHEN ia.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_invigilator,
+             les.status AS live_session_status,
+             les.session_code AS live_session_code,
+             COALESCE(sub_count.cnt, 0) AS submission_count
       FROM exam e
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
@@ -86,6 +89,10 @@ export const getSchedule = async (req, res) => {
       LEFT JOIN invigilator_assignment ia ON es.schedule_id = ia.schedule_id
       LEFT JOIN teacher t_inv ON ia.teacher_id = t_inv.teacher_id
       LEFT JOIN users u_inv ON t_inv.user_id = u_inv.user_id
+      LEFT JOIN live_exam_session les ON les.exam_id = e.exam_id
+      LEFT JOIN (
+        SELECT exam_id, COUNT(*) AS cnt FROM student_submission GROUP BY exam_id
+      ) sub_count ON sub_count.exam_id = e.exam_id
       WHERE co.teacher_id = $1 OR e.teacher_id = $1 OR ia.teacher_id = $1
       ORDER BY COALESCE(es.exam_date, e.proposed_date, e.created_at) DESC
     `, [teacherId]);
@@ -174,7 +181,8 @@ export const uploadPaper = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
     }
 
-    const fileUrl = `http://localhost:${process.env.PORT || 5000}/uploads/${req.file.filename}`;
+    // Resolve URL: Cloudinary URL if Cloudinary is active, local URL otherwise
+    const fileUrl = getFileUrl(req, req.file.filename);
 
     const teacherRes = await pool.query(`
       SELECT co.teacher_id

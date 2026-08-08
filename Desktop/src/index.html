@@ -222,9 +222,24 @@
             </div>
             <div class="exam-time-pill" style="padding:8px 16px;">
               <span class="blip-dot"></span>
-              <span id="student-room-timer">In Progress — 01:30:00 remaining</span>
+              <span id="student-room-timer" style="font-size:15px; font-weight:800; letter-spacing:1px;">Waiting for timer to start...</span>
             </div>
           </div>
+
+          <!-- 5-Minute Warning Banner (hidden by default, shown when ≤5 mins remain) -->
+          <div id="five-min-warning" style="display:none; background:linear-gradient(135deg,#fef9c3,#fef3c7); border:2px solid #f59e0b; border-radius:12px; padding:14px 20px; margin-bottom:18px; display:none; align-items:center; gap:14px; animation: pulse-warning 1.5s ease-in-out infinite;">
+            <span style="font-size:28px;">⚠️</span>
+            <div>
+              <div style="font-size:14px; font-weight:800; color:#92400e;">⏰ Only 5 Minutes Remaining!</div>
+              <div style="font-size:12px; color:#b45309; margin-top:2px;">Please save and <strong>Submit your work now</strong> before time expires. Go to your workspace folder and submit!</div>
+            </div>
+          </div>
+          <style>
+            @keyframes pulse-warning {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+              50% { box-shadow: 0 0 0 10px rgba(245,158,11,0); }
+            }
+          </style>
 
           <!-- Top Status Bar -->
           <div class="card" style="border-left:5px solid var(--navy); background:#f8fafc; margin-bottom:18px;">
@@ -675,6 +690,7 @@
     </div>
   </div>
 
+  <script src="offlineQueue.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

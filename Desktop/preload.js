@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('proctrAPI', {
   startExamWorkspace: (data) => ipcRenderer.invoke('start-exam-workspace', data),
   openWorkspaceFolder: (path) => ipcRenderer.invoke('open-workspace-folder', path),
   setScreenProtection: (enable) => ipcRenderer.invoke('set-screen-protection', enable),
-  minimizeWindow: () => ipcRenderer.invoke('minimize-window')
+  minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
+  writeLocalLog: (data) => ipcRenderer.invoke('write-local-log', data)
 });
