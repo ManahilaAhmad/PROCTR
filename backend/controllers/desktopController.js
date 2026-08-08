@@ -81,6 +81,42 @@ export const joinLiveSession = async (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Incorrect exam passcode.' });
     }
 
+    // ── LAB NETWORK & IP SUBNET VALIDATION ────────────────────────────
+    const reqSimulatedIp = req.body.simulate_external_ip;
+    const rawIp = reqSimulatedIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const clientIp = String(rawIp).replace('::ffff:', '').trim();
+
+    const labRes = await pool.query(
+      `SELECT l.lab_name, l.network_range
+       FROM live_exam_session les
+       JOIN exam e ON les.exam_id = e.exam_id
+       JOIN exam_schedule es ON es.exam_id = e.exam_id
+       JOIN lab l ON es.lab_id = l.lab_id
+       WHERE les.session_code = $1`,
+      [codeUpper]
+    );
+
+    if (labRes.rows.length > 0 && labRes.rows[0].network_range) {
+      const allowedRange = (labRes.rows[0].network_range || '').trim();
+      const labName = labRes.rows[0].lab_name || 'Assigned Lab';
+
+      // If allowedRange is not wildcard '*' or '127.0.0.1'
+      if (allowedRange && allowedRange !== '*' && allowedRange !== '127.0.0.1') {
+        const allowedSubnet = allowedRange.split('/')[0].split('.').slice(0, 3).join('.');
+        const clientSubnet = clientIp.split('.').slice(0, 3).join('.');
+
+        const isMatch = clientIp === allowedRange || clientIp.includes(allowedRange) || (allowedSubnet && clientSubnet === allowedSubnet);
+
+        // If simulated external IP or non-matching IP on restricted lab
+        if (!isMatch && (reqSimulatedIp || (clientIp !== '127.0.0.1' && clientIp !== '::1'))) {
+          return res.status(403).json({
+            status: 'error',
+            message: `Network Restriction Violation: Your device IP (${clientIp}) is outside the allowed lab subnet (${allowedRange}) for ${labName}. Joining from external network is blocked.`
+          });
+        }
+      }
+    }
+
     // Record student connected in desktop_exam_session
     await pool.query(`
       CREATE TABLE IF NOT EXISTS desktop_exam_session (
@@ -101,6 +137,20 @@ export const joinLiveSession = async (req, res) => {
       );
     }
 
+    // Check if student has already submitted work
+    if (student_id) {
+      const subCheck = await pool.query(
+        `SELECT submission_id FROM student_submission WHERE exam_id = $1 AND student_id = $2`,
+        [session.exam_id, student_id]
+      );
+      if (subCheck.rows.length > 0) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Exam Completed: You have already submitted your solution. Re-joining is disabled.'
+        });
+      }
+    }
+
     res.status(200).json({
       status: 'success',
       message: 'Successfully connected to exam session!',
@@ -115,6 +165,55 @@ export const joinLiveSession = async (req, res) => {
   } catch (error) {
     console.error('Error joining live session:', error);
     res.status(500).json({ status: 'error', message: 'Failed to join live session.' });
+  }
+};
+
+/* ===========================================================
+   EXTEND EXAM TIME (Invigilator Action - Max 20 Mins)
+=========================================================== */
+export const extendTime = async (req, res) => {
+  const { session_code, extra_minutes } = req.body;
+  try {
+    const codeUpper = (session_code || '').trim().toUpperCase();
+    const minutesToAdd = Math.min(parseInt(extra_minutes || 10, 10), 20); // Cap at 20 mins
+
+    const result = await pool.query(
+      `UPDATE live_exam_session 
+       SET duration_minutes = duration_minutes + $1 
+       WHERE session_code = $2 RETURNING duration_minutes`,
+      [minutesToAdd, codeUpper]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Active session not found.' });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: `Exam duration extended by ${minutesToAdd} minutes (Max 20 mins limit).`,
+      newDuration: result.rows[0].duration_minutes
+    });
+  } catch (error) {
+    console.error('Error extending time:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to extend exam time.' });
+  }
+};
+
+/* ===========================================================
+   END LIVE EXAM SESSION (Invigilator / Time Up)
+=========================================================== */
+export const endLiveSession = async (req, res) => {
+  const { session_code } = req.body;
+  try {
+    const codeUpper = (session_code || '').trim().toUpperCase();
+    await pool.query(
+      `UPDATE live_exam_session SET status = 'COMPLETED' WHERE session_code = $1`,
+      [codeUpper]
+    );
+    res.status(200).json({ status: 'success', message: 'Live exam session ended. Submissions locked.' });
+  } catch (error) {
+    console.error('Error ending session:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to end live session.' });
   }
 };
 
@@ -144,7 +243,9 @@ export const startTimer = async (req, res) => {
   try {
     const codeUpper = (session_code || '').trim().toUpperCase();
     await pool.query(
-      `UPDATE live_exam_session SET is_timer_started = TRUE WHERE session_code = $1`,
+      `UPDATE live_exam_session 
+       SET is_timer_started = TRUE, timer_start_time = COALESCE(timer_start_time, NOW()) 
+       WHERE session_code = $1`,
       [codeUpper]
     );
     res.status(200).json({ status: 'success', message: 'Exam timer started!' });
@@ -162,7 +263,11 @@ export const getSessionStatus = async (req, res) => {
   try {
     const codeUpper = (sessionCode || '').trim().toUpperCase();
     const result = await pool.query(
-      `SELECT * FROM live_exam_session WHERE session_code = $1`,
+      `SELECT les.*, qp.file_path AS exam_paper_url
+       FROM live_exam_session les
+       LEFT JOIN exam e ON les.exam_id = e.exam_id
+       LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
+       WHERE les.session_code = $1`,
       [codeUpper]
     );
 
@@ -172,9 +277,22 @@ export const getSessionStatus = async (req, res) => {
 
     const session = result.rows[0];
 
-    // Fetch connected count
-    const countRes = await pool.query(
-      `SELECT COUNT(DISTINCT student_id) AS count FROM desktop_exam_session WHERE status = 'ACTIVE'`
+    // Calculate real-time seconds remaining
+    let secondsRemaining = null;
+    if (session.is_timer_started && session.timer_start_time) {
+      const startTime = new Date(session.timer_start_time).getTime();
+      const durationMs = (session.duration_minutes || 90) * 60 * 1000;
+      const elapsedMs = Date.now() - startTime;
+      secondsRemaining = Math.max(0, Math.floor((durationMs - elapsedMs) / 1000));
+    }
+
+    // Fetch connected student details
+    const studentsRes = await pool.query(
+      `SELECT des.student_id, COALESCE(u.first_name || ' ' || u.last_name, 'Student') AS name, COALESCE(s.registration_no, '231593') AS reg_no, des.started_at
+       FROM desktop_exam_session des
+       LEFT JOIN student s ON des.student_id = s.student_id
+       LEFT JOIN users u ON s.user_id = u.user_id
+       WHERE des.status = 'ACTIVE'`
     );
 
     res.status(200).json({
@@ -185,10 +303,15 @@ export const getSessionStatus = async (req, res) => {
         isPaperRevealed: session.is_paper_revealed,
         isTimerStarted: session.is_timer_started,
         durationMinutes: session.duration_minutes,
-        connectedStudents: parseInt(countRes.rows[0]?.count || '0', 10)
+        timerStartTime: session.timer_start_time,
+        secondsRemaining: secondsRemaining,
+        examPaperUrl: session.exam_paper_url || null,
+        connectedStudents: studentsRes.rows.length,
+        connectedList: studentsRes.rows
       }
     });
   } catch (error) {
+    console.error('Error fetching session status:', error);
     res.status(500).json({ status: 'error', message: 'Error fetching session status.' });
   }
 };

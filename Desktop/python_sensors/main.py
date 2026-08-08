@@ -10,8 +10,8 @@ from python_sensors.controllers.sensorController import SensorController
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PROCTR Background OS Sensor Engine (MVC Backend)")
-    parser.add_argument("--exam_id", type=int, default=1, help="Exam ID")
-    parser.add_argument("--student_id", type=int, default=101, help="Student ID")
+    parser.add_argument("--exam_id", type=str, default="1", help="Exam ID")
+    parser.add_argument("--student_id", type=str, default="101", help="Student ID")
     parser.add_argument("--whitelist", type=str, default="", help="Comma-separated whitelisted processes")
 
     args = parser.parse_args()

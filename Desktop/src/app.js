@@ -31,6 +31,15 @@ function showSection(sectionId, navBtns) {
   navBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.section === sectionId.replace('section-', ''));
   });
+
+  // Selective Anti-Screenshot Protection: Enabled ONLY during active exam room
+  if (window.proctrAPI && window.proctrAPI.setScreenProtection) {
+    if (sectionId === 'section-s-live-exam') {
+      window.proctrAPI.setScreenProtection(true);
+    } else {
+      window.proctrAPI.setScreenProtection(false);
+    }
+  }
 }
 
 // ─── LOGIN & AUTHENTICATION ───────────────────────────────────────
@@ -199,8 +208,18 @@ function populateTeacherHeader(user) {
   document.getElementById('teacher-exam-title').textContent = `${user.departmentName || 'Computer Science'} — Lab Session Active`;
 }
 
-// ─── FETCH LIVE STUDENT DATA FROM DB ──────────────────────────────
+// ─── FETCH LIVE STUDENT DATA FROM DB (WITH AUTO-REFRESH) ──────────────
+let studentSchedulePollInterval = null;
+
 async function loadStudentData(userId) {
+  fetchStudentScheduleData(userId);
+
+  // Auto-refresh student schedule table every 3 seconds so live session status updates instantly
+  if (studentSchedulePollInterval) clearInterval(studentSchedulePollInterval);
+  studentSchedulePollInterval = setInterval(() => fetchStudentScheduleData(userId), 3000);
+}
+
+async function fetchStudentScheduleData(userId) {
   try {
     const res = await fetch(`${API_BASE}/student/${userId}/schedule`);
     if (!res.ok) throw new Error('Schedule API error');
@@ -245,8 +264,16 @@ function renderStudentScheduleTable(schedule) {
     const dateStr = item.exam_date ? new Date(item.exam_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Scheduled';
     const timeStr = (item.start_time && item.end_time) ? `${item.start_time.slice(0,5)} – ${item.end_time.slice(0,5)}` : 'TBD';
     const roomStr = item.lab_name || 'Lab';
-    const statusPill = '<span class="status-pill active-pill">Scheduled</span>';
-    const actionBtn = `<button class="btn-primary" style="padding:4px 10px; font-size:11px; width:auto;" onclick="selectExamToJoin('${item.course_code}')">Join Exam</button>`;
+
+    const isLiveActive = item.live_session_status === 'ACTIVE';
+
+    const statusPill = isLiveActive
+      ? '<span class="status-pill active-pill">⚡ Live Active</span>'
+      : '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
+
+    const actionBtn = isLiveActive
+      ? `<button class="btn-primary" style="padding:4px 10px; font-size:11px; width:auto;" onclick="selectExamToJoin('${item.course_code}')">⚡ Join Exam</button>`
+      : `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" onclick="alert('Session is not created yet. Please wait for your invigilator to create and start the live exam session.')">⏳ Waiting for Invigilator</button>`;
 
     return `
       <tr>
@@ -353,12 +380,19 @@ function renderTeacherScheduleTable(schedule) {
     if (item.is_invigilator) rolePills += '<span class="role-pill invigilator-pill">Invigilator</span>';
     if (!rolePills) rolePills = '<span style="color:#94a3b8;">Faculty</span>';
 
-    // Single action button based on exam status
+    // Check permissions: Is current user the assigned Invigilator for this exam?
+    const isInvigilator = item.is_invigilator || (item.invigilator_id && String(item.invigilator_id) === String(currentUser?.teacherId));
     const isCompleted = item.status === 'Completed' || item.status === 'ENDED' || item.exam_status === 'Completed';
 
-    const actionBtn = isCompleted
-      ? `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions</button>`
-      : `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
+    let actionBtn = '';
+    if (isCompleted) {
+      actionBtn = `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions & Logs</button>`;
+    } else if (isInvigilator) {
+      actionBtn = `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
+    } else {
+      // Course Instructor only (Not Invigilator)
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session. All student submissions, reports, and logs will be sent to your portal when the exam finishes.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
+    }
 
     return `
       <tr>
@@ -399,32 +433,40 @@ async function createInvigilationSession(examId, courseCode) {
       // Create course folder on Teacher side (C:\PROCTR_Exams\<CourseCode>_LAB\Submissions\)
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         await window.proctrAPI.startExamWorkspace({
-          examId: examId,
-          studentId: 'TEACHER',
+          examId: String(examId || '1'),
+          studentId: '101',
           courseCode: courseCode
         });
       }
 
-      const codeEl = document.getElementById('inv-session-code');
+      // Switch view to Dedicated Live Control Room
+      showSection('section-t-live-room', document.querySelectorAll('#view-teacher .nav-item'));
+
+      // Populate Live Room UI
+      const codeEl = document.getElementById('room-session-code');
       if (codeEl) codeEl.textContent = data.session.session_code;
-      const passEl = document.getElementById('inv-passcode');
+      const passEl = document.getElementById('room-passcode');
       if (passEl) passEl.textContent = data.session.passcode;
-      const cardEl = document.getElementById('invigilator-session-card');
-      if (cardEl) cardEl.style.display = 'block';
+      const titleEl = document.getElementById('live-room-course-title');
+      if (titleEl) titleEl.textContent = `${courseCode} — Live Lab Exam Session`;
 
-      // Update Header
-      const titleEl = document.getElementById('teacher-exam-title');
-      if (titleEl) titleEl.textContent = `${data.session.session_code} — Live Session Active (Passcode: ${data.session.passcode})`;
-
-      // Poll connected student count
-      pollInvigilatorLiveStatus(data.session.session_code);
+      // Start Polling Live Connected Students & Security Feed
+      pollInvigilatorLiveRoom(data.session.session_code);
     }
   } catch (err) {
     console.error('Error creating live session:', err);
   }
 }
 
-function pollInvigilatorLiveStatus(sessionCode) {
+function formatSecondsToHMS(secs) {
+  if (secs === null || secs === undefined || secs < 0) return '00:00:00';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+}
+
+function pollInvigilatorLiveRoom(sessionCode) {
   if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
   invigilatorPollInterval = setInterval(async () => {
     try {
@@ -432,19 +474,42 @@ function pollInvigilatorLiveStatus(sessionCode) {
       if (!res.ok) return;
       const data = await res.json();
       if (data.session) {
-        const connEl = document.getElementById('stat-connected');
-        if (connEl) connEl.textContent = String(data.session.connectedStudents || 0);
+        // Update connected count
+        const connEl = document.getElementById('room-connected-count');
+        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
+
+        // Update Live Countdown Timer for Teacher
+        if (data.session.secondsRemaining !== null && data.session.secondsRemaining !== undefined) {
+          const timerEl = document.getElementById('teacher-timer');
+          if (timerEl) timerEl.textContent = formatSecondsToHMS(data.session.secondsRemaining);
+        }
+
+        // Update connected student table
+        const tbody = document.getElementById('room-students-tbody');
+        if (tbody && data.session.connectedList) {
+          if (data.session.connectedList.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">Waiting for students to join with Passcode...</td></tr>';
+          } else {
+            tbody.innerHTML = data.session.connectedList.map(s => `
+              <tr>
+                <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
+                <td><span class="status-pill active-pill">Connected</span></td>
+                <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
+              </tr>
+            `).join('');
+          }
+        }
       }
     } catch (err) {
-      console.warn('Error polling invigilator status:', err.message);
+      console.warn('Error polling invigilator room status:', err.message);
     }
-  }, 2000);
+  }, 1000);
 }
 
 // ─── REVEAL PAPER TO STUDENTS (Invigilator) ──────────────────────
-const btnRevealPaper = document.getElementById('btn-reveal-paper');
-if (btnRevealPaper) {
-  btnRevealPaper.addEventListener('click', async () => {
+const roomBtnReveal = document.getElementById('room-btn-reveal');
+if (roomBtnReveal) {
+  roomBtnReveal.addEventListener('click', async () => {
     if (!activeInvigilationCode) return;
     try {
       await fetch(`${API_BASE}/desktop/session/reveal-paper`, {
@@ -452,9 +517,9 @@ if (btnRevealPaper) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
-      btnRevealPaper.textContent = '✓ Exam Paper Revealed';
-      btnRevealPaper.disabled = true;
-      btnRevealPaper.style.background = 'var(--grey-400)';
+      roomBtnReveal.textContent = '✓ Paper Revealed';
+      roomBtnReveal.disabled = true;
+      roomBtnReveal.style.background = 'var(--grey-400)';
     } catch (err) {
       console.error('Error revealing paper:', err);
     }
@@ -462,9 +527,9 @@ if (btnRevealPaper) {
 }
 
 // ─── START EXAM TIMER (Invigilator) ──────────────────────────────
-const btnStartExamTimer = document.getElementById('btn-start-exam-timer');
-if (btnStartExamTimer) {
-  btnStartExamTimer.addEventListener('click', async () => {
+const roomBtnTimer = document.getElementById('room-btn-timer');
+if (roomBtnTimer) {
+  roomBtnTimer.addEventListener('click', async () => {
     if (!activeInvigilationCode) return;
     try {
       await fetch(`${API_BASE}/desktop/session/start-timer`, {
@@ -472,12 +537,62 @@ if (btnStartExamTimer) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
-      btnStartExamTimer.textContent = '✓ Timer Running';
-      btnStartExamTimer.disabled = true;
-      btnStartExamTimer.style.background = 'var(--grey-400)';
+      roomBtnTimer.textContent = '✓ Timer Running';
+      roomBtnTimer.disabled = true;
+      roomBtnTimer.style.background = 'var(--grey-400)';
     } catch (err) {
       console.error('Error starting timer:', err);
     }
+  });
+}
+
+// ─── EXTEND TIME (Invigilator - Max 20 Mins) ─────────────────────
+const roomBtnExtend = document.getElementById('room-btn-extend');
+if (roomBtnExtend) {
+  roomBtnExtend.addEventListener('click', async () => {
+    if (!activeInvigilationCode) return;
+    try {
+      const res = await fetch(`${API_BASE}/desktop/session/extend-time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_code: activeInvigilationCode, extra_minutes: 10 }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        alert(`⏱️ ${data.message}`);
+      }
+    } catch (err) {
+      console.error('Error extending time:', err);
+    }
+  });
+}
+
+// ─── END SESSION (Invigilator) ───────────────────────────────────
+const roomBtnEnd = document.getElementById('room-btn-end');
+if (roomBtnEnd) {
+  roomBtnEnd.addEventListener('click', async () => {
+    if (!activeInvigilationCode) return;
+    if (!confirm('Are you sure you want to end this live exam session? Submissions will be locked.')) return;
+    try {
+      await fetch(`${API_BASE}/desktop/session/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_code: activeInvigilationCode }),
+      });
+      if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+      showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
+    } catch (err) {
+      console.error('Error ending session:', err);
+    }
+  });
+}
+
+// ─── EXIT LIVE CONTROL ROOM ──────────────────────────────────────
+const btnExitRoom = document.getElementById('btn-exit-live-room');
+if (btnExitRoom) {
+  btnExitRoom.addEventListener('click', () => {
+    if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+    showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
   });
 }
 
@@ -555,6 +670,9 @@ if (joinExamForm) {
 
       const joinData = await joinRes.json();
       if (!joinRes.ok || joinData.status !== 'success') {
+        if (joinRes.status === 404) {
+          throw new Error('Session is not created yet. Please wait for your invigilator to start the live session.');
+        }
         throw new Error(joinData.message || 'Incorrect Session ID or Passcode.');
       }
 
@@ -569,15 +687,26 @@ if (joinExamForm) {
         if (result.status === 'success') {
           activeWorkspacePath = result.workspacePath;
 
-          // Update Banner
-          const titleEl = document.getElementById('active-exam-course');
-          if (titleEl) titleEl.textContent = `${examCode.toUpperCase()} — Exam Session Active`;
-          const metaEl = document.getElementById('active-exam-meta');
-          if (metaEl) metaEl.textContent = `Workspace Folder Created: ${activeWorkspacePath}`;
+          // Switch UI to Dedicated Student Live Exam Environment
+          showSection('section-s-live-exam', document.querySelectorAll('#view-student .nav-item'));
 
-          // Switch UI from Join Card to Active Banner
-          if (joinExamCard) joinExamCard.style.display = 'none';
-          if (examBanner) examBanner.style.display = 'flex';
+          // Populate Student Room UI
+          const courseEl = document.getElementById('student-room-course-title');
+          if (courseEl) courseEl.textContent = `${examCode.toUpperCase()} — Live Lab Examination`;
+          const wsEl = document.getElementById('student-room-ws-path');
+          if (wsEl) wsEl.textContent = activeWorkspacePath;
+          const codeTag = document.getElementById('student-room-code-tag');
+          if (codeTag) codeTag.textContent = examCode.toUpperCase();
+
+          // Hook Open Workspace Button
+          const btnRoomOpen = document.getElementById('btn-room-open-ws');
+          if (btnRoomOpen) {
+            btnRoomOpen.onclick = async () => {
+              if (activeWorkspacePath && window.proctrAPI && window.proctrAPI.openWorkspaceFolder) {
+                await window.proctrAPI.openWorkspaceFolder(activeWorkspacePath);
+              }
+            };
+          }
 
           // Start Polling Invigilator Signals (Paper Reveal & Timer Start)
           startStudentSessionPoll(examCode);
@@ -614,40 +743,66 @@ function startStudentSessionPoll(sessionCode) {
 
       // 1. Check if Invigilator Revealed Question Paper
       if (session.isPaperRevealed) {
-        const docCard = document.getElementById('exam-document-card');
-        const docContent = document.getElementById('exam-paper-content');
+        const placeholder = document.getElementById('student-paper-placeholder');
+        const iframe = document.getElementById('student-paper-iframe');
 
-        if (docCard && docCard.style.display === 'none') {
-          docCard.style.display = 'block';
-          if (docContent) {
-            docContent.innerHTML = `
-              <div style="font-weight:700; font-size:15px; margin-bottom:10px; color:var(--navy);">
-                SECTION A: PRACTICAL LAB TASKS (${sessionCode.toUpperCase()})
-              </div>
-              <p><strong>Instructions:</strong> Solve the following programming questions. Write your solutions in your workspace directory (<code>${activeWorkspacePath || 'C:\\PROCTR_Exams'}</code>).</p>
-              <hr style="margin:12px 0; border:none; border-top:1px solid var(--grey-200);"/>
-              <p><strong>Q1. Data Structure Implementation (40 Marks):</strong><br/>
-              Implement a double-ended queue (Deque) supporting push_front, push_back, pop_front, and pop_back with O(1) time complexity. Ensure proper memory cleanup and handle underflow conditions.</p>
-              <br/>
-              <p><strong>Q2. Algorithm Analysis (60 Marks):</strong><br/>
-              Given an array of integers, write an efficient algorithm to find the maximum sum of a contiguous subarray using dynamic programming (Kadane's algorithm).</p>
-            `;
+        if (placeholder && iframe && iframe.style.display === 'none') {
+          placeholder.style.display = 'none';
+          iframe.style.display = 'block';
+
+          if (session.examPaperUrl) {
+            let paperUrl = session.examPaperUrl;
+            if (paperUrl.includes('sample_paper.pdf') || paperUrl.startsWith('file:///') || paperUrl.includes(':/')) {
+              const filename = paperUrl.split('/').pop().split('\\').pop();
+              paperUrl = `http://localhost:5000/uploads/${filename}`;
+            } else if (!paperUrl.startsWith('http://') && !paperUrl.startsWith('https://')) {
+              paperUrl = `http://localhost:5000${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
+            }
+            iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+          } else {
+            // Render protected HTML document if no PDF URL uploaded
+            const doc = iframe.contentWindow.document;
+            doc.open();
+            doc.write(`
+              <html>
+                <head>
+                  <style>
+                    body { font-family:sans-serif; padding:20px; line-height:1.6; color:#1e293b; user-select:none; -webkit-user-select:none; }
+                  </style>
+                </head>
+                <body oncontextmenu="return false;">
+                  <h3 style="color:#0f172a; border-bottom:2px solid #0284c7; padding-bottom:8px;">
+                    SECTION A: PRACTICAL LAB TASKS (${sessionCode.toUpperCase()})
+                  </h3>
+                  <p><strong>Instructions:</strong> Solve the following programming questions inside your workspace folder: <code>${activeWorkspacePath || 'C:\\PROCTR_Exams'}</code></p>
+                  <hr style="border:none; border-top:1px solid #cbd5e1; margin:16px 0;"/>
+                  <h4>Q1. Data Structure Implementation (40 Marks)</h4>
+                  <p>Implement a double-ended queue (Deque) supporting <code>push_front</code>, <code>push_back</code>, <code>pop_front</code>, and <code>pop_back</code> with O(1) time complexity.</p>
+                  <h4>Q2. Algorithm Analysis (60 Marks)</h4>
+                  <p>Write an efficient algorithm to find the maximum sum of a contiguous subarray using dynamic programming (Kadane's algorithm).</p>
+                </body>
+              </html>
+            `);
+            doc.close();
           }
         }
       }
 
       // 2. Check if Invigilator Started Exam Timer
-      if (session.isTimerStarted) {
-        const statusEl = document.getElementById('exam-status-text');
-        if (statusEl && statusEl.textContent.includes('Waiting')) {
-          statusEl.textContent = 'Exam Timer Started';
-          startExamTimer();
+      if (session.isTimerStarted && session.secondsRemaining !== null) {
+        const timerEl = document.getElementById('student-room-timer');
+        if (timerEl) {
+          if (session.secondsRemaining > 0) {
+            timerEl.textContent = `Exam Countdown: ${formatSecondsToHMS(session.secondsRemaining)}`;
+          } else {
+            timerEl.textContent = `00:00:00 — Time Expired (Submissions Closed)`;
+          }
         }
       }
     } catch (err) {
       console.warn('Error polling session status:', err.message);
     }
-  }, 2000);
+  }, 1000);
 }
 
 if (btnOpenWs) {
@@ -878,3 +1033,30 @@ if (window.proctrAPI) {
 document.getElementById('modal-close-btn').addEventListener('click', () => {
   document.getElementById('warning-modal').classList.remove('active');
 });
+
+// ─── GLOBAL ANTI-COPY, ANTI-SCREENSHOT & INSTANT MINIMIZATION SECURITY ──
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  return false;
+});
+
+document.addEventListener('keydown', (e) => {
+  const isPrintScreen = e.key === 'PrintScreen';
+  const isSnippingTool = (e.shiftKey && (e.metaKey || e.key === 'Meta') && (e.key === 'S' || e.key === 's'));
+  const isCopyShortcut = (e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C' || e.key === 'p' || e.key === 'P' || e.key === 's' || e.key === 'S');
+
+  if (isPrintScreen || isSnippingTool) {
+    e.preventDefault();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(''); // Clear clipboard buffer
+    }
+
+    // Instantly minimize Electron app window on screenshot attempt during exam
+    if (window.proctrAPI && window.proctrAPI.minimizeWindow) {
+      window.proctrAPI.minimizeWindow();
+    }
+  } else if (isCopyShortcut) {
+    e.preventDefault();
+  }
+});
+

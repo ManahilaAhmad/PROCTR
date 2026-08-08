@@ -177,7 +177,7 @@
           </div>
 
           <!-- Exam Schedule Table -->
-          <div class="card" style="margin-bottom:18px;">
+          <div class="card" style="margin-top:18px; margin-bottom:18px;">
             <div class="card-title">📅 Exam Schedule</div>
             <div class="table-responsive">
               <table class="data-table">
@@ -206,6 +206,66 @@
             <div class="card-title">📚 Enrolled Courses</div>
             <div class="courses-grid" id="student-courses-grid">
               <div class="empty-state" style="grid-column: 1 / -1; padding:24px;">Loading enrolled courses...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- DEDICATED STUDENT LIVE EXAM ENVIRONMENT VIEW -->
+        <section id="section-s-live-exam" class="content-section">
+          <div class="page-header" style="margin-bottom:16px;">
+            <div>
+              <h2 style="display:flex; align-items:center; gap:10px;">
+                🔒 Secure Student Exam Environment
+                <span class="live-badge" style="font-size:10px;"><span class="blip-dot"></span> EXAM IN PROGRESS</span>
+              </h2>
+              <p class="subtitle" id="student-room-course-title">CS604 — Database Systems Lab Exam</p>
+            </div>
+            <div class="exam-time-pill" style="padding:8px 16px;">
+              <span class="blip-dot"></span>
+              <span id="student-room-timer">In Progress — 01:30:00 remaining</span>
+            </div>
+          </div>
+
+          <!-- Top Status Bar -->
+          <div class="card" style="border-left:5px solid var(--navy); background:#f8fafc; margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+              <div>
+                <div style="font-size:11px; font-weight:700; color:var(--grey-500); text-transform:uppercase;">Workspace Path</div>
+                <div style="font-size:13px; font-weight:800; color:var(--navy); font-family:var(--font-mono);" id="student-room-ws-path">C:\PROCTR_Exams\CS604_LAB</div>
+              </div>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <button class="btn-secondary" id="btn-room-open-ws" style="padding:8px 16px; font-size:12px;">
+                  📁 Open Exam Workspace Folder
+                </button>
+                <button class="btn-primary" id="btn-submit-exam" style="padding:8px 16px; font-size:12px; width:auto; background:var(--teal);">
+                  ✓ Submit Solution
+                </button>
+              </div>
+            </div>
+            <div id="submit-status" style="margin-top:10px; font-size:12px; color:var(--teal); display:none; font-weight:700;"></div>
+          </div>
+
+          <!-- Starter Code Notice Box -->
+          <div class="card" style="background:#eff6ff; border:1px solid #bfdbfe; margin-bottom:18px; padding:14px 18px;">
+            <div style="font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px;">📦</span>
+              <span><strong>Starter Code &amp; Exam Materials:</strong> Unpacked to <code>C:\PROCTR_Exams\<span id="student-room-code-tag">CS604</span>_LAB\starter_code\</code>. Write your solutions in your workspace directory.</span>
+            </div>
+          </div>
+
+          <!-- Secure Read-Only Question Paper Viewer -->
+          <div class="card">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+              <span>📜 Official Approved Exam Question Paper</span>
+              <span class="status-pill active-pill">HOD APPROVED PAPER</span>
+            </div>
+            <div id="student-paper-viewer-container" style="min-height:350px; background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:20px; position:relative; overflow:hidden;">
+              <div id="student-paper-placeholder" style="text-align:center; padding:60px 20px; color:var(--grey-500);">
+                <div style="font-size:32px; margin-bottom:12px;">⏳</div>
+                <div style="font-weight:700; font-size:14px; color:var(--navy);">Waiting for Invigilator to Reveal Paper...</div>
+                <div style="font-size:12px; margin-top:4px;">The question paper will appear here automatically once revealed by your invigilator.</div>
+              </div>
+              <iframe id="student-paper-iframe" style="width:100%; height:450px; border:none; display:none;" src="about:blank"></iframe>
             </div>
           </div>
         </section>
@@ -468,6 +528,92 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- DEDICATED LIVE EXAM CONTROL ROOM VIEW (Invigilator) -->
+        <section id="section-t-live-room" class="content-section">
+          <div class="page-header" style="margin-bottom:16px;">
+            <div>
+              <h2 style="display:flex; align-items:center; gap:10px;">
+                ⚡ Dedicated Invigilation Control Room
+                <span class="live-badge" style="font-size:10px;"><span class="blip-dot"></span> LIVE LAB SESSION</span>
+              </h2>
+              <p class="subtitle" id="live-room-course-title">CS604 — Database Systems Lab Exam</p>
+            </div>
+            <button class="btn-secondary" id="btn-exit-live-room" style="padding:6px 14px; font-size:11px;">
+              ✖ Exit Control Room
+            </button>
+          </div>
+
+          <!-- Hero Control Banner -->
+          <div class="card" style="border-left:5px solid var(--teal); background:linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%); margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px;">
+              <div>
+                <div style="font-size:10px; font-weight:800; color:var(--grey-500); text-transform:uppercase; letter-spacing:1px;">Active Session Code</div>
+                <div style="font-size:26px; font-weight:900; color:var(--navy); font-family:var(--font-mono);" id="room-session-code">CS604</div>
+              </div>
+
+              <div style="background:#ffffff; padding:10px 20px; border-radius:10px; border:2px solid var(--teal); text-align:center; box-shadow:0 4px 12px rgba(0,180,166,.12);">
+                <div style="font-size:10px; font-weight:800; color:var(--grey-500); text-transform:uppercase; letter-spacing:1px;">Student Passcode</div>
+                <div style="font-size:28px; font-weight:900; color:var(--teal); letter-spacing:6px; font-family:var(--font-mono);" id="room-passcode">----</div>
+              </div>
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn-primary" id="room-btn-reveal" style="padding:10px 16px; font-size:12px; width:auto; background:var(--teal);">
+                  📜 Reveal Approved Paper
+                </button>
+                <button class="btn-primary" id="room-btn-timer" style="padding:10px 16px; font-size:12px; width:auto; background:var(--navy);">
+                  ⏱️ Start Exam Timer
+                </button>
+                <button class="btn-primary" id="room-btn-extend" style="padding:10px 16px; font-size:12px; width:auto; background:#d97706;">
+                  ➕ Extend Time (+10m)
+                </button>
+                <button class="btn-primary" id="room-btn-end" style="padding:10px 16px; font-size:12px; width:auto; background:#ef4444;">
+                  🔴 End Session
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Split Workspace: Connected Students & Live Violation Log Stream -->
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:18px;">
+            <!-- Left Pane: Connected Students List -->
+            <div class="card">
+              <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>👥 Connected Lab PCs</span>
+                <span class="status-pill active-pill" id="room-connected-count">0 Connected</span>
+              </div>
+              <div class="table-responsive" style="max-height:300px; overflow-y:auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Reg No / Student</th>
+                      <th>Status</th>
+                      <th>Joined Time</th>
+                    </tr>
+                  </thead>
+                  <tbody id="room-students-tbody">
+                    <tr>
+                      <td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">
+                        Waiting for students to join with Passcode...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Right Pane: Real-Time Security Alerts Stream -->
+            <div class="card">
+              <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>🚨 Real-Time Security Feed</span>
+                <span class="badge-count" id="room-alerts-count">0 Alerts</span>
+              </div>
+              <div class="feed-list" id="room-alerts-feed" style="max-height:300px; overflow-y:auto;">
+                <div class="empty-state" style="padding:24px;">Monitoring is active. Security alerts will stream here live.</div>
+              </div>
             </div>
           </div>
         </section>

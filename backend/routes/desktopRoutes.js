@@ -4,6 +4,8 @@ import {
   joinLiveSession,
   revealPaper,
   startTimer,
+  extendTime,
+  endLiveSession,
   getSessionStatus,
   startSession,
   logViolation,
@@ -17,6 +19,8 @@ router.post('/session/create', createLiveSession);
 router.post('/session/join', joinLiveSession);
 router.post('/session/reveal-paper', revealPaper);
 router.post('/session/start-timer', startTimer);
+router.post('/session/extend-time', extendTime);
+router.post('/session/end', endLiveSession);
 router.get('/session/:sessionCode/status', getSessionStatus);
 
 // Legacy/Direct endpoints

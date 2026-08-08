@@ -5,5 +5,7 @@ contextBridge.exposeInMainWorld('proctrAPI', {
   onCloseWarning: (callback) => ipcRenderer.on('app-close-warning', () => callback()),
   stopSensors: () => ipcRenderer.invoke('stop-sensors'),
   startExamWorkspace: (data) => ipcRenderer.invoke('start-exam-workspace', data),
-  openWorkspaceFolder: (path) => ipcRenderer.invoke('open-workspace-folder', path)
+  openWorkspaceFolder: (path) => ipcRenderer.invoke('open-workspace-folder', path),
+  setScreenProtection: (enable) => ipcRenderer.invoke('set-screen-protection', enable),
+  minimizeWindow: () => ipcRenderer.invoke('minimize-window')
 });

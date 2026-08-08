@@ -3,6 +3,9 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
+// Suppress harmless Chromium GPU cache warnings on Windows
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 let mainWindow;
 let pythonProcess = null;
 
@@ -19,6 +22,9 @@ function createWindow() {
       contextIsolation: true
     }
   });
+
+  // Default screen protection to FALSE on app launch (enabled only during active exam)
+  mainWindow.setContentProtection(false);
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
@@ -163,3 +169,25 @@ ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
     return { status: 'error', message: err.message };
   }
 });
+
+// IPC Handler to Dynamically Enable/Disable Screen Protection (Anti-Screenshot)
+ipcMain.handle('set-screen-protection', async (event, enable) => {
+  if (mainWindow) {
+    mainWindow.setContentProtection(Boolean(enable));
+    console.log(`[Electron] Window Screen Protection set to: ${enable}`);
+    return { status: 'success', protected: Boolean(enable) };
+  }
+  return { status: 'error' };
+});
+
+// IPC Handler to Minimize App Window on Screenshot Attempt
+ipcMain.handle('minimize-window', async () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+    console.log('[Electron] Window minimized due to screenshot attempt during active exam.');
+    return { status: 'success' };
+  }
+  return { status: 'error' };
+});
+
+
