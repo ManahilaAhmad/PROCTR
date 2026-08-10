@@ -1137,6 +1137,7 @@ function addViolationCard(v, feedId, counterId) {
   const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
   const card = document.createElement('div');
   card.className = 'alert-card';
+  const detValue = v.detected_value ? `<div style="font-family:monospace;font-size:11px;background:rgba(239,68,68,0.1);padding:4px 8px;border-radius:4px;margin-top:6px;word-break:break-all;">${v.detected_value}</div>` : '';
   card.innerHTML = `
     <div style="flex:1">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -1144,6 +1145,7 @@ function addViolationCard(v, feedId, counterId) {
         <span class="alert-code-badge">${v.code || 'H?'}</span>
       </div>
       <div class="alert-desc-text">${v.description || ''}</div>
+      ${detValue}
       <div style="display:flex;justify-content:space-between;margin-top:8px;">
         <span class="alert-severity">${v.severity || 'HIGH'}</span>
         <span class="alert-time-text">${timeStr}</span>
@@ -1162,7 +1164,7 @@ async function logViolationToDB(v) {
     student_id: currentUser?.studentId || null,
     violation_code: v.code || 'H0',
     title: v.title || 'Security Violation',
-    description: v.description || '',
+    description: v.detected_value ? `${v.description || ''} | ${v.detected_value}` : (v.description || ''),
     severity: v.severity || 'HIGH',
   };
 

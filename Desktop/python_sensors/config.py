@@ -37,7 +37,20 @@ DEFAULT_WHITELISTED_PROCESSES = {
     "svchost.exe",
 }
 
-# Hard Violation Codes & Descriptions (H1 - H4b)
+# Default permitted network/DNS web domains
+DEFAULT_ALLOWED_DOMAINS = {
+    "localhost",
+    "127.0.0.1",
+    "github.com",
+    "raw.githubusercontent.com",
+    "stackoverflow.com",
+    "university.edu",
+    "neon.tech",
+    "aws.amazon.com",
+    "cloudinary.com"
+}
+
+# Hard Violation Codes & Descriptions (H1 - H5)
 VIOLATION_CODES = {
     "H1": {
         "code": "H1",
@@ -68,5 +81,11 @@ VIOLATION_CODES = {
         "title": "Workspace & Document Tampering",
         "severity": "HIGH",
         "description": "Unauthorized file modification or external document access detected outside workspace."
+    },
+    "H5": {
+        "code": "H5",
+        "title": "Unauthorized Domain / DNS Access",
+        "severity": "CRITICAL",
+        "description": "Network request to a non-whitelisted web domain or DNS lookup detected."
     }
 }
