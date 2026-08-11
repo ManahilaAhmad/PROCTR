@@ -66,9 +66,11 @@ def _restore_file_from_backup(file_path):
 
 
 def is_office_temp_file(filename):
-    """Returns True if filename is an internal temporary Office swap file (~$doc.docx, ~WRL0001.tmp)."""
+    """Returns True if filename is an internal temporary Office swap file (~$doc.docx, ~WRL0001.tmp) or SQLite system file."""
     fn = filename.lower()
     if fn.startswith("~$") or fn.startswith("~wrl") or fn.startswith("~wrf") or fn.startswith("~wrd") or fn.endswith(".tmp"):
+        return True
+    if fn.endswith("-journal") or fn.endswith("-wal") or fn.endswith("-shm") or fn.endswith(".db"):
         return True
     return False
 

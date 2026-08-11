@@ -332,6 +332,7 @@ export const respondToSwapRequest = async (req, res) => {
     if (teacherQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Teacher profile not found.' });
     }
+    const teacherId = teacherQuery.rows[0].teacher_id;
     if (decision === 'Accepted') {
       const getSched = await pool.query(`
         SELECT ia.schedule_id, es.exam_date, es.start_time, es.end_time

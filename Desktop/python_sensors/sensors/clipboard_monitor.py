@@ -3,13 +3,14 @@ import os
 import json
 import time
 import threading
-import psutil
+import subprocess
+
 from python_sensors.config import VIOLATION_CODES
 
 LOG_DIR = r"C:\PROCTR_Exams\offline_logs" if sys.platform == "win32" else os.path.expanduser("~/PROCTR_Exams/offline_logs")
 
-def _write_log_file(record: dict):
-    """Appends a copy-paste forensic record to the daily log file."""
+def _write_clipboard_log_file(record: dict):
+    """Appends a copy-paste forensic violation record to daily log file."""
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
         date_str = time.strftime("%Y-%m-%d")
@@ -29,110 +30,107 @@ def _write_log_file(record: dict):
         print(f"[ClipboardMonitor] Could not write log file: {e}")
         return None
 
-_write_clipboard_log_file = _write_log_file
+
+def _get_clipboard_text():
+    """Reads current clipboard text cleanly on Windows & Linux."""
+    if sys.platform == "win32":
+        try:
+            import win32clipboard
+            import win32con
+            win32clipboard.OpenClipboard()
+            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+            elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                data = win32clipboard.GetClipboardData(win32con.CF_TEXT)
+            else:
+                data = None
+            win32clipboard.CloseClipboard()
+            return data or ""
+        except Exception:
+            try:
+                import win32clipboard
+                win32clipboard.CloseClipboard()
+            except Exception:
+                pass
+            return ""
+    else:
+        try:
+            return subprocess.check_output(["xclip", "-selection", "clipboard", "-o"]).decode("utf-8")
+        except Exception:
+            return ""
 
 
 def resolve_file_and_app_info():
     """
-    Extracts foreground process name, window title, AND full file path being edited/viewed.
+    Forensic Engine Component:
+    Resolves active process executable, window title, and active open file path.
     """
     if sys.platform != "win32":
-        return "unknown.exe", "Unknown Window", "Unknown File Path"
+        return "Unknown App", "Unknown Window", "Unknown File Path"
 
     try:
         import win32gui
         import win32process
+        import psutil
 
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
-            return "unknown.exe", "Unknown Window", "Unknown File Path"
+            return "Unknown App", "Unknown Window", "Unknown File Path"
 
-        title = win32gui.GetWindowText(hwnd)
+        window_title = win32gui.GetWindowText(hwnd) or "Untitled Window"
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        proc = psutil.Process(pid)
-        proc_name = proc.name().lower()
-        exe_path = proc.exe()
 
-        file_path = None
-
-        # 1. Try resolving file path from process command line arguments
         try:
-            cmdline = proc.cmdline()
-            for arg in cmdline[1:]:
-                if os.path.isfile(arg):
-                    file_path = os.path.abspath(arg)
-                    break
-        except Exception:
-            pass
-
-        # 2. Try resolving open file handles for common code/document files
-        if not file_path:
+            proc = psutil.Process(pid)
+            proc_name = proc.name()
+            
+            open_files = []
             try:
-                for open_file in proc.open_files():
-                    ext = os.path.splitext(open_file.path)[1].lower()
-                    if ext in ['.py', '.txt', '.cpp', '.c', '.java', '.docx', '.pdf', '.md', '.json', '.html', '.css', '.js', '.cs']:
-                        file_path = os.path.abspath(open_file.path)
-                        break
+                for f in proc.open_files():
+                    open_files.append(f.path)
             except Exception:
                 pass
 
-        # 3. Try parsing filename/path from Window Title (e.g. "cheating.txt - Notepad")
-        if not file_path and title:
-            parts = title.split(" - ")
-            for part in parts:
-                cleaned = part.strip().strip("*").strip()
-                if os.path.isfile(cleaned):
-                    file_path = os.path.abspath(cleaned)
-                    break
-                elif "." in cleaned and len(cleaned) > 2 and not cleaned.endswith(".exe"):
-                    file_path = cleaned
+            file_path = "Unknown File Path"
+            if open_files:
+                code_files = [f for f in open_files if not f.endswith(('.dll', '.exe', '.dat', '.log', '.tmp', '.pyd', '.sys'))]
+                if code_files:
+                    file_path = code_files[-1]
+                else:
+                    file_path = open_files[0]
 
-        final_path = file_path or exe_path or title or "Unknown Path"
-        return proc_name, title, final_path
+            if file_path == "Unknown File Path" and window_title:
+                parts = window_title.split(" - ")
+                for part in parts:
+                    clean_part = part.strip().strip("*")
+                    if os.path.exists(clean_part) or "\\" in clean_part or "/" in clean_part:
+                        file_path = clean_part
+                        break
+                    elif "." in clean_part and len(clean_part.split(".")) == 2:
+                        file_path = clean_part
+
+            return proc_name, window_title, file_path
+
+        except Exception:
+            return "Unknown App", window_title, "Unknown File Path"
 
     except Exception:
-        return "unknown.exe", "Unknown Window", "Unknown File Path"
-
-
-def _get_clipboard_text():
-    """Reads current OS clipboard text."""
-    if sys.platform == "win32":
-        try:
-            import win32clipboard
-            win32clipboard.OpenClipboard()
-            if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
-                data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
-            else:
-                data = ""
-            win32clipboard.CloseClipboard()
-            return data
-        except Exception:
-            return ""
-    return ""
-
-
-def _clear_clipboard():
-    """Empties the OS clipboard buffer completely."""
-    if sys.platform == "win32":
-        try:
-            import win32clipboard
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.CloseClipboard()
-        except Exception:
-            pass
+        return "Unknown App", "Unknown Window", "Unknown File Path"
 
 
 class ClipboardMonitor:
     """
-    Forensic Copy-Paste File & Path Tracking Sensor (H4a Violation):
-    - Multi-thread engine: combines keyboard event hooks (Ctrl+C, Ctrl+V) with clipboard polling.
+    Sensor 3: Copy-Paste Forensic Path Telemetry & Anti-Leak Monitor (H4a Violation)
+
+    Features:
     - Resolves EXACT source file path (e.g. D:\\cheat_notes\\cheating.txt) and destination file path (e.g. C:\\Exam\\python.py).
     - Logs exact format: "at time 10:55:27 879 characters were copied from D:\\cheating.txt to C:\\Exam\\python.py"
+    - Auto-wipes clipboard on unapproved pastes.
+    - Safe-zone exemption for Submission/ and Teacher_Starter_Code/.
     """
 
-    def __init__(self, callback_on_violation=None, max_paste_chars=300, auto_clear=False):
-        self.callback = callback_on_violation
+    def __init__(self, callback_on_violation=None, violation_callback=None, max_paste_chars=300, auto_clear=False):
+        self.callback = callback_on_violation or violation_callback
         self.max_paste_chars = max_paste_chars
         self.auto_clear = auto_clear  # Default to False for clear testing feedback
         self.running = False
@@ -175,9 +173,9 @@ class ClipboardMonitor:
                 char_val = getattr(key, 'char', None)
                 vk_val = getattr(key, 'vk', None)
 
-                # Direct ASCII control code checks: \x03 is Ctrl+C, \x16 is Ctrl+V
-                is_copy = char_val == '\x03' or (self._ctrl_held and (char_val in ('c', 'C') or vk_val == 67))
-                is_paste = char_val == '\x16' or (self._ctrl_held and (char_val in ('v', 'V') or vk_val == 86))
+                # Robust checks for Ctrl+C and Ctrl+V across keyboard layouts
+                is_copy = (char_val == '\x03') or (self._ctrl_held and (char_val in ('c', 'C') or vk_val in (67, 99)))
+                is_paste = (char_val == '\x16') or (self._ctrl_held and (char_val in ('v', 'V') or vk_val in (86, 118)))
 
                 if is_copy:
                     threading.Thread(target=self._on_copy_triggered, daemon=True).start()
@@ -216,22 +214,48 @@ class ClipboardMonitor:
         now_time = time.strftime("%H:%M:%S")
         full_date = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        EXAM_SAFE_APPS = {
-            "code.exe", "pycharm64.exe", "devenv.exe", "codeblocks.exe",
-            "devcpp.exe", "notepad++.exe", "sublime_text.exe", "eclipse.exe",
-            "idea64.exe", "python.exe", "pythonw.exe", "cmd.exe", "powershell.exe",
-            "proctr-desktop.exe", "electron.exe"
-        }
-
-        # Check if source file is in Teacher_Starter_Code or Submission safe-zone
         path_lower = os.path.abspath(file_path).lower() if file_path and not file_path.startswith("Unknown") else ""
         is_safe_zone = any(z in path_lower for z in ["submission", "teacher_starter_code", "starter_code"])
 
-        is_safe_app = proc in EXAM_SAFE_APPS
-        is_large = char_count > self.max_paste_chars
+        self.pending_copy = {
+            "proc": proc,
+            "title": title,
+            "file_path": file_path,
+            "char_count": char_count,
+            "word_count": word_count,
+            "line_count": line_count,
+            "snippet": snippet,
+            "time_str": now_time,
+            "timestamp": full_date,
+            "text": text,
+            "is_safe_zone": is_safe_zone
+        }
+        log_msg = f"at time {now_time} {char_count} characters were copied from {file_path}"
+        print(f"\n📋 [COPY EVENT LOGGED]")
+        print(f"   --> {log_msg}")
+        print(f"   App Name: [{proc}] '{title}'")
+        print(f"   Snippet : '{snippet}'\n")
 
-        # Flag as threat if outside safe-zone, not safe app, or exceeds char limit
-        if (not is_safe_zone and not is_safe_app) or (not is_safe_zone and is_large) or (not is_safe_app):
+    def _on_paste_triggered(self):
+        """Called immediately when paste (Ctrl+V) or destination switch occurs."""
+        time.sleep(0.05)
+        text = _get_clipboard_text()
+        if not text:
+            return
+
+        # If no pending copy recorded (e.g., text copied before monitor started), populate from current clipboard
+        if not self.pending_copy:
+            proc, title, file_path = resolve_file_and_app_info()
+            char_count = len(text)
+            word_count = len(text.split())
+            line_count = text.count("\n") + 1
+            snippet = text[:100].replace("\n", " ") + ("..." if char_count > 100 else "")
+            now_time = time.strftime("%H:%M:%S")
+            full_date = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            path_lower = os.path.abspath(file_path).lower() if file_path and not file_path.startswith("Unknown") else ""
+            is_safe_zone = any(z in path_lower for z in ["submission", "teacher_starter_code", "starter_code"])
+
             self.pending_copy = {
                 "proc": proc,
                 "title": title,
@@ -245,29 +269,22 @@ class ClipboardMonitor:
                 "text": text,
                 "is_safe_zone": is_safe_zone
             }
-            log_msg = f"at time {now_time} {char_count} characters were copied from {file_path}"
-            print(f"\n📋 [COPY EVENT LOGGED]")
-            print(f"   --> {log_msg}")
-            print(f"   App Name: [{proc}] '{title}'")
-            print(f"   Snippet : '{snippet}'\n")
 
-    def _on_paste_triggered(self):
-        """Called immediately when paste (Ctrl+V) or destination switch occurs."""
-        if not self.pending_copy:
-            return
-
-        time.sleep(0.05)
         proc_dest, title_dest, file_path_dest = resolve_file_and_app_info()
         src = self.pending_copy
 
-        # Check if destination paste is into Submission folder
+        now_time = time.strftime("%H:%M:%S")
+        print(f"\n📋 [PASTE EVENT LOGGED]")
+        print(f"   --> at time {now_time} Paste action performed in [{proc_dest}] '{title_dest}'")
+        print(f"   Target Path: {file_path_dest}\n")
+
         path_dest_lower = os.path.abspath(file_path_dest).lower() if file_path_dest and not file_path_dest.startswith("Unknown") else ""
         dest_is_safe_zone = any(z in path_dest_lower for z in ["submission", "teacher_starter_code", "starter_code"])
 
-        # Case 1: Copy source was OUTSIDE safe-zone, pasted INTO workspace (Import Violation)
-        # Case 2: Copy source was INSIDE safe-zone, pasted OUTSIDE workspace (Export Leak Violation)
         src_is_safe = src.get("is_safe_zone", False)
 
+        # Case 1: Copy source was OUTSIDE safe-zone, pasted INTO workspace (Import Violation)
+        # Case 2: Copy source was INSIDE safe-zone, pasted OUTSIDE workspace (Export Leak Violation)
         if not src_is_safe or (src_is_safe and not dest_is_safe_zone):
             if src_is_safe and not dest_is_safe_zone:
                 v_title = "Unauthorized Exam File Export Attempt"
@@ -328,10 +345,23 @@ class ClipboardMonitor:
                     except Exception:
                         pass
 
+        # Reset pending copy after paste evaluation
         self.pending_copy = None
 
+    def _clear_clipboard(self):
+        """Wipes Windows clipboard buffer to prevent non-whitelisted text from pasting."""
+        try:
+            if sys.platform == "win32":
+                import win32clipboard
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.CloseClipboard()
+                print("🧹 [PROCTR ENFORCEMENT] Non-whitelisted clipboard buffer auto-wiped!")
+        except Exception:
+            pass
+
     def _monitor_polling_loop(self):
-        """Fallback polling thread: detects clipboard content changes."""
+        """Fallback polling thread that detects clipboard content changes."""
         while self.running:
             try:
                 current_text = _get_clipboard_text()
@@ -341,4 +371,4 @@ class ClipboardMonitor:
                         self._on_copy_triggered()
             except Exception:
                 pass
-            time.sleep(0.4)
+            time.sleep(0.5)

@@ -80,7 +80,6 @@ class SensorController:
     def _listen_stdin_commands(self):
         """Reads stdin IPC commands sent by Electron in real-time."""
         def stdin_loop():
-            import threading
             for line in sys.stdin:
                 line = line.strip()
                 if not line:
@@ -94,7 +93,7 @@ class SensorController:
                         )
                 except Exception:
                     pass
-        import threading
+
         t = threading.Thread(target=stdin_loop, daemon=True)
         t.start()
 

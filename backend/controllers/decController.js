@@ -1,3 +1,5 @@
+import pool from '../db.js';
+
 /* ===========================================================
    HELPER: Check Teacher Invigilation Overlap Conflict
 =========================================================== */

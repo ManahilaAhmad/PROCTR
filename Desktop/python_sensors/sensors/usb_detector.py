@@ -162,8 +162,8 @@ class USBDetector:
     - Mobile Phone Cable Detection: Catches Mobile Phones connected via USB cable.
     """
 
-    def __init__(self, callback_on_violation=None, active_locking=True):
-        self.callback = callback_on_violation
+    def __init__(self, callback_on_violation=None, violation_callback=None, active_locking=True):
+        self.callback = callback_on_violation or violation_callback
         self.active_locking = active_locking
         self.running = False
         self.thread = None
