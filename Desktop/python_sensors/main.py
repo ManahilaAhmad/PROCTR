@@ -2,6 +2,8 @@ import sys
 import os
 import time
 import argparse
+import atexit
+import signal
 
 # Insert Desktop/ folder (parent of python_sensors) so 'from python_sensors.x import y' works
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,10 +50,25 @@ if __name__ == "__main__":
         custom_whitelist=custom_whitelist
     )
 
+    def cleanup_on_exit(sig=None, frame=None):
+        try:
+            controller.stop()
+        except Exception:
+            pass
+
+    atexit.register(cleanup_on_exit)
+    try:
+        signal.signal(signal.SIGINT, cleanup_on_exit)
+        signal.signal(signal.SIGTERM, cleanup_on_exit)
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, cleanup_on_exit)
+    except Exception:
+        pass
+
     controller.start()
 
     try:
         while True:
             time.sleep(1.0)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         controller.stop()

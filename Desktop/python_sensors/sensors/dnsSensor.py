@@ -93,6 +93,22 @@ class DNSSensor:
         self.hosts_path = r"C:\Windows\System32\drivers\etc\hosts" if sys.platform == "win32" else "/etc/hosts"
         self.hosts_backup = None
 
+        import atexit
+        import signal
+        atexit.register(self._restore_hosts_file)
+
+        def signal_cleaner(sig, frame):
+            self._restore_hosts_file()
+            sys.exit(0)
+
+        try:
+            signal.signal(signal.SIGINT, signal_cleaner)
+            signal.signal(signal.SIGTERM, signal_cleaner)
+            if hasattr(signal, "SIGBREAK"):
+                signal.signal(signal.SIGBREAK, signal_cleaner)
+        except Exception:
+            pass
+
     def update_allowed_domains(self, domain_list):
         """Dynamically update allowed domains from Teacher exam options in real-time."""
         self.allowed_domains = set(d.lower().strip() for d in domain_list)
