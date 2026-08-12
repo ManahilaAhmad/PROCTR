@@ -275,6 +275,29 @@ def test_workspace_file_protection():
     fs_watcher.stop()
     print("\n✅ Workspace File Protection Test Finished.\n")
 
+from python_sensors.sensors.lan_detector import LANDetector
+
+def test_lan_detector():
+    print("\n--- [TEST 7] Lab LAN Subnet & Anti-Tethering Integrity Watcher (N1) ---")
+    print("Allowed Lab Subnet Prefix: '172.30.'")
+    print("How this works:")
+    print("  1. Inspects active network interfaces to ensure IP starts with 172.30.x.x")
+    print("  2. Detects mobile phone USB tethering, Wi-Fi hotspots, or VPN adapters")
+    print("  3. Flags N1 Violation if student connects to non-lab network during exam!")
+    print()
+    print("Starting LAN Subnet Detector...\n")
+
+    lan_sensor = LANDetector(violation_callback=sample_violation_callback, allowed_subnet_prefix="172.30.", check_interval=3)
+    lan_sensor.start()
+
+    try:
+        input("Press ENTER in this window when done testing...\n")
+    except (KeyboardInterrupt, EOFError):
+        pass
+
+    lan_sensor.stop()
+    print("\n✅ Lab LAN Subnet Integrity Test Finished.\n")
+
 def main():
     while True:
         print_banner()
@@ -285,10 +308,11 @@ def main():
         print(" [4] Test USB Hardware Insertion & Volume Metadata Detector (H1)")
         print(" [5] Test Full Multi-Sensor Engine (All Sensors)")
         print(" [6] Test Workspace Submission File Protection & Auto-Deletion (H4b)")
+        print(" [7] Test Lab LAN Subnet & Anti-Tethering Integrity Watcher (N1)")
         print(" [0] Exit Test Runner\n")
         
         try:
-            choice = input("Enter choice (0-6): ").strip()
+            choice = input("Enter choice (0-7): ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nExiting.")
             break
@@ -305,6 +329,8 @@ def main():
             test_full_orchestrator()
         elif choice == "6":
             test_workspace_file_protection()
+        elif choice == "7":
+            test_lan_detector()
         elif choice == "0":
             print("\nExiting Test Suite. Goodbye!")
             break

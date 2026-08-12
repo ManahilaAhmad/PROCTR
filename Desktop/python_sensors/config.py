@@ -87,5 +87,11 @@ VIOLATION_CODES = {
         "title": "Unauthorized Domain / DNS Access",
         "severity": "CRITICAL",
         "description": "Network request to a non-whitelisted web domain or DNS lookup detected."
+    },
+    "N1": {
+        "code": "N1",
+        "title": "Unauthorized Network Subnet / Hotspot Breach",
+        "severity": "CRITICAL",
+        "description": "Student device connected to non-lab network, mobile hotspot, or unauthorized adapter."
     }
 }

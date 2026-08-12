@@ -8,6 +8,7 @@ import Btn from "../components/common/Btn";
 import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
+import { API_BASE_URL } from "../config/apiConfig";
 
 export default function HODPage({ activePage, setPage }) {
   const [activeTab, setActiveTab] = useState(activePage === "reports" ? "reports" : "queue");
@@ -22,7 +23,7 @@ export default function HODPage({ activePage, setPage }) {
   const [hodComment, setHodComment] = useState("");
 
   const fetchData = () => {
-    fetch("http://localhost:5000/api/hod/queue")
+    fetch(`${API_BASE_URL}/hod/queue`)
       .then(res => res.json())
       .then(data => {
         if (data.status === "success" && Array.isArray(data.queue)) {
@@ -31,7 +32,7 @@ export default function HODPage({ activePage, setPage }) {
       })
       .catch(() => {});
 
-    fetch("http://localhost:5000/api/hod/decisions")
+    fetch(`${API_BASE_URL}/hod/decisions`)
       .then(res => res.json())
       .then(data => {
         if (data.status === "success" && Array.isArray(data.decisions)) {
@@ -46,7 +47,7 @@ export default function HODPage({ activePage, setPage }) {
   }, []);
 
   function handleDecision(examId, decision, commentText) {
-    fetch("http://localhost:5000/api/hod/review", {
+    fetch(`${API_BASE_URL}/hod/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

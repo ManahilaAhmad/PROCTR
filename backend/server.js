@@ -6,27 +6,27 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 
 // Route files (namespaced)
-import authRoutes          from './routes/authRoutes.js';
-import teacherRoutes       from './routes/teacherRoutes.js';
-import examRoutes          from './routes/examRoutes.js';
-import hodRoutes           from './routes/hodRoutes.js';
-import decRoutes           from './routes/decRoutes.js';
-import studentRoutes       from './routes/studentRoutes.js';
-import coordinatorRoutes   from './routes/coordinatorRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import teacherRoutes from './routes/teacherRoutes.js';
+import examRoutes from './routes/examRoutes.js';
+import hodRoutes from './routes/hodRoutes.js';
+import decRoutes from './routes/decRoutes.js';
+import studentRoutes from './routes/studentRoutes.js';
+import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
-import desktopRoutes       from './routes/desktopRoutes.js';
+import desktopRoutes from './routes/desktopRoutes.js';
 
 // Controllers (for legacy flat-path aliases)
-import { listTeachers, getSharedPapers }                                         from './controllers/teacherController.js';
+import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
 import { assignInvigilator, createSwapRequest, listSwapRequests, reviewSwapRequest } from './controllers/decController.js';
-import { getSchedule as coordGetSchedule, getLabs }                          from './controllers/coordinatorController.js';
+import { getSchedule as coordGetSchedule, getLabs } from './controllers/coordinatorController.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ── Core Middleware ─────────────────────────────────────────
@@ -84,15 +84,15 @@ pool.query(`
 `).catch(err => console.log("Database constraint check:", err.message));
 
 // ── Primary Namespaced Routes ───────────────────────────────
-app.use('/api/auth',          authRoutes);           // POST /api/auth/login, /api/auth/change-password
-app.use('/api/teacher',       teacherRoutes);        // GET  /api/teacher/:userId/schedule
-app.use('/api/exams',         examRoutes);           // POST /api/exams, /api/exams/upload, etc.
-app.use('/api/hod',           hodRoutes);            // GET  /api/hod/queue, POST /api/hod/review, etc.
-app.use('/api/dec',           decRoutes);            // POST /api/dec/invigilator/assign, etc.
-app.use('/api/student',       studentRoutes);        // GET  /api/student/:userId/schedule
-app.use('/api/coordinator',   coordinatorRoutes);    // Full coordinator CRUD
+app.use('/api/auth', authRoutes);           // POST /api/auth/login, /api/auth/change-password
+app.use('/api/teacher', teacherRoutes);        // GET  /api/teacher/:userId/schedule
+app.use('/api/exams', examRoutes);           // POST /api/exams, /api/exams/upload, etc.
+app.use('/api/hod', hodRoutes);            // GET  /api/hod/queue, POST /api/hod/review, etc.
+app.use('/api/dec', decRoutes);            // POST /api/dec/invigilator/assign, etc.
+app.use('/api/student', studentRoutes);        // GET  /api/student/:userId/schedule
+app.use('/api/coordinator', coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
-app.use('/api/desktop',       desktopRoutes);        // Desktop app sessions & violations
+app.use('/api/desktop', desktopRoutes);        // Desktop app sessions & violations
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
@@ -102,14 +102,14 @@ app.use('/api/desktop',       desktopRoutes);        // Desktop app sessions & v
 app.get('/api/teachers', listTeachers);
 
 // DEC - invigilator and swap
-app.post('/api/invigilator/assign',       assignInvigilator);
-app.post('/api/swap-request',             createSwapRequest);
-app.get('/api/swap-requests/dec',         listSwapRequests);
+app.post('/api/invigilator/assign', assignInvigilator);
+app.post('/api/swap-request', createSwapRequest);
+app.get('/api/swap-requests/dec', listSwapRequests);
 app.post('/api/swap-requests/dec/review', reviewSwapRequest);
 
 // Director + DEC use these flat paths
-app.get('/api/schedule',        coordGetSchedule);
-app.get('/api/labs',            getLabs);
+app.get('/api/schedule', coordGetSchedule);
+app.get('/api/labs', getLabs);
 app.get('/api/director/papers', getSharedPapers);
 
 // ── Multer Error Handler ────────────────────────────────────

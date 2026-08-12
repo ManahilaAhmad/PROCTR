@@ -11,6 +11,7 @@ import StatCard from "../components/common/StatCard";
 import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
 import NotificationBell from "../components/common/NotificationBell";
+import { API_BASE_URL } from "../config/apiConfig";
 
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
     if (uploadNotes.trim()) formData.append("notes", uploadNotes.trim());
 
     setUploading(true);
-    fetch("http://localhost:5000/api/exams/upload", {
+    fetch(`${API_BASE_URL}/exams/upload`, {
       method: "POST",
       body: formData, // no Content-Type header — browser sets multipart boundary automatically
     })
@@ -112,54 +113,41 @@ export default function TeacherPage({ activePage, setPage, user }) {
   }
 
   function shareWithDEC(examId) {
-    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
+    fetch(`${API_BASE_URL}/exams/${examId}/share-dec`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user?.userId }),
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          showToast("Exam paper shared with Director Exam!");
+          showToast("Exam paper shared with Director Examination!");
           fetchData();
         } else {
-          alert(data.message || "Failed to share with Director Exam.");
+          alert(data.message || "Failed to share exam paper.");
         }
       })
-      .catch(() => alert("Network error. Failed to share with Director Exam."));
+      .catch(() => alert("Connection error."));
   }
 
   const fetchData = () => {
     if (!user) return;
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/schedule`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          setExams(data.schedule.filter(s => s.is_instructor));
-          setInvigilatorAssignments(data.schedule.filter(s => s.is_invigilator));
-        }
-      });
-
-    fetch("http://localhost:5000/api/teachers")
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setTeachersPool(data.teachers); });
-
-    // Fetch swap requests created by this teacher
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/outgoing`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          setMySwaps(data.requests);
-        }
-      });
-
-    // Fetch courses this teacher is teaching (for exam creation dropdown)
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/courses`)
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setMyCourses(data.courses); });
-
-    // Fetch incoming swap requests for this teacher
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/incoming`)
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setIncomingSwaps(data.incoming); });
+    Promise.all([
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/schedule`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teachers`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/outgoing`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/courses`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/incoming`).then(r => r.json()).catch(() => ({ status: 'error' }))
+    ]).then(([schedData, teachData, outSwap, courseData, inSwap]) => {
+      if (schedData.status === "success") {
+        setExams(schedData.schedule.filter(s => s.is_instructor));
+        setInvigilatorAssignments(schedData.schedule.filter(s => s.is_invigilator));
+      }
+      if (teachData.status === "success") setTeachersPool(teachData.teachers);
+      if (outSwap.status === "success") setMySwaps(outSwap.requests);
+      if (courseData.status === "success") setMyCourses(courseData.courses);
+      if (inSwap.status === "success") setIncomingSwaps(inSwap.incoming);
+    });
   };
 
   useEffect(() => {
@@ -171,7 +159,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
   function showToast(msg, type = "ok") { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); }
 
   function submitToHOD(examId) {
-    fetch("http://localhost:5000/api/exams/submit-hod", {
+    fetch(`${API_BASE_URL}/exams/submit-hod`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ exam_id: examId }),
@@ -188,23 +176,6 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .catch(() => alert("Connection error."));
   }
 
-  function shareWithDEC(examId) {
-    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user?.userId }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          showToast("Exam paper shared with Director Examination!");
-          fetchData();
-        } else {
-          alert(data.message || "Failed to share exam paper.");
-        }
-      })
-      .catch(() => alert("Connection error."));
-  }
   function handleCourseSelect(e) {
     const coId = e.target.value;
     setSelectedCourseOffering(coId);
@@ -222,7 +193,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       return;
     }
     setIsSubmitting(true);
-    fetch("http://localhost:5000/api/exams", {
+    fetch(`${API_BASE_URL}/exams`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -252,7 +223,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
   }
   function submitSwap() {
     if (!swapFor || !swapReason.trim()) return;
-    fetch("http://localhost:5000/api/swap-request", {
+    fetch(`${API_BASE_URL}/swap-request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -275,7 +246,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .catch(err => alert("Connection error to swap api."));
   }
   function respondIncoming(requestId, decision) {
-    fetch(`http://localhost:5000/api/teacher/swap-requests/${requestId}/respond`, {
+    fetch(`${API_BASE_URL}/teacher/swap-requests/${requestId}/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: user?.userId, decision }),

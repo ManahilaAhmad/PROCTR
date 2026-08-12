@@ -2,6 +2,7 @@ import { useState } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import Input from "../components/common/Input";
+import { API_BASE_URL } from "../config/apiConfig";
 
 const loginStyles = `
   @keyframes fadeUp {
@@ -84,7 +85,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
     if (!email.trim() || !pass.trim()) { setShake(true); setTimeout(() => setShake(false), 600); return; }
     
     setLoading(true);
-    fetch("http://localhost:5000/api/auth/login", {
+    fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.trim(), password: pass.trim(), user_type: selectedRole }),

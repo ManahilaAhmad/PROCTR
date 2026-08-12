@@ -10,6 +10,7 @@ import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
 import Select from "../components/common/Select";
+import { API_BASE_URL } from "../config/apiConfig";
 
 // ── Main Component ───────────────────────────────────────────────────
 export default function DECPage({ activePage, setPage, user }) {
@@ -30,17 +31,17 @@ export default function DECPage({ activePage, setPage, user }) {
   const [teachersPool, setTeachersPool] = useState([]);
 
   const fetchData = () => {
-    fetch("http://localhost:5000/api/schedule")
+    fetch(`${API_BASE_URL}/schedule`)
       .then(res => res.json())
       .then(data => { if (data.status === "success" && Array.isArray(data.schedule)) setAssignments(data.schedule); })
       .catch(() => {});
 
-    fetch("http://localhost:5000/api/swap-requests/dec")
+    fetch(`${API_BASE_URL}/swap-requests/dec`)
       .then(res => res.json())
       .then(data => { if (data.status === "success" && Array.isArray(data.requests)) setSwapRequests(data.requests); })
       .catch(() => {});
 
-    fetch("http://localhost:5000/api/teachers")
+    fetch(`${API_BASE_URL}/teachers`)
       .then(res => res.json())
       .then(data => { if (data.status === "success" && Array.isArray(data.teachers)) setTeachersPool(data.teachers); })
       .catch(() => {});
@@ -78,7 +79,7 @@ export default function DECPage({ activePage, setPage, user }) {
 
   function confirmAssign() {
     if (!selectedInvigilator) return;
-    fetch("http://localhost:5000/api/invigilator/assign", {
+    fetch(`${API_BASE_URL}/invigilator/assign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -117,7 +118,7 @@ export default function DECPage({ activePage, setPage, user }) {
   }
 
   function handleSwapDecision(decision) {
-    fetch("http://localhost:5000/api/swap-requests/dec/review", {
+    fetch(`${API_BASE_URL}/swap-requests/dec/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

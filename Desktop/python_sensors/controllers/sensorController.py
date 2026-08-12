@@ -15,6 +15,7 @@ from python_sensors.sensors.clipboardSensor import ClipboardSensor
 from python_sensors.sensors.windowSensor import WindowSensor
 from python_sensors.sensors.fileSystemSensor import FileSystemSensor
 from python_sensors.sensors.dnsSensor import DNSSensor
+from python_sensors.sensors.lan_detector import LANDetector
 
 class SensorController:
     """
@@ -37,12 +38,13 @@ class SensorController:
         # 3. Initialize Violation Controller
         self.violation_ctrl = ViolationController(self.violation_model)
 
-        # 4. Initialize All 5 Production OS Sensors
+        # 4. Initialize All Production OS Sensors
         self.usb_sensor = USBSensor(violation_callback=self.on_violation)
         self.clipboard_sensor = ClipboardSensor(violation_callback=self.on_violation)
         self.window_sensor = WindowSensor(violation_callback=self.on_violation, custom_whitelist=custom_whitelist)
         self.fs_sensor = FileSystemSensor(workspace_path=self.workspace_ctrl.get_workspace_path(), violation_callback=self.on_violation)
         self.dns_sensor = DNSSensor(violation_callback=self.on_violation, active_blocking=True)
+        self.lan_sensor = LANDetector(violation_callback=self.on_violation, allowed_subnet_prefix="172.30.")
 
     def on_violation(self, code, detected_value="", title="", severity="", description="", *args, **kwargs):
         val = detected_value or description or str(kwargs)
@@ -61,6 +63,8 @@ class SensorController:
             "detected_value": val,
             "timestamp": record["timestamp"] if record else time.strftime("%Y-%m-%dT%H:%M:%S")
         }
+        
+        # Stream JSON alert line over stdout for Electron Process Bridge
         print(json.dumps(alert_payload), flush=True)
 
     def update_policy(self, allowed_domains=None, allowed_processes=None):
@@ -78,19 +82,25 @@ class SensorController:
         }), flush=True)
 
     def _listen_stdin_commands(self):
-        """Reads stdin IPC commands sent by Electron in real-time."""
+        """IPC Listener thread that receives control commands from Electron via stdin."""
         def stdin_loop():
             for line in sys.stdin:
-                line = line.strip()
-                if not line:
-                    continue
                 try:
-                    cmd = json.loads(line)
-                    if cmd.get("command") == "UPDATE_POLICY":
-                        self.update_policy(
-                            allowed_domains=cmd.get("allowed_domains"),
-                            allowed_processes=cmd.get("allowed_processes")
-                        )
+                    data = json.loads(line.strip())
+                    cmd_type = data.get("type")
+
+                    if cmd_type == "UPDATE_WHITELIST":
+                        new_whitelist = data.get("whitelist", [])
+                        self.window_sensor.update_whitelist(new_whitelist)
+                    elif cmd_type == "UPDATE_ALLOWED_DOMAINS":
+                        new_domains = data.get("allowed_domains", [])
+                        self.dns_sensor.update_allowed_domains(new_domains)
+                    elif cmd_type == "UPDATE_LAB_SUBNET":
+                        new_subnet = data.get("allowed_subnet", "172.30.")
+                        self.lan_sensor.allowed_subnet_prefix = new_subnet
+                    elif cmd_type == "FORCE_STOP":
+                        self.stop()
+                        sys.exit(0)
                 except Exception:
                     pass
 
@@ -101,7 +111,7 @@ class SensorController:
         self._listen_stdin_commands()
         print(json.dumps({
             "type": "SENSOR_SYSTEM_START",
-            "message": "PROCTR All 5 OS Security Sensors Initialized Successfully",
+            "message": "PROCTR OS Security Sensors Initialized Successfully",
             "workspace_dir": self.workspace_info["workspace_dir"]
         }), flush=True)
 
@@ -110,6 +120,7 @@ class SensorController:
         self.window_sensor.start()
         self.fs_sensor.start()
         self.dns_sensor.start()
+        self.lan_sensor.start()
 
     def stop(self):
         self.usb_sensor.stop()
@@ -117,4 +128,5 @@ class SensorController:
         self.window_sensor.stop()
         self.fs_sensor.stop()
         self.dns_sensor.stop()
+        self.lan_sensor.stop()
         print(json.dumps({"type": "SENSOR_SYSTEM_STOP", "message": "Sensors stopped."}), flush=True)

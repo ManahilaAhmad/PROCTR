@@ -244,7 +244,7 @@ class DNSSensor:
                 for conn in connections:
                     if conn.status == psutil.CONN_ESTABLISHED and conn.raddr:
                         remote_ip = conn.raddr.ip
-                        if remote_ip in ("127.0.0.1", "0.0.0.0", "::1") or remote_ip.startswith("10.") or remote_ip.startswith("192.168."):
+                        if remote_ip in ("127.0.0.1", "0.0.0.0", "::1") or remote_ip.startswith("10.") or remote_ip.startswith("192.168.") or remote_ip.startswith("172."):
                             continue
 
                         # Identify process PID
