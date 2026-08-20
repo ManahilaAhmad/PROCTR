@@ -637,11 +637,36 @@
         <section id="section-t-monitoring" class="content-section">
           <div class="page-header">
             <div>
-              <h2>Live Security Alerts</h2>
-              <p class="subtitle">Real-time violation feed from all student PCs</p>
+              <h2>Live Security Monitoring</h2>
+              <p class="subtitle">Click any candidate card to inspect specific student security logs</p>
             </div>
-            <span class="badge-count" id="teacher-alert-count">0 Alerts</span>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <button class="btn-secondary" id="btn-clear-student-filter" style="display:none; padding:5px 12px; font-size:11px;" onclick="clearStudentCandidateFilter()">
+                🔄 Show All Candidates
+              </button>
+              <span class="badge-count" id="teacher-alert-count">0 Alerts</span>
+            </div>
           </div>
+
+          <!-- Connected Candidates Grid -->
+          <div class="card" style="margin-bottom:20px;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <span>👥 Connected Candidates (<span id="candidate-count-val">0</span>)</span>
+              <span style="font-size:11px; color:var(--grey-500); font-weight:600;">Click a candidate card below to view their specific log feed</span>
+            </div>
+            <div id="monitoring-candidates-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px;">
+              <div class="empty-state" style="padding:16px; grid-column:1/-1;">Waiting for candidate PCs to connect to live session...</div>
+            </div>
+          </div>
+
+          <!-- Active Filter Header -->
+          <div id="filter-active-header" style="display:none; padding:10px 16px; background:var(--teal-light, #f0fdfa); border:1.5px solid var(--teal); border-radius:8px; margin-bottom:14px; justify-content:space-between; align-items:center;">
+            <div style="font-size:13px; font-weight:800; color:var(--navy);">
+              🔍 Filtered Inspection: <span id="filter-student-name" style="color:var(--teal);">--</span>
+            </div>
+            <span style="font-size:11px; color:var(--grey-600); cursor:pointer; font-weight:700;" onclick="clearStudentCandidateFilter()">✕ Clear Filter</span>
+          </div>
+
           <div class="feed-list" id="teacher-feed">
             <div class="empty-state">Monitoring is active. No violations detected yet.</div>
           </div>

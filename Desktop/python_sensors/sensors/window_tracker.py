@@ -111,12 +111,55 @@ class WindowTracker:
                 
                 if active_process:
                     active_process_lower = active_process.lower()
-                    is_whitelisted = any(active_process_lower == w.lower() for w in self.whitelist)
+                    
+                    # 1. Antigravity IDE & Essential Developer Tools Protection
+                    is_antigravity = "antigravity" in active_process_lower
+                    is_whitelisted = is_antigravity or any(active_process_lower == w.lower() for w in self.whitelist)
+                    
+                    title_lower = (window_title or "").lower()
+                    is_ai_breach = any(ai_kw in title_lower for ai_kw in ["chatgpt", "openai", "claude", "gemini", "bard", "perplexity"]) or ("copilot" in title_lower and "microsoft edge" not in title_lower)
                     now_time = time.strftime("%H:%M:%S")
                     full_date = time.strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    if not is_whitelisted:
-                        # ── H2 VIOLATION: Unauthorized Process & Website View ─
+
+                    # Protected system & IDE prefixes — NEVER CLOSE OR KILL THESE!
+                    PROTECTED_KEYWORDS = [
+                        "antigravity", "proctr", "electron", "python", "explorer",
+                        "code", "node", "powershell", "cmd", "conhost", "windowsterminal",
+                        "chrome", "msedge", "firefox", "brave", "opera",
+                        "system", "svchost", "csrss", "smss", "services", "lsass", "wininit", "winlogon", "taskhostw", "dwm"
+                    ]
+                    is_protected = any(kw in active_process_lower for kw in PROTECTED_KEYWORDS)
+
+                    if not is_whitelisted or is_ai_breach:
+                        # ── ACTIVE OS ENFORCEMENT: Safe Lockdown ────────────────────────────────
+                        if is_ai_breach:
+                            # Close AI tab cleanly using native Windows API keyboard events
+                            try:
+                                import ctypes
+                                VK_CONTROL = 0x11
+                                VK_W = 0x57
+                                KEYEVENTF_KEYUP = 0x0002
+                                user32 = ctypes.windll.user32
+                                user32.keybd_event(VK_CONTROL, 0, 0, 0)
+                                user32.keybd_event(VK_W, 0, 0, 0)
+                                time.sleep(0.05)
+                                user32.keybd_event(VK_W, 0, KEYEVENTF_KEYUP, 0)
+                                user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+                                print(f"[PROCTR Lockdown Enforced] Closed AI website tab in {active_process}")
+                            except Exception as err:
+                                print(f"[PROCTR Lockdown] Tab closure error: {err}")
+                        elif not is_protected:
+                            # Safely close non-whitelisted standalone windows (e.g. VLC, Local LLMs, Discord)
+                            try:
+                                import win32gui
+                                hwnd = win32gui.GetForegroundWindow()
+                                if hwnd:
+                                    win32gui.PostMessage(hwnd, 0x0010, 0, 0)
+                                    print(f"[PROCTR Lockdown Enforced] Closed unauthorized window: {active_process}")
+                            except Exception as err:
+                                print(f"[PROCTR Lockdown] Window closure error: {err}")
+
+                        # ── H2 VIOLATION LOGGING: Record Alert Once Per Title Key ─────────────────
                         current_title_key = f"{active_process_lower}:{window_title}"
                         if self.last_flagged_title != current_title_key:
                             self.last_flagged_title = current_title_key
@@ -128,14 +171,17 @@ class WindowTracker:
                                 f"('{clean_title}') in {active_process}"
                             )
 
-                            print(f"\n{'='*75}")
-                            print(f"🚨 [UNAUTHORIZED APP / WEBSITE OPENED — H2]")
-                            print(f"   {formatted_log}")
-                            print(f"   Category / Site : {site_category}")
-                            print(f"   Page / Tab Title: {clean_title}")
-                            print(f"   Process Name    : {active_process}")
-                            print(f"   Executable Path : {exe_path}")
-                            print(f"{'='*75}\n")
+                            try:
+                                print(f"\n{'='*75}")
+                                print(f"[UNAUTHORIZED APP / WEBSITE OPENED - H2]")
+                                print(f"   {formatted_log}")
+                                print(f"   Category / Site : {site_category}")
+                                print(f"   Page / Tab Title: {clean_title}")
+                                print(f"   Process Name    : {active_process}")
+                                print(f"   Executable Path : {exe_path}")
+                                print(f"{'='*75}\n")
+                            except Exception:
+                                pass
 
                             json_record = {
                                 "timestamp": full_date,
@@ -151,7 +197,10 @@ class WindowTracker:
                             }
                             log_path = _write_window_log_file(json_record)
                             if log_path:
-                                print(f"📁 Forensic Log Saved → {log_path}\n")
+                                try:
+                                    print(f"Forensic Log Saved -> {log_path}\n")
+                                except Exception:
+                                    pass
 
                             if self.callback:
                                 v_info = VIOLATION_CODES.get("H2", {"title": "Unauthorized Application Execution", "severity": "HIGH"})

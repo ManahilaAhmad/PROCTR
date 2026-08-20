@@ -231,7 +231,7 @@ class ClipboardMonitor:
             "is_safe_zone": is_safe_zone
         }
         log_msg = f"at time {now_time} {char_count} characters were copied from {file_path}"
-        print(f"\n📋 [COPY EVENT LOGGED]")
+        print(f"\n[COPY EVENT LOGGED]")
         print(f"   --> {log_msg}")
         print(f"   App Name: [{proc}] '{title}'")
         print(f"   Snippet : '{snippet}'\n")
@@ -274,7 +274,7 @@ class ClipboardMonitor:
         src = self.pending_copy
 
         now_time = time.strftime("%H:%M:%S")
-        print(f"\n📋 [PASTE EVENT LOGGED]")
+        print(f"\n[PASTE EVENT LOGGED]")
         print(f"   --> at time {now_time} Paste action performed in [{proc_dest}] '{title_dest}'")
         print(f"   Target Path: {file_path_dest}\n")
 
@@ -298,15 +298,18 @@ class ClipboardMonitor:
                 f"were copied from {src['file_path']} to {file_path_dest}"
             )
 
-            print(f"\n{'='*75}")
-            print(f"🚨 [{v_title.upper()} — H4a]")
-            print(f"   {formatted_log}")
-            print(f"   Source App : [{src['proc']}] '{src['title']}'")
-            print(f"   Source Path: {src['file_path']}")
-            print(f"   Dest Path  : {file_path_dest}")
-            print(f"   Chars/Words: {src['char_count']} chars, {src['word_count']} words")
-            print(f"   Snippet    : '{src['snippet']}'")
-            print(f"{'='*75}\n")
+            try:
+                print(f"\n{'='*75}")
+                print(f"[UNAUTHORIZED COPY-PASTE BREACH - H4a]")
+                print(f"   {formatted_log}")
+                print(f"   Source App : [{src['proc']}] '{src['title']}'")
+                print(f"   Source Path: {src['file_path']}")
+                print(f"   Dest Path  : {file_path_dest}")
+                print(f"   Chars/Words: {src['char_count']} chars, {src['word_count']} words")
+                print(f"   Snippet    : '{src['snippet']}'")
+                print(f"{'='*75}\n")
+            except Exception:
+                pass
 
             json_record = {
                 "timestamp": src["timestamp"],
@@ -325,7 +328,10 @@ class ClipboardMonitor:
             }
             log_path = _write_clipboard_log_file(json_record)
             if log_path:
-                print(f"📁 Forensic Log Saved → {log_path}\n")
+                try:
+                    print(f"Forensic Log Saved -> {log_path}\n")
+                except Exception:
+                    pass
 
             if self.auto_clear:
                 self._clear_clipboard()

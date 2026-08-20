@@ -455,7 +455,7 @@ function renderTeacherScheduleTable(schedule) {
 
     // Check permissions: Is current user the assigned Invigilator for this exam?
     const isInvigilator = item.is_invigilator || (item.invigilator_id && String(item.invigilator_id) === String(currentUser?.teacherId));
-    const isCompleted = item.status === 'Completed' || item.status === 'ENDED' || item.exam_status === 'Completed' || item.live_session_status === 'COMPLETED';
+    const isCompleted = item.live_session_status === 'ENDED' || item.live_session_status === 'COMPLETED';
     const hasSubmissions = item.submission_count > 0;
 
     // Check if exam date+end_time has already passed
@@ -468,17 +468,15 @@ function renderTeacherScheduleTable(schedule) {
     }
 
     let actionBtn = '';
-    if (isCompleted || (examExpired && hasSubmissions)) {
-      // Exam was conducted & submissions exist
+    if (isCompleted) {
+      // Exam was explicitly completed by invigilator
       actionBtn = `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions & Logs</button>`;
-    } else if (examExpired && !hasSubmissions) {
-      // Date passed but exam was never conducted
-      actionBtn = `<span style="display:inline-flex; align-items:center; gap:5px; background:#fee2e2; color:#b91c1c; padding:5px 10px; border-radius:8px; font-size:11px; font-weight:700;">❌ Exam Not Conducted</span>`;
     } else if (isInvigilator) {
+      // Assigned Invigilator can create & start live session
       actionBtn = `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
     } else {
-      // Course Instructor only (Not Invigilator) — exam not yet expired
-      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session. All student submissions, reports, and logs will be sent to your portal when the exam finishes.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
+      // Course Instructor only (Not Invigilator)
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
     }
 
     return `
@@ -557,6 +555,293 @@ function formatSecondsToHMS(secs) {
 
 let teacherLocalCountdown = null; // client-side ticking interval for teacher timer
 
+let selectedStudentFilter = null;
+let shownToastViolationIds = new Set();
+window.lastPollSessionData = null;
+
+function createToastContainer() {
+  let c = document.getElementById('critical-toast-container');
+  if (!c) {
+    c = document.createElement('div');
+    c.id = 'critical-toast-container';
+    c.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+      width: 350px;
+      max-width: 90vw;
+      pointer-events: auto;
+    `;
+    document.body.appendChild(c);
+  }
+  return c;
+}
+
+function showCriticalCheatingToast(v) {
+  const container = createToastContainer();
+  const toast = document.createElement('div');
+  toast.className = 'critical-cheating-toast';
+  toast.style.cssText = `
+    background: #ffffff;
+    border: 2px solid #ef4444;
+    border-left: 6px solid #dc2626;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 10px 25px rgba(220, 38, 38, 0.22);
+    animation: slideInRight 0.3s ease-out;
+    position: relative;
+    font-family: var(--font-sans);
+  `;
+
+  const titleText = v.surface_title || v.title || 'CRITICAL CHEATING BREACH';
+  const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+  toast.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <span style="font-size:11px; font-weight:800; color:#dc2626; text-transform:uppercase; letter-spacing:0.5px;">🚨 CRITICAL CHEATING ALERT</span>
+      <span style="font-size:11px; color:#64748b;">${timeStr}</span>
+    </div>
+    <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:2px;">
+      ${v.name || 'Candidate'} <span style="font-family:var(--font-mono); color:#0284c7;">(${v.reg_no || '231593'})</span>
+    </div>
+    <div style="font-size:13px; font-weight:700; color:#dc2626; margin-bottom:4px;">
+      ${titleText}
+    </div>
+    <div style="font-size:12px; color:#475569; line-height:1.4;">
+      ${v.description || ''}
+    </div>
+    <button style="position:absolute; top:8px; right:8px; background:none; border:none; color:#94a3b8; font-size:14px; cursor:pointer;" onclick="this.parentElement.remove()">✕</button>
+  `;
+
+  container.appendChild(toast);
+  setTimeout(() => {
+    if (toast.parentElement) toast.remove();
+  }, 7000);
+}
+
+function selectStudentCandidateFilter(regNo, name) {
+  const targetReg = String(regNo);
+  if (selectedStudentFilter === targetReg) {
+    clearStudentCandidateFilter();
+    return;
+  }
+  selectedStudentFilter = targetReg;
+
+  const header = document.getElementById('filter-active-header');
+  const nameEl = document.getElementById('filter-student-name');
+  const btnClear = document.getElementById('btn-clear-student-filter');
+  if (header) header.style.display = 'flex';
+  if (nameEl) nameEl.textContent = `${name} (${regNo})`;
+  if (btnClear) btnClear.style.display = 'inline-block';
+
+  if (window.lastPollSessionData) {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
+window.selectStudentCandidateFilter = selectStudentCandidateFilter;
+
+function clearStudentCandidateFilter() {
+  selectedStudentFilter = null;
+  const header = document.getElementById('filter-active-header');
+  const btnClear = document.getElementById('btn-clear-student-filter');
+  if (header) header.style.display = 'none';
+  if (btnClear) btnClear.style.display = 'none';
+
+  if (window.lastPollSessionData) {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
+window.clearStudentCandidateFilter = clearStudentCandidateFilter;
+
+function renderInvigilatorLiveRoomUI(session) {
+  if (!session) return;
+
+  // 1. Update connected count
+  const connEl = document.getElementById('room-connected-count');
+  if (connEl) connEl.textContent = `${session.connectedStudents || 0} Connected`;
+
+  const statConn = document.getElementById('stat-connected');
+  if (statConn) statConn.textContent = session.connectedStudents || 0;
+
+  const candCountVal = document.getElementById('candidate-count-val');
+  if (candCountVal) candCountVal.textContent = session.connectedStudents || 0;
+
+  // 2. Sync teacher countdown from server
+  if (session.secondsRemaining !== null && session.secondsRemaining !== undefined) {
+    if (teacherLocalCountdown) clearInterval(teacherLocalCountdown);
+    let secs = Math.max(0, session.secondsRemaining);
+    const timerEl = document.getElementById('teacher-timer');
+    if (timerEl) {
+      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+    }
+    teacherLocalCountdown = setInterval(() => {
+      secs = Math.max(0, secs - 1);
+      const el = document.getElementById('teacher-timer');
+      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      if (secs <= 0) clearInterval(teacherLocalCountdown);
+    }, 1000);
+  }
+
+  // 3. Render Connected Candidates Grid
+  const grid = document.getElementById('monitoring-candidates-grid');
+  const tbody = document.getElementById('room-students-tbody');
+
+  const connectedList = session.connectedList || [];
+  const recentViolations = session.recentViolations || [];
+
+  if (tbody) {
+    if (connectedList.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">Waiting for students to join with Passcode...</td></tr>';
+    } else {
+      tbody.innerHTML = connectedList.map(s => `
+        <tr>
+          <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
+          <td><span class="status-pill active-pill">Connected</span></td>
+          <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  if (grid) {
+    if (connectedList.length === 0) {
+      grid.innerHTML = '<div class="empty-state" style="padding:20px; grid-column:1/-1;">Waiting for candidate PCs to join live session...</div>';
+    } else {
+      grid.innerHTML = connectedList.map(s => {
+        const studentReg = String(s.reg_no);
+        const studentViolations = recentViolations.filter(v => String(v.reg_no) === studentReg || String(v.student_id) === String(s.student_id));
+        const isSelected = selectedStudentFilter === studentReg;
+        const violBadge = studentViolations.length > 0
+          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">🚨 ${studentViolations.length} Alert(s)</span>`
+          : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">🟢 Clean</span>`;
+
+        return `
+          <div class="candidate-card-item" data-reg-no="${studentReg}" onclick="selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div style="font-size:14px; font-weight:800; color:var(--navy);">${s.name}</div>
+              ${violBadge}
+            </div>
+            <div style="font-size:12px; font-family:var(--font-mono); color:var(--grey-600); font-weight:600;">
+              Reg No: <span style="color:var(--teal);">${s.reg_no}</span>
+            </div>
+            <div style="font-size:11px; color:var(--grey-400); margin-top:6px;">
+              Joined at ${new Date(s.started_at || Date.now()).toLocaleTimeString()}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // 4. Trigger Real-Time Critical Cheating Notification Toasts
+  recentViolations.forEach(v => {
+    const isCritical = v.severity === 'CRITICAL' || ['H1', 'H2', 'H5', 'N1'].includes(v.violation_code);
+    const violationKey = `${v.id || ''}_${v.violation_code}_${v.reg_no}_${v.timestamp}`;
+    if (isCritical && !shownToastViolationIds.has(violationKey)) {
+      shownToastViolationIds.add(violationKey);
+      showCriticalCheatingToast(v);
+    }
+  });
+
+  // 5. Render Security Feeds (Filtered if selectedStudentFilter is active)
+  renderInvigilatorFeeds(session);
+}
+
+function formatCleanLogSummary(v) {
+  const code = v.violation_code || v.code || 'H2';
+  const name = v.name || 'Student';
+  const reg = v.reg_no || '231593';
+  const desc = v.description || v.detected_value || '';
+  const title = v.surface_title || v.title || 'Security Violation';
+
+  let actionText = '';
+
+  if (code === 'H1') {
+    actionText = `connected an unauthorized USB Storage Device.`;
+  } else if (code === 'H2') {
+    const descLower = desc.toLowerCase();
+    if (descLower.includes('claude')) {
+      actionText = `opened Claude AI website.`;
+    } else if (descLower.includes('chatgpt') || descLower.includes('openai')) {
+      actionText = `opened ChatGPT AI website.`;
+    } else if (descLower.includes('gemini') || descLower.includes('bard')) {
+      actionText = `opened Google Gemini AI website.`;
+    } else if (descLower.includes('copilot') || descLower.includes('perplexity')) {
+      actionText = `opened AI Assistant website.`;
+    } else if (desc.includes('Opened') || desc.includes('opened')) {
+      const siteMatch = desc.match(/'([^']+)'/);
+      const siteName = siteMatch ? siteMatch[1] : 'unauthorized application/website';
+      actionText = `opened '${siteName}'.`;
+    } else {
+      actionText = `accessed an unauthorized process/website.`;
+    }
+  } else if (code === 'H4a') {
+    const charMatch = desc.match(/(\d+)\s*characters/i);
+    const charCount = charMatch ? `${charMatch[1]} characters` : 'external text';
+    actionText = `attempted copy-paste breach (${charCount} into workspace).`;
+  } else if (code === 'H3') {
+    const secMatch = desc.match(/for\s*(\d+)\s*seconds/i);
+    const durationStr = secMatch ? `for ${secMatch[1]}s` : '';
+    actionText = `switched focus away from exam workspace ${durationStr}.`;
+  } else if (code === 'N1') {
+    actionText = `connected to an unauthorized non-lab network / mobile hotspot.`;
+  } else {
+    actionText = title || 'triggered a security violation.';
+  }
+
+  return `${name} (${reg}) ${actionText}`;
+}
+
+function renderInvigilatorFeeds(session) {
+  const roomFeed = document.getElementById('room-alerts-feed');
+  const teacherFeed = document.getElementById('teacher-feed');
+  const alertsCount = document.getElementById('room-alerts-count');
+  const teacherAlertCount = document.getElementById('teacher-alert-count');
+  const statTotalViolations = document.getElementById('stat-total-violations');
+
+  let violations = session.recentViolations || [];
+  if (selectedStudentFilter) {
+    violations = violations.filter(v => String(v.reg_no) === selectedStudentFilter || String(v.student_id) === selectedStudentFilter);
+  }
+
+  if (alertsCount) alertsCount.textContent = `${violations.length} Alert(s)`;
+  if (teacherAlertCount) teacherAlertCount.textContent = `${violations.length} Alert(s)`;
+  if (statTotalViolations) statTotalViolations.textContent = session.recentViolations?.length || 0;
+
+  const feedHTML = violations.length === 0
+    ? `<div class="empty-state" style="padding:24px;">${selectedStudentFilter ? 'No security violations recorded for this candidate.' : 'Monitoring is active. Security alerts will stream here live.'}</div>`
+    : violations.map(v => {
+        const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const badgeColor = v.severity === 'CRITICAL' ? '#dc2626' : '#d97706';
+        const badgeBg = v.severity === 'CRITICAL' ? '#fee2e2' : '#fef3c7';
+        const cleanSummary = formatCleanLogSummary(v);
+
+        return `
+          <div class="alert-card" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span style="font-size:13px; font-weight:800; color:#0f172a;">${v.name} <span class="mono" style="font-size:11px; color:#0284c7;">(${v.reg_no})</span></span>
+              <span style="font-size:10px; font-weight:800; background:${badgeBg}; color:${badgeColor}; padding:2px 8px; border-radius:10px;">${v.severity || 'HIGH'}</span>
+            </div>
+            <div style="font-size:13px; font-weight:700; color:#dc2626; margin-bottom:4px;">
+              ${v.surface_title || v.title}
+            </div>
+            <div style="font-size:12.5px; color:#334155; font-weight:600; line-height:1.4; background:#f8fafc; padding:8px 12px; border-radius:6px; border-left:3px solid ${badgeColor}; margin-top:4px;">
+              📌 ${cleanSummary}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:11px; color:#64748b;">
+              <span>Violation Code: <strong style="color:#0f172a; font-family:var(--font-mono);">${v.violation_code}</strong></span>
+              <span>${timeStr}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  if (roomFeed) roomFeed.innerHTML = feedHTML;
+  if (teacherFeed) teacherFeed.innerHTML = feedHTML;
+}
+
 function pollInvigilatorLiveRoom(sessionCode) {
   if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
   invigilatorPollInterval = setInterval(async () => {
@@ -565,55 +850,23 @@ function pollInvigilatorLiveRoom(sessionCode) {
       if (!res.ok) return;
       const data = await res.json();
       if (data.session) {
-        // Update connected count
-        const connEl = document.getElementById('room-connected-count');
-        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
-
-        // Sync teacher countdown from server every 5s, tick locally every second
-        if (data.session.secondsRemaining !== null && data.session.secondsRemaining !== undefined) {
-          if (teacherLocalCountdown) clearInterval(teacherLocalCountdown);
-          let secs = Math.max(0, data.session.secondsRemaining);
-          const timerEl = document.getElementById('teacher-timer');
-          if (timerEl) {
-            timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
-          }
-          teacherLocalCountdown = setInterval(() => {
-            secs = Math.max(0, secs - 1);
-            const el = document.getElementById('teacher-timer');
-            if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
-            if (secs <= 0) clearInterval(teacherLocalCountdown);
-          }, 1000);
-        }
-
-        // Update connected student table
-        const tbody = document.getElementById('room-students-tbody');
-        if (tbody && data.session.connectedList) {
-          if (data.session.connectedList.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">Waiting for students to join with Passcode...</td></tr>';
-          } else {
-            tbody.innerHTML = data.session.connectedList.map(s => `
-              <tr>
-                <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
-                <td><span class="status-pill active-pill">Connected</span></td>
-                <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
-              </tr>
-            `).join('');
-          }
-        }
+        window.lastPollSessionData = data.session;
+        renderInvigilatorLiveRoomUI(data.session);
       }
     } catch (err) {
       console.warn('Error polling invigilator room status:', err.message);
     }
-  }, 5000); // Sync from server every 5s; local interval ticks every second
+  }, 3000);
+
   // Kick off first poll immediately
   (async () => {
     try {
       const res = await fetch(`${API_BASE}/desktop/session/${sessionCode}/status`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.session && data.session.connectedStudents !== undefined) {
-        const connEl = document.getElementById('room-connected-count');
-        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
+      if (data.session) {
+        window.lastPollSessionData = data.session;
+        renderInvigilatorLiveRoomUI(data.session);
       }
     } catch (_) {}
   })();
@@ -693,6 +946,10 @@ if (roomBtnEnd) {
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
       if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+      if (window.proctrAPI) {
+        if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+        if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
+      }
       showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
     } catch (err) {
       console.error('Error ending session:', err);
@@ -789,6 +1046,10 @@ if (joinExamForm) {
         throw new Error(joinData.message || 'Incorrect Session ID or Passcode.');
       }
 
+      const sessionObj = joinData.session || joinData.data || {};
+      window.activeSessionId = sessionObj.session_id || joinData.session_id || null;
+      window.activeSessionCode = examCode;
+
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         const result = await window.proctrAPI.startExamWorkspace({
@@ -854,6 +1115,22 @@ function startStudentSessionPoll(sessionCode) {
 
       if (!session) return;
 
+      // 0. Check if Invigilator Ended Session
+      if (session.isSessionEnded || session.status === 'ENDED' || session.status === 'COMPLETED') {
+        if (studentPollInterval) clearInterval(studentPollInterval);
+        if (studentLocalCountdown) clearInterval(studentLocalCountdown);
+
+        if (window.proctrAPI) {
+          if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+          if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
+        }
+
+        const statusEl = document.getElementById('exam-status-text');
+        if (statusEl) statusEl.textContent = '🔒 Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
+        alert('🔴 The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
+        return;
+      }
+
       // 1. Check if Invigilator Revealed Question Paper
       if (session.isPaperRevealed) {
         const placeholder = document.getElementById('student-paper-placeholder');
@@ -865,13 +1142,21 @@ function startStudentSessionPoll(sessionCode) {
 
           if (session.examPaperUrl) {
             let paperUrl = session.examPaperUrl;
-            if (paperUrl.includes('sample_paper.pdf') || paperUrl.startsWith('file:///') || paperUrl.includes(':/')) {
+            if (paperUrl.startsWith('http://') || paperUrl.startsWith('https://')) {
+              // Full Cloudinary or external HTTPS URL — use directly
+            } else if (paperUrl.startsWith('file:///') || paperUrl.includes(':\\')) {
               const filename = paperUrl.split('/').pop().split('\\').pop();
               paperUrl = `http://localhost:5000/uploads/${filename}`;
-            } else if (!paperUrl.startsWith('http://') && !paperUrl.startsWith('https://')) {
+            } else {
               paperUrl = `http://localhost:5000${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
             }
-            iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+
+            const isWordDoc = paperUrl.toLowerCase().includes('.docx') || paperUrl.toLowerCase().includes('.doc');
+            if (isWordDoc) {
+              iframe.src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(paperUrl)}`;
+            } else {
+              iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+            }
           } else {
             // Render protected HTML document if no PDF URL uploaded
             const doc = iframe.contentWindow.document;
@@ -1160,8 +1445,9 @@ function addViolationCard(v, feedId, counterId) {
 
 async function logViolationToDB(v) {
   const payload = {
-    session_id: currentSessionId,
-    student_id: currentUser?.studentId || null,
+    session_id: window.activeSessionId || null,
+    session_code: window.activeSessionCode || activeInvigilationCode || null,
+    student_id: currentUser?.studentId || currentUser?.id || 101,
     violation_code: v.code || 'H0',
     title: v.title || 'Security Violation',
     description: v.detected_value ? `${v.description || ''} | ${v.detected_value}` : (v.description || ''),

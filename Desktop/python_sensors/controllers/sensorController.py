@@ -40,7 +40,7 @@ class SensorController:
 
         # 4. Initialize All Production OS Sensors
         self.usb_sensor = USBSensor(violation_callback=self.on_violation)
-        self.clipboard_sensor = ClipboardSensor(violation_callback=self.on_violation)
+        self.clipboard_sensor = ClipboardSensor(violation_callback=self.on_violation, auto_clear=True)
         self.window_sensor = WindowSensor(violation_callback=self.on_violation, custom_whitelist=custom_whitelist)
         self.fs_sensor = FileSystemSensor(workspace_path=self.workspace_ctrl.get_workspace_path(), violation_callback=self.on_violation)
         self.dns_sensor = DNSSensor(violation_callback=self.on_violation, active_blocking=True)

@@ -97,7 +97,12 @@ export const getSchedule = async (req, res) => {
       ORDER BY COALESCE(es.exam_date, e.proposed_date, e.created_at) DESC
     `, [teacherId]);
 
-    res.status(200).json({ status: 'success', schedule: result.rows });
+    const rows = result.rows.map(row => ({
+      ...row,
+      exam_paper_url: row.exam_paper_url ? getFileUrl(req, row.exam_paper_url) : null
+    }));
+
+    res.status(200).json({ status: 'success', schedule: rows });
   } catch (error) {
     console.error('Error fetching teacher schedule:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch schedule.' });
@@ -182,7 +187,7 @@ export const uploadPaper = async (req, res) => {
     }
 
     // Resolve URL: Cloudinary URL if Cloudinary is active, local URL otherwise
-    const fileUrl = getFileUrl(req, req.file.filename);
+    const fileUrl = getFileUrl(req, req.file);
 
     const teacherRes = await pool.query(`
       SELECT co.teacher_id
@@ -192,11 +197,19 @@ export const uploadPaper = async (req, res) => {
     `, [exam_id]);
     const teacherId = teacherRes.rows[0]?.teacher_id || null;
 
-    await pool.query(`
-      INSERT INTO question_paper (exam_id, uploaded_by, file_path, version)
-      VALUES ($1, $2, $3, 1)
-      ON CONFLICT DO NOTHING
-    `, [exam_id, teacherId, fileUrl]);
+    const checkPaper = await pool.query('SELECT question_paper_id FROM question_paper WHERE exam_id = $1', [exam_id]);
+    if (checkPaper.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO question_paper (exam_id, uploaded_by, file_path, uploaded_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [exam_id, teacherId, fileUrl]
+      );
+    } else {
+      await pool.query(
+        `UPDATE question_paper SET file_path = $1, uploaded_at = NOW() WHERE exam_id = $2`,
+        [fileUrl, exam_id]
+      );
+    }
 
     await pool.query(
       "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1",

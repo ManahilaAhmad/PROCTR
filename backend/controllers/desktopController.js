@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import { getFileUrl } from '../middleware/upload.js';
 
 /* ===========================================================
    1. CREATE LIVE EXAM SESSION (Invigilator Action)
@@ -155,6 +156,7 @@ export const joinLiveSession = async (req, res) => {
       status: 'success',
       message: 'Successfully connected to exam session!',
       session: {
+        session_id: session.session_id,
         sessionCode: session.session_code,
         examId: session.exam_id,
         isPaperRevealed: session.is_paper_revealed,
@@ -288,26 +290,64 @@ export const getSessionStatus = async (req, res) => {
 
     // Fetch connected student details
     const studentsRes = await pool.query(
-      `SELECT des.student_id, COALESCE(u.first_name || ' ' || u.last_name, 'Student') AS name, COALESCE(s.registration_no, '231593') AS reg_no, des.started_at
+      `SELECT DISTINCT ON (des.student_id) des.student_id, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name, COALESCE(s.registration_no, '231593') AS reg_no, des.started_at
        FROM desktop_exam_session des
        LEFT JOIN student s ON des.student_id = s.student_id
        LEFT JOIN users u ON s.user_id = u.user_id
-       WHERE des.status = 'ACTIVE'`
+       WHERE des.status = 'ACTIVE'
+       ORDER BY des.student_id, des.started_at DESC`
     );
+
+    // Fetch recent violation logs specifically for THIS live exam session
+    const violationsRes = await pool.query(
+      `SELECT dvl.*, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS student_name, COALESCE(s.registration_no, '231593') AS reg_no
+       FROM desktop_violation_log dvl
+       LEFT JOIN student s ON dvl.student_id = s.student_id
+       LEFT JOIN users u ON s.user_id = u.user_id
+       WHERE (dvl.session_id = $1 OR dvl.session_id IN (SELECT session_id FROM live_exam_session WHERE UPPER(session_code) = $2) OR $1 = 0)
+       ORDER BY dvl.detected_at DESC
+       LIMIT 50`,
+      [session.session_id || 0, codeUpper]
+    ).catch(() => ({ rows: [] }));
+
+    const HUMAN_MAP = {
+      'H1': 'USB Drive Inserted',
+      'H2': 'Blocked Website / App Access',
+      'H3': 'Untrusted Workspace File Detected',
+      'H4': 'Application Exit Attempted',
+      'H4b': 'Forced Application Shutdown',
+      'H5': 'Unauthorized Website Connection',
+      'N1': 'Non-Lab Network Connection'
+    };
+
+    const formattedViolations = (violationsRes.rows || []).map(v => ({
+      id: v.violation_id,
+      violation_code: v.violation_code,
+      student_id: v.student_id,
+      reg_no: v.reg_no || '231593',
+      name: v.student_name || 'Candidate',
+      surface_title: HUMAN_MAP[v.violation_code] || v.title || 'Security Violation',
+      description: v.description || '',
+      severity: v.severity || 'HIGH',
+      timestamp: v.detected_at
+    }));
 
     res.status(200).json({
       status: 'success',
       session: {
         sessionCode: session.session_code,
         passcode: session.passcode,
+        status: session.status,
+        isSessionEnded: session.status === 'ENDED' || session.status === 'COMPLETED',
         isPaperRevealed: session.is_paper_revealed,
         isTimerStarted: session.is_timer_started,
         durationMinutes: session.duration_minutes,
         timerStartTime: session.timer_start_time,
         secondsRemaining: secondsRemaining,
-        examPaperUrl: session.exam_paper_url || null,
+        examPaperUrl: session.exam_paper_url ? getFileUrl(req, session.exam_paper_url) : null,
         connectedStudents: studentsRes.rows.length,
-        connectedList: studentsRes.rows
+        connectedList: studentsRes.rows,
+        recentViolations: formattedViolations
       }
     });
   } catch (error) {
@@ -359,10 +399,31 @@ export const startSession = async (req, res) => {
    LOG DESKTOP SENSOR VIOLATION
 =========================================================== */
 export const logViolation = async (req, res) => {
-  const { session_id, student_id, violation_code, title, description, severity } = req.body;
+  const { session_id, session_code, student_id, violation_code, title, description, severity } = req.body;
   try {
     if (!violation_code || !title) {
       return res.status(400).json({ status: 'error', message: 'violation_code and title are required.' });
+    }
+
+    let targetSessionId = session_id || null;
+    if (!targetSessionId) {
+      // Auto-link to currently active live_exam_session if session_id was omitted
+      const activeSess = await pool.query(
+        `SELECT session_id FROM live_exam_session 
+         WHERE ${session_code ? 'session_code = $1' : "(status = 'ACTIVE' OR status = 'SCHEDULED' OR status = 'IN_PROGRESS')"}
+         ORDER BY session_id DESC LIMIT 1`,
+        session_code ? [session_code] : []
+      ).catch(() => ({ rows: [] }));
+
+      if (activeSess.rows && activeSess.rows.length > 0) {
+        targetSessionId = activeSess.rows[0].session_id;
+      } else {
+        // Fallback to most recent live_exam_session
+        const fallback = await pool.query(`SELECT session_id FROM live_exam_session ORDER BY session_id DESC LIMIT 1`).catch(() => ({ rows: [] }));
+        if (fallback.rows && fallback.rows.length > 0) {
+          targetSessionId = fallback.rows[0].session_id;
+        }
+      }
     }
 
     await pool.query(`
@@ -382,7 +443,7 @@ export const logViolation = async (req, res) => {
       `INSERT INTO desktop_violation_log (session_id, student_id, violation_code, title, description, severity)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING violation_id, detected_at`,
-      [session_id || null, student_id || null, violation_code, title, description, severity || 'HIGH']
+      [targetSessionId, student_id || null, violation_code, title, description, severity || 'HIGH']
     );
 
     res.status(200).json({

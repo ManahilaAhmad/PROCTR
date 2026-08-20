@@ -22,9 +22,9 @@ if (hasCloudinaryEnv) {
 
     if (cloudinary && CloudinaryStorage) {
       cloudinary.config({
-        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-        api_key: process.env.CLOUDINARY_API_KEY,
-        api_secret: process.env.CLOUDINARY_API_SECRET,
+        cloud_name: (process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+        api_key: (process.env.CLOUDINARY_API_KEY || '').trim(),
+        api_secret: (process.env.CLOUDINARY_API_SECRET || '').trim(),
       });
       useCloudinary = true;
       console.log('[Upload] ✅ Cloudinary storage active');
@@ -47,12 +47,14 @@ let imageStorage;
 if (useCloudinary && CloudinaryStorage && cloudinary) {
   examPaperStorage = new CloudinaryStorage({
     cloudinary,
-    params: async (req, file) => ({
-      folder: 'proctr/exam_papers',
-      resource_type: 'raw',
-      public_id: `exam_${Date.now()}`,
-      format: path.extname(file.originalname).slice(1).toLowerCase(),
-    }),
+    params: async (req, file) => {
+      const ext = path.extname(file.originalname).slice(1).toLowerCase() || 'pdf';
+      return {
+        folder: 'proctr/exam_papers',
+        resource_type: 'raw',
+        public_id: `exam_${Date.now()}.${ext}`,
+      };
+    },
   });
 
   imageStorage = new CloudinaryStorage({
@@ -85,10 +87,16 @@ if (useCloudinary && CloudinaryStorage && cloudinary) {
 
 // ─── FILE FILTERS ─────────────────────────────────────────────────
 const pdfFilter = (req, file, cb) => {
-  if (file.mimetype === 'application/pdf' || path.extname(file.originalname).toLowerCase() === '.pdf') {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedTypes = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword'
+  ];
+  if (allowedTypes.includes(file.mimetype) || ['.pdf', '.docx', '.doc'].includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only PDF files are allowed for exam papers.'), false);
+    cb(new Error('Only PDF and Word (.docx, .doc) files are allowed for exam papers.'), false);
   }
 };
 
@@ -119,15 +127,25 @@ export const upload = uploadExamPaper;
 export const uploadImage = uploadProfilePicture;
 
 // ─── HELPER TO GET ACCESSIBLE URL ─────────────────────────────────
-export const getFileUrl = (req, file) => {
-  if (!file) return null;
+export const getFileUrl = (req, fileOrPath) => {
+  if (!fileOrPath) return null;
 
-  if (file.path && (file.path.startsWith('http://') || file.path.startsWith('https://'))) {
-    return file.path;
+  if (typeof fileOrPath === 'string') {
+    if (fileOrPath.startsWith('http://') || fileOrPath.startsWith('https://')) {
+      return fileOrPath;
+    }
+    const host = req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:5000';
+    const cleanPath = fileOrPath.startsWith('/') ? fileOrPath : `/${fileOrPath}`;
+    return `${host}${cleanPath}`;
   }
-  if (file.secure_url) return file.secure_url;
-  if (file.url) return file.url;
 
-  const filename = file.filename || path.basename(file.path);
-  return `${req.protocol}://${req.get('host')}/uploads/${filename}`;
+  if (fileOrPath.path && (fileOrPath.path.startsWith('http://') || fileOrPath.path.startsWith('https://'))) {
+    return fileOrPath.path;
+  }
+  if (fileOrPath.secure_url) return fileOrPath.secure_url;
+  if (fileOrPath.url) return fileOrPath.url;
+
+  const host = req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:5000';
+  const filename = fileOrPath.filename || path.basename(fileOrPath.path);
+  return `${host}/uploads/${filename}`;
 };

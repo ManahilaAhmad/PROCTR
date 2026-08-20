@@ -514,8 +514,18 @@ export default function TeacherPage({ activePage, setPage, user }) {
           <Card>
             <h3 style={{ margin: "0 0 20px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Upload Exam Paper</h3>
             <Select label="Select Exam" value={selectedExamForUpload} onChange={e => setSelectedExamForUpload(e.target.value)}>
-              <option value="">Choose exam…</option>
-              {exams.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} – {e.section_name}</option>)}
+              {exams.filter(e => !e.exam_paper_url).length === 0 ? (
+                <option value="">✓ All exam papers uploaded</option>
+              ) : (
+                <>
+                  <option value="">Choose exam…</option>
+                  {exams.filter(e => !e.exam_paper_url).map(e => (
+                    <option key={e.exam_id} value={e.exam_id}>
+                      {e.course_code} {e.exam_type} – {e.section_name}
+                    </option>
+                  ))}
+                </>
+              )}
             </Select>
 
             <input

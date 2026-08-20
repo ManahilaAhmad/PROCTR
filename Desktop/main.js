@@ -34,8 +34,8 @@ function createWindow() {
     mainWindow.webContents.send('app-close-warning');
   });
 
-  // Start Background Python Sensor Engine (Person 1 Core)
-  startPythonSensors(1, 101);
+  // DO NOT spawn Python sensors on app launch.
+  // Sensors are spawned ONLY when a student actively joins an exam workspace via start-exam-workspace.
 }
 
 function startPythonSensors(examId, studentId) {
@@ -110,14 +110,16 @@ app.on('window-all-closed', () => {
 // IPC Handler to stop sensors manually if needed
 ipcMain.handle('stop-sensors', () => {
   if (pythonProcess) {
+    console.log('[Electron] Stopping Python Sensor Process PID:', pythonProcess.pid);
     pythonProcess.kill();
+    pythonProcess = null;
     return { status: 'stopped' };
   }
   return { status: 'no_process' };
 });
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
-ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode }) => {
+ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, isStudent }) => {
   const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
   
   // Ensure Root directory exists
@@ -141,11 +143,13 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
     fs.mkdirSync(starterPath, { recursive: true });
     fs.mkdirSync(logsPath, { recursive: true });
 
-    // Restart Python sensor engine targeted at this workspace
-    if (pythonProcess) {
-      pythonProcess.kill();
+    // Restart Python sensor engine ONLY for Student sessions
+    if (isStudent !== false) {
+      if (pythonProcess) {
+        pythonProcess.kill();
+      }
+      startPythonSensors(examId || 1, studentId || 101);
     }
-    startPythonSensors(examId || 1, studentId || 101);
 
     return {
       status: 'success',
@@ -179,6 +183,7 @@ ipcMain.handle('set-screen-protection', async (event, enable) => {
   }
   return { status: 'error' };
 });
+
 
 // IPC Handler to Minimize App Window on Screenshot Attempt
 ipcMain.handle('minimize-window', async () => {
