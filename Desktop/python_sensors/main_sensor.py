@@ -3,6 +3,7 @@ import os
 import json
 import time
 import argparse
+import threading
 
 # Ensure current package can be imported cleanly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,6 +15,7 @@ from python_sensors.sensors.usb_detector import USBDetector
 from python_sensors.sensors.clipboard_monitor import ClipboardMonitor
 from python_sensors.sensors.window_tracker import WindowTracker
 from python_sensors.sensors.fs_watcher import FileSystemWatcher
+from python_sensors.sensors.dnsSensor import DNSSensor
 
 class SensorOrchestrator:
     """
@@ -38,9 +40,10 @@ class SensorOrchestrator:
         
         # 4. Initialize Sensor Modules
         self.usb_sensor = USBDetector(callback_on_violation=self.on_violation_detected)
-        self.clipboard_sensor = ClipboardMonitor(callback_on_violation=self.on_violation_detected)
+        self.clipboard_sensor = ClipboardMonitor(callback_on_violation=self.on_violation_detected, auto_clear=True)
         self.window_sensor = WindowTracker(callback_on_violation=self.on_violation_detected, custom_whitelist=custom_whitelist)
         self.fs_sensor = FileSystemWatcher(workspace_path=self.workspace_mgr.get_workspace_path(), callback_on_violation=self.on_violation_detected)
+        self.dns_sensor = DNSSensor(violation_callback=self.on_violation_detected)
 
     def on_violation_detected(self, code, title, severity, description, detected_value=""):
         """Triggered whenever any sensor detects a violation (H1 - H4b)."""
@@ -59,8 +62,42 @@ class SensorOrchestrator:
         
         print(json.dumps(alert_payload), flush=True)
 
+    def update_policy(self, allowed_domains=None, allowed_processes=None):
+        """Allows Teacher/Invigilator live policy overrides during active exam."""
+        if allowed_domains is not None:
+            self.dns_sensor.update_allowed_domains(allowed_domains)
+        if allowed_processes is not None:
+            self.window_sensor.update_whitelist(allowed_processes)
+        
+        print(json.dumps({
+            "type": "POLICY_UPDATED",
+            "exam_id": self.exam_id,
+            "allowed_domains": list(self.dns_sensor.allowed_domains),
+            "allowed_processes": list(self.window_sensor.whitelist)
+        }), flush=True)
+
+    def _listen_stdin_commands(self):
+        """Reads stdin IPC commands sent by Electron in real-time."""
+        def stdin_loop():
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    cmd = json.loads(line)
+                    if cmd.get("command") == "UPDATE_POLICY":
+                        self.update_policy(
+                            allowed_domains=cmd.get("allowed_domains"),
+                            allowed_processes=cmd.get("allowed_processes")
+                        )
+                except Exception:
+                    pass
+        t = threading.Thread(target=stdin_loop, daemon=True)
+        t.start()
+
     def start_all_sensors(self):
         """Starts all sensor threads."""
+        self._listen_stdin_commands()
         print(json.dumps({
             "type": "SENSOR_SYSTEM_START",
             "message": "PROCTR Sensors Initialized Successfully",
@@ -71,6 +108,7 @@ class SensorOrchestrator:
         self.clipboard_sensor.start()
         self.window_sensor.start()
         self.fs_sensor.start()
+        self.dns_sensor.start()
 
     def stop_all_sensors(self):
         """Stops all background sensors gracefully."""
@@ -78,6 +116,7 @@ class SensorOrchestrator:
         self.clipboard_sensor.stop()
         self.window_sensor.stop()
         self.fs_sensor.stop()
+        self.dns_sensor.stop()
         print(json.dumps({"type": "SENSOR_SYSTEM_STOP", "message": "Sensors stopped."}), flush=True)
 
 

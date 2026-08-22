@@ -3,6 +3,9 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
+// Suppress harmless Chromium GPU cache warnings on Windows
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 let mainWindow;
 let pythonProcess = null;
 
@@ -20,6 +23,9 @@ function createWindow() {
     }
   });
 
+  // Default screen protection to FALSE on app launch (enabled only during active exam)
+  mainWindow.setContentProtection(false);
+
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   // Intercept window close to warn student
@@ -28,8 +34,8 @@ function createWindow() {
     mainWindow.webContents.send('app-close-warning');
   });
 
-  // Start Background Python Sensor Engine (Person 1 Core)
-  startPythonSensors(1, 101);
+  // DO NOT spawn Python sensors on app launch.
+  // Sensors are spawned ONLY when a student actively joins an exam workspace via start-exam-workspace.
 }
 
 function startPythonSensors(examId, studentId) {
@@ -104,14 +110,16 @@ app.on('window-all-closed', () => {
 // IPC Handler to stop sensors manually if needed
 ipcMain.handle('stop-sensors', () => {
   if (pythonProcess) {
+    console.log('[Electron] Stopping Python Sensor Process PID:', pythonProcess.pid);
     pythonProcess.kill();
+    pythonProcess = null;
     return { status: 'stopped' };
   }
   return { status: 'no_process' };
 });
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
-ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode }) => {
+ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, isStudent }) => {
   const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
   
   // Ensure Root directory exists
@@ -135,11 +143,13 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
     fs.mkdirSync(starterPath, { recursive: true });
     fs.mkdirSync(logsPath, { recursive: true });
 
-    // Restart Python sensor engine targeted at this workspace
-    if (pythonProcess) {
-      pythonProcess.kill();
+    // Restart Python sensor engine ONLY for Student sessions
+    if (isStudent !== false) {
+      if (pythonProcess) {
+        pythonProcess.kill();
+      }
+      startPythonSensors(examId || 1, studentId || 101);
     }
-    startPythonSensors(examId || 1, studentId || 101);
 
     return {
       status: 'success',
@@ -160,6 +170,57 @@ ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
     await shell.openPath(folderPath);
     return { status: 'success' };
   } catch (err) {
+    return { status: 'error', message: err.message };
+  }
+});
+
+// IPC Handler to Dynamically Enable/Disable Screen Protection (Anti-Screenshot)
+ipcMain.handle('set-screen-protection', async (event, enable) => {
+  if (mainWindow) {
+    mainWindow.setContentProtection(Boolean(enable));
+    console.log(`[Electron] Window Screen Protection set to: ${enable}`);
+    return { status: 'success', protected: Boolean(enable) };
+  }
+  return { status: 'error' };
+});
+
+
+// IPC Handler to Minimize App Window on Screenshot Attempt
+ipcMain.handle('minimize-window', async () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+    console.log('[Electron] Window minimized due to screenshot attempt during active exam.');
+    return { status: 'success' };
+  }
+  return { status: 'error' };
+});
+
+// IPC Handler — Write local log file (offline-first storage)
+// Logs are always written locally, even when backend is unreachable
+ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }) => {
+  try {
+    const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+    const logsDir = path.join(rootDir, 'offline_logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const logFile = path.join(logsDir, `offline_log_${date}.json`);
+
+    // Read existing log file
+    let logs = [];
+    if (fs.existsSync(logFile)) {
+      try { logs = JSON.parse(fs.readFileSync(logFile, 'utf8')); } catch { logs = []; }
+    }
+
+    logs.push({ endpoint, payload, timestamp, written_at: new Date().toISOString() });
+
+    // Keep last 2000 entries per file
+    if (logs.length > 2000) logs = logs.slice(-2000);
+
+    fs.writeFileSync(logFile, JSON.stringify(logs, null, 2), 'utf8');
+    return { status: 'success', path: logFile };
+  } catch (err) {
+    console.error('[Electron] Failed to write local log:', err.message);
     return { status: 'error', message: err.message };
   }
 });

@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import bcrypt from 'bcryptjs';
+import { getFileUrl } from '../middleware/upload.js';
 
 /* ===========================================================
    LOGIN
@@ -207,7 +208,7 @@ export const updateProfilePicture = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
     }
 
-    const fileUrl = `http://localhost:${process.env.PORT || 5000}/uploads/${req.file.filename}`;
+    const fileUrl = getFileUrl(req, req.file.filename);
 
     // Ensure profile_picture_url column exists on users table
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_url TEXT NULL');

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -7,8 +7,7 @@ import Btn from "../components/common/Btn";
 import Input from "../components/common/Input";
 import Badge from "../components/common/Badge";
 import StatCard from "../components/common/StatCard";
-
-import { useEffect } from "react";
+import { API_BASE_URL } from "../config/apiConfig";
 
 export default function StudentPage({ activePage, user }) {
   const [selectedExam, setSelectedExam] = useState(null);
@@ -23,13 +22,13 @@ export default function StudentPage({ activePage, user }) {
 
   useEffect(() => {
     if (user?.userId) {
-      fetch(`http://localhost:5000/api/notifications/${user.userId}`)
+      fetch(`${API_BASE_URL}/notifications/${user.userId}`)
         .then(res => res.json())
         .then(data => { if (data.status === "success") setNotifications(data.notifications); });
     }
 
     if (user?.userId) {
-      fetch(`http://localhost:5000/api/student/${user.userId}/schedule`)
+      fetch(`${API_BASE_URL}/student/${user.userId}/schedule`)
         .then(res => res.json())
         .then(data => { if (data.status === "success") setSchedule(data.schedule); });
     }
@@ -72,7 +71,7 @@ export default function StudentPage({ activePage, user }) {
       showToast("Session error. Please log in again.", "warn");
       return;
     }
-    fetch("http://localhost:5000/api/auth/change-password", {
+    fetch(`${API_BASE_URL}/auth/change-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, current_password: currentPass, new_password: newPass }),
@@ -106,7 +105,7 @@ export default function StudentPage({ activePage, user }) {
     formData.append("avatar", file);
     formData.append("user_id", userId);
 
-    fetch("http://localhost:5000/api/auth/profile-picture", {
+    fetch(`${API_BASE_URL}/auth/profile-picture`, {
       method: "POST",
       body: formData,
     })

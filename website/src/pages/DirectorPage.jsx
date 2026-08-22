@@ -9,6 +9,7 @@ import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
+import { API_BASE_URL } from "../config/apiConfig";
 
 export default function DirectorPage({ activePage, setPage }) {
   const [tab, setTab] = useState(
@@ -35,15 +36,15 @@ export default function DirectorPage({ activePage, setPage }) {
   const [sharedPapers, setSharedPapers] = useState([]);
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/schedule")
+    fetch(`${API_BASE_URL}/schedule`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSchedule(data.schedule); });
 
-    fetch("http://localhost:5000/api/labs")
+    fetch(`${API_BASE_URL}/labs`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setLabs(data.labs); });
 
-    fetch("http://localhost:5000/api/director/papers")
+    fetch(`${API_BASE_URL}/director/papers`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSharedPapers(data.papers); });
   }, []);

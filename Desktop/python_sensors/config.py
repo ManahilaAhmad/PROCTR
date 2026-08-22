@@ -8,6 +8,8 @@ BASE_EXAM_DIR = r"C:\PROCTR_Exams" if sys.platform == "win32" else os.path.expan
 DEFAULT_WHITELISTED_PROCESSES = {
     # IDEs & Code Editors
     "code.exe",             # VS Code
+    "antigravity.exe",       # Antigravity IDE
+    "antigravity-ide.exe",   # Antigravity IDE
     "pycharm64.exe",        # PyCharm
     "devenv.exe",           # Visual Studio
     "codeblocks.exe",       # Code::Blocks
@@ -28,16 +30,36 @@ DEFAULT_WHITELISTED_PROCESSES = {
     "cmd.exe",
     "powershell.exe",
 
-    # System & PROCTR Processes
+    # System, Web Viewers & PROCTR Processes
     "proctr-desktop.exe",
     "electron.exe",
     "python_sensor.exe",
     "explorer.exe",
     "conhost.exe",
     "svchost.exe",
+
+    # Web Browsers (permitted for exam paper viewer and whitelisted docs)
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "opera.exe"
 }
 
-# Hard Violation Codes & Descriptions (H1 - H4b)
+# Default permitted network/DNS web domains
+DEFAULT_ALLOWED_DOMAINS = {
+    "localhost",
+    "127.0.0.1",
+    "github.com",
+    "raw.githubusercontent.com",
+    "stackoverflow.com",
+    "university.edu",
+    "neon.tech",
+    "aws.amazon.com",
+    "cloudinary.com"
+}
+
+# Hard Violation Codes & Descriptions (H1 - H5)
 VIOLATION_CODES = {
     "H1": {
         "code": "H1",
@@ -68,5 +90,17 @@ VIOLATION_CODES = {
         "title": "Workspace & Document Tampering",
         "severity": "HIGH",
         "description": "Unauthorized file modification or external document access detected outside workspace."
+    },
+    "H5": {
+        "code": "H5",
+        "title": "Unauthorized Domain / DNS Access",
+        "severity": "CRITICAL",
+        "description": "Network request to a non-whitelisted web domain or DNS lookup detected."
+    },
+    "N1": {
+        "code": "N1",
+        "title": "Unauthorized Network Subnet / Hotspot Breach",
+        "severity": "CRITICAL",
+        "description": "Student device connected to non-lab network, mobile hotspot, or unauthorized adapter."
     }
 }
