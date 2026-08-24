@@ -4,6 +4,83 @@
  */
 
 const API_BASE = 'http://localhost:5000/api';
+const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
+
+// ─── LIVE SOCKET CONNECTION (instant violation push to teacher dashboard) ──
+// Uses the socket.io client bundle vendored at src/vendor/socket.io.min.js
+// (loaded as a plain <script> tag before this file — no bundler in this app).
+let proctrSocket = null;
+let joinedSessionRoom = null;
+
+function getProctrSocket() {
+  if (proctrSocket) return proctrSocket;
+  if (typeof io === 'undefined') {
+    console.warn('[Socket] socket.io client not loaded — live push disabled, falling back to polling only.');
+    return null;
+  }
+  proctrSocket = io(SOCKET_BASE, { transports: ['websocket', 'polling'] });
+
+  proctrSocket.on('connect', () => {
+    console.log('[Socket] Connected:', proctrSocket.id);
+    // Re-join the session room on reconnect (e.g. after backend restart)
+    if (joinedSessionRoom) {
+      proctrSocket.emit('join_room', { sessionCode: joinedSessionRoom });
+    }
+  });
+
+  proctrSocket.on('disconnect', () => {
+    console.warn('[Socket] Disconnected — live push paused, polling continues as fallback.');
+  });
+
+  // Fired by the backend the instant a student's desktop client reports a
+  // hard violation for a session this teacher client has joined.
+  proctrSocket.on('live_violation', (v) => {
+    handleLiveViolationPush(v);
+  });
+
+  proctrSocket.on('live_violation_update', (v) => {
+    handleLiveViolationPush(v);
+  });
+
+  return proctrSocket;
+}
+
+function joinSessionRoom(sessionCode) {
+  if (!sessionCode) return;
+  const codeUpper = String(sessionCode).trim().toUpperCase();
+  joinedSessionRoom = codeUpper;
+  const socket = getProctrSocket();
+  if (socket) {
+    // If already connected, emit right away; otherwise the 'connect' handler above will do it.
+    if (socket.connected) {
+      socket.emit('join_room', { sessionCode: codeUpper });
+    }
+  }
+}
+
+// Merges a pushed violation into the currently-cached session data and
+// re-renders immediately, so the teacher sees it with zero delay instead
+// of waiting for the next 3s poll tick. The next poll will simply confirm
+// the same data from the database (harmless, keeps things eventually consistent
+// if a push is ever missed e.g. brief disconnect).
+function handleLiveViolationPush(v) {
+  if (!v) return;
+  if (!window.lastPollSessionData) {
+    // Live room UI hasn't done its first poll yet — it will pick this up shortly.
+    return;
+  }
+  const violations = window.lastPollSessionData.recentViolations || [];
+  const existingIndex = violations.findIndex(x => String(x.id) === String(v.id));
+  if (existingIndex >= 0) {
+    violations[existingIndex] = v;
+  } else {
+    violations.unshift(v);
+  }
+  window.lastPollSessionData.recentViolations = violations;
+  if (typeof renderInvigilatorLiveRoomUI === 'function') {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
 
 // ─── STATE ────────────────────────────────────────────────────────
 let currentRole = 'student'; // 'student' | 'teacher'
@@ -520,12 +597,13 @@ async function createInvigilationSession(examId, courseCode) {
         await window.proctrAPI.startExamWorkspace({
           examId: String(examId || '1'),
           studentId: '101',
-          courseCode: courseCode
+          courseCode: courseCode,
+          isStudent: false // Teacher's own PC must NOT spawn the sensor engine
         });
       }
 
-      // Switch view to Dedicated Live Control Room
-      showSection('section-t-live-room', document.querySelectorAll('#view-teacher .nav-item'));
+      // Switch view to the unified Live Monitoring workspace
+      showSection('section-t-monitoring', document.querySelectorAll('#view-teacher .nav-item'));
 
       // Populate Live Room UI
       const codeEl = document.getElementById('room-session-code');
@@ -535,7 +613,10 @@ async function createInvigilationSession(examId, courseCode) {
       const titleEl = document.getElementById('live-room-course-title');
       if (titleEl) titleEl.textContent = `${courseCode} — Live Lab Exam Session`;
 
-      // Start Polling Live Connected Students & Security Feed
+      // Join the live socket room for this session so violations push instantly
+      joinSessionRoom(data.session.session_code);
+
+      // Start Polling Live Connected Students & Security Feed (fallback/backfill)
       pollInvigilatorLiveRoom(data.session.session_code);
     }
   } catch (err) {
@@ -556,70 +637,7 @@ function formatSecondsToHMS(secs) {
 let teacherLocalCountdown = null; // client-side ticking interval for teacher timer
 
 let selectedStudentFilter = null;
-let shownToastViolationIds = new Set();
 window.lastPollSessionData = null;
-
-function createToastContainer() {
-  let c = document.getElementById('critical-toast-container');
-  if (!c) {
-    c = document.createElement('div');
-    c.id = 'critical-toast-container';
-    c.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 9999;
-      width: 350px;
-      max-width: 90vw;
-      pointer-events: auto;
-    `;
-    document.body.appendChild(c);
-  }
-  return c;
-}
-
-function showCriticalCheatingToast(v) {
-  const container = createToastContainer();
-  const toast = document.createElement('div');
-  toast.className = 'critical-cheating-toast';
-  toast.style.cssText = `
-    background: #ffffff;
-    border: 2px solid #ef4444;
-    border-left: 6px solid #dc2626;
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    box-shadow: 0 10px 25px rgba(220, 38, 38, 0.22);
-    animation: slideInRight 0.3s ease-out;
-    position: relative;
-    font-family: var(--font-sans);
-  `;
-
-  const titleText = v.surface_title || v.title || 'CRITICAL CHEATING BREACH';
-  const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-
-  toast.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-      <span style="font-size:11px; font-weight:800; color:#dc2626; text-transform:uppercase; letter-spacing:0.5px;">🚨 CRITICAL CHEATING ALERT</span>
-      <span style="font-size:11px; color:#64748b;">${timeStr}</span>
-    </div>
-    <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:2px;">
-      ${v.name || 'Candidate'} <span style="font-family:var(--font-mono); color:#0284c7;">(${v.reg_no || '231593'})</span>
-    </div>
-    <div style="font-size:13px; font-weight:700; color:#dc2626; margin-bottom:4px;">
-      ${titleText}
-    </div>
-    <div style="font-size:12px; color:#475569; line-height:1.4;">
-      ${v.description || ''}
-    </div>
-    <button style="position:absolute; top:8px; right:8px; background:none; border:none; color:#94a3b8; font-size:14px; cursor:pointer;" onclick="this.parentElement.remove()">✕</button>
-  `;
-
-  container.appendChild(toast);
-  setTimeout(() => {
-    if (toast.parentElement) toast.remove();
-  }, 7000);
-}
 
 function selectStudentCandidateFilter(regNo, name) {
   const targetReg = String(regNo);
@@ -720,7 +738,9 @@ function renderInvigilatorLiveRoomUI(session) {
         return `
           <div class="candidate-card-item" data-reg-no="${studentReg}" onclick="selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <div style="font-size:14px; font-weight:800; color:var(--navy);">${s.name}</div>
+              <button type="button" title="View this student's notifications" onclick="event.stopPropagation(); selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="padding:0; border:0; background:none; font-size:14px; font-weight:800; color:var(--navy); cursor:pointer; text-align:left;">
+                ${s.name}
+              </button>
               ${violBadge}
             </div>
             <div style="font-size:12px; font-family:var(--font-mono); color:var(--grey-600); font-weight:600;">
@@ -735,17 +755,7 @@ function renderInvigilatorLiveRoomUI(session) {
     }
   }
 
-  // 4. Trigger Real-Time Critical Cheating Notification Toasts
-  recentViolations.forEach(v => {
-    const isCritical = v.severity === 'CRITICAL' || ['H1', 'H2', 'H5', 'N1'].includes(v.violation_code);
-    const violationKey = `${v.id || ''}_${v.violation_code}_${v.reg_no}_${v.timestamp}`;
-    if (isCritical && !shownToastViolationIds.has(violationKey)) {
-      shownToastViolationIds.add(violationKey);
-      showCriticalCheatingToast(v);
-    }
-  });
-
-  // 5. Render Security Feeds (Filtered if selectedStudentFilter is active)
+  // Render Security Feeds (Filtered if selectedStudentFilter is active)
   renderInvigilatorFeeds(session);
 }
 
@@ -806,20 +816,71 @@ function renderInvigilatorFeeds(session) {
     violations = violations.filter(v => String(v.reg_no) === selectedStudentFilter || String(v.student_id) === selectedStudentFilter);
   }
 
-  if (alertsCount) alertsCount.textContent = `${violations.length} Alert(s)`;
-  if (teacherAlertCount) teacherAlertCount.textContent = `${violations.length} Alert(s)`;
+  const groupedViolations = Array.from(violations.reduce((groups, violation) => {
+    const groupKey = `${violation.student_id || violation.reg_no}:${violation.violation_code || violation.code || 'H0'}`;
+    const group = groups.get(groupKey);
+    if (group) {
+      group.occurrences.push({
+        timestamp: violation.timestamp,
+        title: violation.surface_title || violation.title,
+        description: violation.description || violation.detected_value || '',
+        severity: violation.severity || 'HIGH'
+      });
+      group.lastTimestamp = violation.timestamp || group.lastTimestamp;
+    } else {
+      groups.set(groupKey, {
+        ...violation,
+        id: `group-${groupKey}`,
+        occurrences: [{
+          timestamp: violation.timestamp,
+          title: violation.surface_title || violation.title,
+          description: violation.description || violation.detected_value || '',
+          severity: violation.severity || 'HIGH'
+        }],
+        occurrenceCount: 1,
+        lastTimestamp: violation.timestamp
+      });
+    }
+    if (group) group.occurrenceCount += 1;
+    return groups;
+  }, new Map()).values());
+
+  if (alertsCount) alertsCount.textContent = `${groupedViolations.length} Alert(s)`;
+  if (teacherAlertCount) teacherAlertCount.textContent = `${groupedViolations.length} Alert(s)`;
   if (statTotalViolations) statTotalViolations.textContent = session.recentViolations?.length || 0;
 
-  const feedHTML = violations.length === 0
+  const openAlertDetails = new Set(
+    Array.from(document.querySelectorAll('#teacher-feed details[data-alert-id][open]'))
+      .map(details => details.dataset.alertId)
+  );
+  const alertFingerprint = JSON.stringify(groupedViolations.map(v => ({
+    id: v.id,
+    occurrenceCount: v.occurrenceCount,
+    lastDetectedAt: v.lastDetectedAt,
+    description: v.description,
+    occurrences: v.occurrences
+  })));
+
+  const feedHTML = groupedViolations.length === 0
     ? `<div class="empty-state" style="padding:24px;">${selectedStudentFilter ? 'No security violations recorded for this candidate.' : 'Monitoring is active. Security alerts will stream here live.'}</div>`
-    : violations.map(v => {
+    : groupedViolations.map(v => {
         const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const occurrences = Array.isArray(v.occurrences) && v.occurrences.length > 0
+          ? v.occurrences
+          : [{ timestamp: v.timestamp, description: v.description || '' }];
         const badgeColor = v.severity === 'CRITICAL' ? '#dc2626' : '#d97706';
         const badgeBg = v.severity === 'CRITICAL' ? '#fee2e2' : '#fef3c7';
         const cleanSummary = formatCleanLogSummary(v);
+        const occurrenceDetails = occurrences.map((occurrence, index) => `
+              <div style="padding:8px 0; border-top:1px solid #e2e8f0;">
+                <strong>#${index + 1} · ${occurrence.timestamp ? new Date(occurrence.timestamp).toLocaleString() : 'Unknown time'}</strong>
+                <div style="margin-top:3px; color:#475569;">${occurrence.description || 'Detection recorded.'}</div>
+              </div>
+            `).join('');
+        const targetLabel = v.violation_code === 'H5' ? 'DNS/domain' : v.violation_code === 'H2' ? 'app/site' : 'violation';
 
         return `
-          <div class="alert-card" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+          <div class="alert-card" data-alert-id="${v.id}" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
               <span style="font-size:13px; font-weight:800; color:#0f172a;">${v.name} <span class="mono" style="font-size:11px; color:#0284c7;">(${v.reg_no})</span></span>
               <span style="font-size:10px; font-weight:800; background:${badgeBg}; color:${badgeColor}; padding:2px 8px; border-radius:10px;">${v.severity || 'HIGH'}</span>
@@ -830,6 +891,13 @@ function renderInvigilatorFeeds(session) {
             <div style="font-size:12.5px; color:#334155; font-weight:600; line-height:1.4; background:#f8fafc; padding:8px 12px; border-radius:6px; border-left:3px solid ${badgeColor}; margin-top:4px;">
               📌 ${cleanSummary}
             </div>
+            <div style="margin-top:8px; font-size:11px; color:#64748b;">
+              Opened at <strong>${v.timestamp ? new Date(v.timestamp).toLocaleString() : 'Unknown time'}</strong>
+            </div>
+            <details data-alert-id="${v.id}" ${openAlertDetails.has(String(v.id)) ? 'open' : ''} style="margin-top:8px; font-size:12px; color:#334155;">
+              <summary style="cursor:pointer; font-weight:800; color:#0284c7;">View ${v.occurrenceCount || occurrences.length} ${targetLabel} detection${(v.occurrenceCount || occurrences.length) === 1 ? '' : 's'}</summary>
+              <div style="margin-top:5px;">${occurrenceDetails}</div>
+            </details>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:11px; color:#64748b;">
               <span>Violation Code: <strong style="color:#0f172a; font-family:var(--font-mono);">${v.violation_code}</strong></span>
               <span>${timeStr}</span>
@@ -838,11 +906,19 @@ function renderInvigilatorFeeds(session) {
         `;
       }).join('');
 
-  if (roomFeed) roomFeed.innerHTML = feedHTML;
-  if (teacherFeed) teacherFeed.innerHTML = feedHTML;
+  const renderFeed = (feed) => {
+    if (!feed) return;
+    if (feed.dataset.alertFingerprint === alertFingerprint) return;
+    feed.dataset.alertFingerprint = alertFingerprint;
+    feed.innerHTML = feedHTML;
+  };
+
+  renderFeed(roomFeed);
+  renderFeed(teacherFeed);
 }
 
 function pollInvigilatorLiveRoom(sessionCode) {
+  joinSessionRoom(sessionCode); // ensure the live-push socket room is joined even if called directly
   if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
   invigilatorPollInterval = setInterval(async () => {
     try {
@@ -946,6 +1022,10 @@ if (roomBtnEnd) {
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
       if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+      if (proctrSocket && joinedSessionRoom) {
+        proctrSocket.emit('leave_room', { sessionCode: joinedSessionRoom });
+        joinedSessionRoom = null;
+      }
       if (window.proctrAPI) {
         if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
         if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
@@ -962,6 +1042,10 @@ const btnExitRoom = document.getElementById('btn-exit-live-room');
 if (btnExitRoom) {
   btnExitRoom.addEventListener('click', () => {
     if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+    if (proctrSocket && joinedSessionRoom) {
+      proctrSocket.emit('leave_room', { sessionCode: joinedSessionRoom });
+      joinedSessionRoom = null;
+    }
     showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
   });
 }
@@ -1452,6 +1536,7 @@ async function logViolationToDB(v) {
     title: v.title || 'Security Violation',
     description: v.detected_value ? `${v.description || ''} | ${v.detected_value}` : (v.description || ''),
     severity: v.severity || 'HIGH',
+    event_key: v.event_key || '',
   };
 
   // Use offline-first safe post: logs locally first, queues for backend sync if offline
@@ -1479,7 +1564,6 @@ if (window.proctrAPI) {
       if (ws && payload.workspace_dir) ws.textContent = payload.workspace_dir;
     } else if (payload.type === 'VIOLATION_ALERT') {
       addViolationCard(payload, 'student-feed', 'violation-badge');
-      addViolationCard(payload, 'teacher-feed', 'teacher-alert-count');
     }
   });
 

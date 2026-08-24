@@ -1,11 +1,5 @@
 import pool from '../db.js';
-
-let ioInstance = null;
-
-// Helper to set socket.io instance from server.js
-export const setIO = (io) => {
-  ioInstance = io;
-};
+import { getIO } from '../socketRegistry.js';
 
 /* ===========================================================
    RECORD A PROCTORING EVENT (Hard violation or Fuzzy result)
@@ -43,8 +37,9 @@ export const recordEvent = async (req, res) => {
     };
 
     // Broadcast live to teacher room for this exam
-    if (ioInstance) {
-      ioInstance.to(`exam:${exam_id}`).emit('proctoring_event', payload);
+    const io = getIO();
+    if (io) {
+      io.to(`exam:${exam_id}`).emit('proctoring_event', payload);
     }
 
     res.status(201).json({ status: 'success', event: payload });
@@ -115,8 +110,9 @@ export const evaluateFuzzy = async (req, res) => {
       student: studentInfo.rows[0] || null
     };
 
-    if (ioInstance) {
-      ioInstance.to(`exam:${exam_id}`).emit('proctoring_event', payload);
+    const io = getIO();
+    if (io) {
+      io.to(`exam:${exam_id}`).emit('proctoring_event', payload);
     }
 
     res.status(200).json({ status: 'success', evaluation: evalResult, event: payload });
