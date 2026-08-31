@@ -100,11 +100,30 @@ app.whenReady().then(() => {
   });
 });
 
+function runRestoreDefaultsSync() {
+  const restoreScript = path.join(__dirname, 'python_sensors', 'restore_network_defaults.py');
+  try {
+    const { execSync } = require('child_process');
+    execSync(`python "${restoreScript}"`, { stdio: 'ignore', timeout: 5000 });
+    console.log('[Electron] Guaranteed OS System Settings Restored to Default.');
+  } catch (err) {
+    console.log('[Electron Cleanup Note]:', err.message);
+  }
+}
+
 app.on('window-all-closed', () => {
   if (pythonProcess) {
-    pythonProcess.kill();
+    try { pythonProcess.kill(); } catch (e) {}
   }
+  runRestoreDefaultsSync();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  if (pythonProcess) {
+    try { pythonProcess.kill(); } catch (e) {}
+  }
+  runRestoreDefaultsSync();
 });
 
 // IPC Handler to stop sensors manually if needed
