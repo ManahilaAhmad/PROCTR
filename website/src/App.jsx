@@ -12,6 +12,8 @@ import DirectorPage from "./pages/DirectorPage";
 import CoordinatorPage from "./pages/CoordinatorPage";
 import InvigilatorPage from "./pages/InvigilatorPage";
 import DECPage from "./pages/DECPage";
+import LiveDashboardPage from "./pages/LiveDashboardPage";
+import PostExamReportPage from "./pages/PostExamReportPage";
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
@@ -103,6 +105,10 @@ export default function App() {
         return <InvigilatorPage activePage="start" setPage={navigateTo} user={user} />;
       case "inv-monitor":
         return <InvigilatorPage activePage="monitor" setPage={navigateTo} user={user} />;
+      case "live-monitor":
+        return <LiveDashboardPage setPage={navigateTo} user={user} />;
+      case "exam-reports":
+        return <PostExamReportPage setPage={navigateTo} user={user} />;
       default:
         return <DECPage activePage="dec" setPage={navigateTo} user={user} />;
     }
@@ -114,7 +120,7 @@ export default function App() {
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "inv-schedule", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (

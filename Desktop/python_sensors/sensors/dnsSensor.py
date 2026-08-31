@@ -265,6 +265,7 @@ class DNSSensor:
                             continue
 
                         domain_name = self._resolve_ip(remote_ip)
+                        connection_key = domain_name
                         if domain_name and domain_name not in self.flagged_hosts:
                             if not self.validate_domain(domain_name):
                                 self.flagged_hosts.add(domain_name)
@@ -311,7 +312,8 @@ class DNSSensor:
                                             title=v_info["title"],
                                             severity=v_info["severity"],
                                             description=f"App '{proc_name}' connected to unauthorized domain '{domain_name}'.",
-                                            detected_value=formatted_log
+                                            detected_value=formatted_log,
+                                            event_key=connection_key
                                         )
                                     except TypeError:
                                         try:

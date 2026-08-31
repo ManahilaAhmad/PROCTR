@@ -131,6 +131,7 @@ class WindowTracker:
                     is_protected = any(kw in active_process_lower for kw in PROTECTED_KEYWORDS)
 
                     if not is_whitelisted or is_ai_breach:
+                        site_category, clean_title = parse_active_site_or_doc(active_process, window_title)
                         # ── ACTIVE OS ENFORCEMENT: Safe Lockdown ────────────────────────────────
                         if is_ai_breach:
                             # Close AI tab cleanly using native Windows API keyboard events
@@ -163,8 +164,6 @@ class WindowTracker:
                         current_title_key = f"{active_process_lower}:{window_title}"
                         if self.last_flagged_title != current_title_key:
                             self.last_flagged_title = current_title_key
-                            
-                            site_category, clean_title = parse_active_site_or_doc(active_process, window_title)
                             
                             formatted_log = (
                                 f"at time {now_time} Student opened '{site_category}' "
@@ -210,7 +209,8 @@ class WindowTracker:
                                         title=v_info["title"],
                                         severity=v_info["severity"],
                                         description=f"Opened '{site_category}' ({clean_title}) in {active_process}",
-                                        detected_value=formatted_log
+                                        detected_value=formatted_log,
+                                        event_key=f"{active_process_lower}:{window_title}"
                                     )
                                 except TypeError:
                                     try:
@@ -273,6 +273,7 @@ class WindowTracker:
                         self.last_away_time = None
                         self.away_logged = False
                         self.last_flagged_title = None
+
 
             except Exception:
                 pass

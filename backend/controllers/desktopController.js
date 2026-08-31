@@ -1,5 +1,21 @@
 import pool from '../db.js';
 import { getFileUrl } from '../middleware/upload.js';
+import { emitToSession } from '../socketRegistry.js';
+
+/* ===========================================================
+   Human-readable titles for hard violation codes (H1-H4b, H5, N1).
+   Source of truth is python_sensors/config.py's VIOLATION_CODES —
+   keep these two in sync if a code's meaning ever changes.
+=========================================================== */
+const HUMAN_MAP = {
+  'H1': 'USB Hardware Insertion Detected',
+  'H2': 'Unauthorized Application / Website Access',
+  'H3': 'Window Focus Loss / Away Breach',
+  'H4a': 'Clipboard Buffer Violation',
+  'H4b': 'Workspace & Document Tampering',
+  'H5': 'Unauthorized Domain / DNS Access',
+  'N1': 'Unauthorized Network Subnet / Hotspot Breach'
+};
 
 /* ===========================================================
    1. CREATE LIVE EXAM SESSION (Invigilator Action)
@@ -28,7 +44,11 @@ export const createLiveSession = async (req, res) => {
       );
     `);
 
-    // Insert or update existing session for this code
+    // Insert or update existing session for this code.
+    // Reusing the same session_code (e.g. re-running the same course's exam)
+    // reuses the same live_session_id row — reset every stateful field so
+    // it behaves like a genuinely fresh session, not a continuation of
+    // whatever was left over from the last time this code was used.
     const result = await pool.query(
       `INSERT INTO live_exam_session (exam_id, session_code, passcode, invigilator_id, duration_minutes, is_paper_revealed, is_timer_started, status)
        VALUES ($1, $2, $3, $4, $5, FALSE, FALSE, 'ACTIVE')
@@ -36,10 +56,22 @@ export const createLiveSession = async (req, res) => {
        SET passcode = EXCLUDED.passcode,
            status = 'ACTIVE',
            is_paper_revealed = FALSE,
-           is_timer_started = FALSE
+           is_timer_started = FALSE,
+           timer_start_time = NULL,
+           duration_minutes = EXCLUDED.duration_minutes
        RETURNING live_session_id, session_code, passcode, duration_minutes, is_paper_revealed, is_timer_started, status`,
       [exam_id || null, session_code, passcode, invigilator_id || null, duration || 90]
     );
+
+    const newLiveSessionId = result.rows[0].live_session_id;
+
+    // ── FRESH START: wipe any violations/connected-student rows left over
+    //    from a PREVIOUS run of this exact session code. Without this, every
+    //    "Create Live Session" click on a course code you've tested before
+    //    would immediately flood the live feed with old historical data the
+    //    moment the room opens — before any student has even joined this run.
+    await pool.query(`DELETE FROM desktop_violation_log WHERE session_id = $1`, [newLiveSessionId]).catch(() => {});
+    await pool.query(`DELETE FROM desktop_exam_session WHERE live_session_id = $1`, [newLiveSessionId]).catch(() => {});
 
     res.status(200).json({
       status: 'success',
@@ -124,17 +156,32 @@ export const joinLiveSession = async (req, res) => {
         session_id SERIAL PRIMARY KEY,
         student_id INT,
         exam_id INT,
+        live_session_id INT,
         system_info JSONB,
         started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         status VARCHAR(30) DEFAULT 'ACTIVE'
       );
     `);
+    // Migration safety: add live_session_id if the table pre-dates this column
+    await pool.query(`
+      ALTER TABLE desktop_exam_session ADD COLUMN IF NOT EXISTS live_session_id INT;
+    `).catch(() => {});
 
     if (student_id) {
+      // Close out any stale ACTIVE rows this student may have left behind
+      // from a previous session for the same exam (e.g. a session that was
+      // ended and re-created), so they don't leak into a new session's
+      // connected-students list.
       await pool.query(
-        `INSERT INTO desktop_exam_session (student_id, exam_id, status)
-         VALUES ($1, $2, 'ACTIVE')`,
-        [student_id, session.exam_id]
+        `UPDATE desktop_exam_session SET status = 'STALE' 
+         WHERE student_id = $1 AND exam_id = $2 AND status = 'ACTIVE' AND (live_session_id IS DISTINCT FROM $3)`,
+        [student_id, session.exam_id, session.live_session_id]
+      ).catch(() => {});
+
+      await pool.query(
+        `INSERT INTO desktop_exam_session (student_id, exam_id, live_session_id, status)
+         VALUES ($1, $2, $3, 'ACTIVE')`,
+        [student_id, session.exam_id, session.live_session_id]
       );
     }
 
@@ -156,7 +203,7 @@ export const joinLiveSession = async (req, res) => {
       status: 'success',
       message: 'Successfully connected to exam session!',
       session: {
-        session_id: session.session_id,
+        session_id: session.live_session_id,
         sessionCode: session.session_code,
         examId: session.exam_id,
         isPaperRevealed: session.is_paper_revealed,
@@ -288,37 +335,30 @@ export const getSessionStatus = async (req, res) => {
       secondsRemaining = Math.max(0, Math.floor((durationMs - elapsedMs) / 1000));
     }
 
-    // Fetch connected student details
+    // Fetch connected student details — STRICTLY for this live session only,
+    // so students from a different/older exam session never leak in.
     const studentsRes = await pool.query(
       `SELECT DISTINCT ON (des.student_id) des.student_id, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name, COALESCE(s.registration_no, '231593') AS reg_no, des.started_at
        FROM desktop_exam_session des
        LEFT JOIN student s ON des.student_id = s.student_id
        LEFT JOIN users u ON s.user_id = u.user_id
-       WHERE des.status = 'ACTIVE'
-       ORDER BY des.student_id, des.started_at DESC`
+       WHERE des.status = 'ACTIVE' AND des.live_session_id = $1
+       ORDER BY des.student_id, des.started_at DESC`,
+      [session.live_session_id]
     );
 
-    // Fetch recent violation logs specifically for THIS live exam session
+    // Fetch recent violation logs specifically for THIS live exam session.
+    // STRICT match only — no "show everything" fallback. A violation only
+    // ever belongs to one live_exam_session (by its real PK, live_session_id).
     const violationsRes = await pool.query(
       `SELECT dvl.*, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS student_name, COALESCE(s.registration_no, '231593') AS reg_no
        FROM desktop_violation_log dvl
        LEFT JOIN student s ON dvl.student_id = s.student_id
        LEFT JOIN users u ON s.user_id = u.user_id
-       WHERE (dvl.session_id = $1 OR dvl.session_id IN (SELECT session_id FROM live_exam_session WHERE UPPER(session_code) = $2) OR $1 = 0)
-       ORDER BY dvl.detected_at DESC
-       LIMIT 50`,
-      [session.session_id || 0, codeUpper]
+       WHERE dvl.session_id = $1
+      ORDER BY dvl.detected_at DESC`,
+      [session.live_session_id]
     ).catch(() => ({ rows: [] }));
-
-    const HUMAN_MAP = {
-      'H1': 'USB Drive Inserted',
-      'H2': 'Blocked Website / App Access',
-      'H3': 'Untrusted Workspace File Detected',
-      'H4': 'Application Exit Attempted',
-      'H4b': 'Forced Application Shutdown',
-      'H5': 'Unauthorized Website Connection',
-      'N1': 'Non-Lab Network Connection'
-    };
 
     const formattedViolations = (violationsRes.rows || []).map(v => ({
       id: v.violation_id,
@@ -329,7 +369,12 @@ export const getSessionStatus = async (req, res) => {
       surface_title: HUMAN_MAP[v.violation_code] || v.title || 'Security Violation',
       description: v.description || '',
       severity: v.severity || 'HIGH',
-      timestamp: v.detected_at
+      timestamp: v.detected_at,
+      lastDetectedAt: v.last_detected_at || v.detected_at,
+      occurrenceCount: v.occurrence_count || 1,
+      occurrences: Array.isArray(v.occurrences) && v.occurrences.length > 0
+        ? v.occurrences
+        : [{ timestamp: v.detected_at, title: v.title, description: v.description || '', severity: v.severity || 'HIGH' }],
     }));
 
     res.status(200).json({
@@ -399,31 +444,49 @@ export const startSession = async (req, res) => {
    LOG DESKTOP SENSOR VIOLATION
 =========================================================== */
 export const logViolation = async (req, res) => {
-  const { session_id, session_code, student_id, violation_code, title, description, severity } = req.body;
+  const { session_code, student_id, violation_code, title, description, severity } = req.body;
   try {
     if (!violation_code || !title) {
       return res.status(400).json({ status: 'error', message: 'violation_code and title are required.' });
     }
+    if (!session_code) {
+      return res.status(400).json({ status: 'error', message: 'session_code is required to log a violation.' });
+    }
+    if (!student_id) {
+      return res.status(400).json({ status: 'error', message: 'student_id is required to log a violation.' });
+    }
 
-    let targetSessionId = session_id || null;
-    if (!targetSessionId) {
-      // Auto-link to currently active live_exam_session if session_id was omitted
-      const activeSess = await pool.query(
-        `SELECT session_id FROM live_exam_session 
-         WHERE ${session_code ? 'session_code = $1' : "(status = 'ACTIVE' OR status = 'SCHEDULED' OR status = 'IN_PROGRESS')"}
-         ORDER BY session_id DESC LIMIT 1`,
-        session_code ? [session_code] : []
-      ).catch(() => ({ rows: [] }));
+    const resolvedSessionCode = session_code.trim().toUpperCase();
 
-      if (activeSess.rows && activeSess.rows.length > 0) {
-        targetSessionId = activeSess.rows[0].session_id;
-      } else {
-        // Fallback to most recent live_exam_session
-        const fallback = await pool.query(`SELECT session_id FROM live_exam_session ORDER BY session_id DESC LIMIT 1`).catch(() => ({ rows: [] }));
-        if (fallback.rows && fallback.rows.length > 0) {
-          targetSessionId = fallback.rows[0].session_id;
-        }
-      }
+    // ── STRICT RESOLUTION #1: the session must actually exist and be ACTIVE ──
+    // No "fall back to most recent session" — a violation that can't be tied
+    // to a real, currently-running session is rejected outright.
+    const sessLookup = await pool.query(
+      `SELECT live_session_id FROM live_exam_session WHERE session_code = $1 AND status = 'ACTIVE'`,
+      [resolvedSessionCode]
+    );
+    if (sessLookup.rows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: `No active live session found for code "${resolvedSessionCode}" — violation discarded.`
+      });
+    }
+    const targetSessionId = sessLookup.rows[0].live_session_id;
+
+    // ── STRICT RESOLUTION #2: the student must have actually joined THIS
+    //    session (an ACTIVE desktop_exam_session row for this live_session_id).
+    //    This is what enforces "no violations before the student joins" —
+    //    if there's no join record yet, the sensor event is dropped, not shown.
+    const joinCheck = await pool.query(
+      `SELECT 1 FROM desktop_exam_session WHERE student_id = $1 AND live_session_id = $2 AND status = 'ACTIVE' LIMIT 1`,
+      [student_id, targetSessionId]
+    ).catch(() => ({ rows: [] }));
+
+    if (joinCheck.rows.length === 0) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Violation rejected: this student has not joined this live session.'
+      });
     }
 
     await pool.query(`
@@ -435,16 +498,49 @@ export const logViolation = async (req, res) => {
         title VARCHAR(255) NOT NULL,
         description TEXT,
         severity VARCHAR(20) DEFAULT 'HIGH',
+        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
-
     const result = await pool.query(
-      `INSERT INTO desktop_violation_log (session_id, student_id, violation_code, title, description, severity)
+      `INSERT INTO desktop_violation_log
+         (session_id, student_id, violation_code, title, description, severity)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING violation_id, detected_at`,
-      [targetSessionId, student_id || null, violation_code, title, description, severity || 'HIGH']
+       RETURNING violation_id, session_id, student_id, violation_code, title, description, severity, detected_at`,
+      [targetSessionId, student_id, violation_code, title, description || '', severity || 'HIGH']
     );
+
+    const savedRow = result.rows[0];
+
+    // ── Look up student name/reg_no so the teacher's live feed can render
+    //    immediately without needing a separate lookup ────────────────
+    let studentName = 'Candidate';
+    let regNo = '231593';
+    const studentInfo = await pool.query(
+      `SELECT COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name, COALESCE(s.registration_no, '231593') AS reg_no
+       FROM student s
+       LEFT JOIN users u ON s.user_id = u.user_id
+       WHERE s.student_id = $1`,
+      [student_id]
+    ).catch(() => ({ rows: [] }));
+    if (studentInfo.rows && studentInfo.rows.length > 0) {
+      studentName = studentInfo.rows[0].name || studentName;
+      regNo = studentInfo.rows[0].reg_no || regNo;
+    }
+
+    // ── Push instantly to any teacher dashboard(s) watching this session ──
+    const liveViolation = {
+      id: savedRow.violation_id,
+      violation_code: savedRow.violation_code,
+      student_id: savedRow.student_id,
+      reg_no: regNo,
+      name: studentName,
+      surface_title: HUMAN_MAP[savedRow.violation_code] || savedRow.title || 'Security Violation',
+      description: savedRow.description || '',
+      severity: savedRow.severity || 'HIGH',
+      timestamp: savedRow.detected_at,
+    };
+    emitToSession(resolvedSessionCode, 'live_violation', liveViolation);
 
     res.status(200).json({
       status: 'success',
