@@ -114,6 +114,11 @@ function restoreSession() {
     currentRole = role;
     currentUser = user;
 
+    // Sync the active role tab to match the restored session
+    document.querySelectorAll('.role-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.role === role);
+    });
+
     if (role === 'student') {
       populateStudentProfile(user);
       showView('view-student');
@@ -172,6 +177,12 @@ roleTabs.forEach(tab => {
     roleTabs.forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     currentRole = tab.dataset.role;
+
+    // Clear any saved session so previous teacher/student session doesn't bleed into new login
+    clearSession();
+    loginError.style.display = 'none';
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
 
     if (currentRole === 'teacher') {
       if (loginLabel) loginLabel.textContent = 'Teacher Email Address';
