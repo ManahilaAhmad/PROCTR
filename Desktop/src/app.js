@@ -256,6 +256,7 @@ document.querySelectorAll('#view-student .nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
     const section = 'section-' + btn.dataset.section;
     showSection(section, document.querySelectorAll('#view-student .nav-item'));
+    if (section === 'section-s-submission') loadStudentSubmittedWork();
   });
 });
 
@@ -263,6 +264,7 @@ document.querySelectorAll('#view-teacher .nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
     const section = 'section-' + btn.dataset.section;
     showSection(section, document.querySelectorAll('#view-teacher .nav-item'));
+    if (section === 'section-t-submissions') loadTeacherSubmissionLabs();
   });
 });
 
@@ -1037,24 +1039,12 @@ if (roomBtnEnd) {
   });
 }
 
-// ─── EXIT LIVE CONTROL ROOM ──────────────────────────────────────
-const btnExitRoom = document.getElementById('btn-exit-live-room');
-if (btnExitRoom) {
-  btnExitRoom.addEventListener('click', () => {
-    if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
-    if (proctrSocket && joinedSessionRoom) {
-      proctrSocket.emit('leave_room', { sessionCode: joinedSessionRoom });
-      joinedSessionRoom = null;
-    }
-    showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
-  });
-}
-
 function openLiveMonitoring() {
   showSection('section-t-monitoring', document.querySelectorAll('#view-teacher .nav-item'));
 }
 function openTeacherSubmissions() {
   showSection('section-t-submissions', document.querySelectorAll('#view-teacher .nav-item'));
+  loadTeacherSubmissionLabs();
 }
 window.createInvigilationSession = createInvigilationSession;
 window.openLiveMonitoring = openLiveMonitoring;
@@ -1133,6 +1123,8 @@ if (joinExamForm) {
       const sessionObj = joinData.session || joinData.data || {};
       window.activeSessionId = sessionObj.session_id || joinData.session_id || null;
       window.activeSessionCode = examCode;
+      window.activeExamId = sessionObj.examId || null;
+      autoSubmitTriggered = false; // fresh exam session — allow auto-submit to fire again
 
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
@@ -1186,6 +1178,7 @@ if (joinExamForm) {
 
 // ─── STUDENT SESSION POLLING FOR PAPER REVEAL & TIMER START ───────
 let studentPollInterval = null;
+let studentLocalCountdown = null;
 
 function startStudentSessionPoll(sessionCode) {
   if (studentPollInterval) clearInterval(studentPollInterval);
@@ -1207,6 +1200,12 @@ function startStudentSessionPoll(sessionCode) {
         if (window.proctrAPI) {
           if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
           if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
+        }
+
+        // Auto-submit whatever's in the workspace the moment the session ends
+        if (!autoSubmitTriggered) {
+          autoSubmitTriggered = true;
+          performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Session ended:', r));
         }
 
         const statusEl = document.getElementById('exam-status-text');
@@ -1284,6 +1283,10 @@ function startStudentSessionPoll(sessionCode) {
               if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
+              if (!autoSubmitTriggered) {
+                autoSubmitTriggered = true;
+                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+              }
               return;
             }
 
@@ -1316,6 +1319,10 @@ function startStudentSessionPoll(sessionCode) {
               if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
+              if (!autoSubmitTriggered) {
+                autoSubmitTriggered = true;
+                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+              }
               return;
             }
             if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
@@ -1374,18 +1381,403 @@ function startExamTimer() {
 }
 
 // ─── SUBMISSION ───────────────────────────────────────────────────
-document.getElementById('btn-submit-exam').addEventListener('click', () => {
-  const btn = document.getElementById('btn-submit-exam');
-  const status = document.getElementById('submit-status');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
+// The actual upload — reads the student's local Submissions folder (via the
+// Electron main process, which has real filesystem access) and posts it to
+// the backend. Called automatically at session end / timer expiry, and
+// manually via the Submit button. Safe to call more than once — the backend
+// upserts on (exam_id, student_id), so a later call just replaces the files.
+let autoSubmitTriggered = false;
 
-  setTimeout(() => {
-    btn.textContent = '✓ Submitted';
-    status.textContent = '✅ Your submission has been sent to the local exam server successfully.';
-    status.style.display = 'block';
-  }, 1200);
-});
+async function performExamSubmission(type) {
+  if (!window.proctrAPI || !window.proctrAPI.submitExamWork) {
+    return { status: 'error', message: 'Submission is not available in this environment.' };
+  }
+  const examId = window.activeExamId;
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (!examId || !studentId) {
+    return { status: 'error', message: 'No active exam to submit — join a session first.' };
+  }
+  return window.proctrAPI.submitExamWork({
+    examId,
+    studentId,
+    sessionCode: window.activeSessionCode,
+    workspacePath: activeWorkspacePath,
+    submissionType: type,
+    apiBase: API_BASE
+  });
+}
+
+const submitExamBtn = document.getElementById('btn-submit-exam');
+if (submitExamBtn) {
+  submitExamBtn.addEventListener('click', async () => {
+    const status = document.getElementById('submit-status');
+    submitExamBtn.disabled = true;
+    submitExamBtn.textContent = 'Submitting...';
+
+    const result = await performExamSubmission('MANUAL');
+
+    if (result.status === 'success') {
+      submitExamBtn.textContent = '✓ Submitted';
+      if (status) {
+        status.textContent = `✅ ${result.message || 'Your submission has been sent successfully.'}`;
+        status.style.display = 'block';
+        status.style.color = 'var(--teal)';
+      }
+    } else {
+      submitExamBtn.disabled = false;
+      submitExamBtn.textContent = '✓ Submit Solution';
+      if (status) {
+        status.textContent = `✖ ${result.message || 'Submission failed — you can try again.'}`;
+        status.style.display = 'block';
+        status.style.color = '#dc2626';
+      }
+    }
+  });
+}
+
+// ─── SUBMITTED WORK VIEWER (Student) ──────────────────────────────
+function escapeHtmlJS(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
+}
+
+function formatFileSize(bytes) {
+  bytes = Number(bytes) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function loadStudentSubmittedWork() {
+  const root = document.getElementById('student-submitted-work-root');
+  if (!root) return;
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (!studentId) { root.innerHTML = '<div class="empty-state">Not logged in.</div>'; return; }
+
+  root.innerHTML = '<div class="empty-state">Loading your submitted work…</div>';
+  try {
+    const res = await fetch(`${API_BASE}/submission/student/${studentId}/labs`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
+    renderStudentLabsList(data.labs || []);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submitted work: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+function renderStudentLabsList(labs) {
+  const root = document.getElementById('student-submitted-work-root');
+  if (!labs.length) {
+    root.innerHTML = '<div class="empty-state">You haven\'t submitted any work yet. It will appear here automatically once your exam session ends, or once you submit manually.</div>';
+    return;
+  }
+  root.innerHTML = `
+    <div class="folder-grid">
+      ${labs.map((lab, i) => `
+        <button class="folder-card" data-co-id="${lab.course_offering_id}" data-idx="${i}">
+          <div class="folder-icon">📁</div>
+          <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
+          <div class="folder-meta">Submitted ${new Date(lab.submitted_at).toLocaleString()}</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  root.querySelectorAll('.folder-card').forEach((card, i) => {
+    card.addEventListener('click', () => loadStudentLabFiles(labs[i].course_offering_id, labs[i].label));
+  });
+}
+
+async function loadStudentLabFiles(courseOfferingId, labLabel) {
+  const root = document.getElementById('student-submitted-work-root');
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  root.innerHTML = '<div class="empty-state">Loading files…</div>';
+  try {
+    const res = await fetch(`${API_BASE}/submission/student/${studentId}/lab/${courseOfferingId}/files`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load files.');
+    const files = data.files || [];
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-labs">Submitted Work</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(labLabel)}</span>
+      </div>
+      ${files.length === 0 ? '<div class="empty-state">No files found in this submission.</div>' : `
+      <table class="file-list-table">
+        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+        <tbody>
+          ${files.map(f => `
+            <tr>
+              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+              <td>${formatFileSize(f.file_size)}</td>
+              <td><a class="file-download" href="${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}" target="_blank">Download</a></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    `;
+    document.getElementById('back-to-labs').addEventListener('click', loadStudentSubmittedWork);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load files: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+function getPreviewKind(name) {
+  const fileName = String(name || '').toLowerCase();
+
+  if (/\.(html?|xhtml|svg)$/.test(fileName)) return 'html';
+  if (/\.(pdf)$/.test(fileName)) return 'pdf';
+  if (/\.(png|jpe?g|gif|bmp|webp|ico)$/.test(fileName)) return 'image';
+  if (/\.(txt|md|csv|log|json|xml|yaml|yml|ini|cfg|toml|sql|java|c|cc|cpp|h|hpp|cs|php|rb|go|rs|swift|kt|scala|js|jsx|ts|tsx|py|sh|bash|zsh|ps1|bat|cmd|css)$/.test(fileName)) return 'text';
+  return 'unsupported';
+}
+
+function openResourceInViewer(resourceUrl, title) {
+  const modal = document.getElementById('submission-viewer-modal');
+  const iframe = document.getElementById('submission-viewer-iframe');
+  const message = document.getElementById('submission-viewer-message');
+  const titleEl = document.getElementById('submission-viewer-title');
+
+  if (!modal || !iframe || !message || !titleEl) {
+    window.open(resourceUrl, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
+  titleEl.textContent = title || 'Submission Viewer';
+  iframe.src = 'about:blank';
+  iframe.srcdoc = '';
+  iframe.style.display = 'none';
+  message.style.display = 'none';
+  modal.style.display = 'flex';
+
+  fetch(resourceUrl, { credentials: 'include' })
+    .then(async (res) => {
+      if (!res.ok) throw new Error('The file could not be opened.');
+
+      const mimeType = (res.headers.get('content-type') || '').toLowerCase();
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const previewKind = getPreviewKind(title || resourceUrl);
+
+      if (previewKind === 'html' || mimeType.includes('text/html') || mimeType.includes('application/xhtml+xml')) {
+        const html = await blob.text();
+        iframe.srcdoc = html;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (previewKind === 'image' || mimeType.includes('image/')) {
+        iframe.src = objectUrl;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (previewKind === 'pdf' || mimeType.includes('application/pdf')) {
+        iframe.src = objectUrl;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (
+        previewKind === 'text' ||
+        mimeType.startsWith('text/') ||
+        mimeType.includes('json') ||
+        mimeType.includes('xml') ||
+        mimeType.includes('javascript') ||
+        mimeType.includes('typescript') ||
+        mimeType.includes('x-python')
+      ) {
+        const text = await blob.text();
+        if (!text || text.trim().length === 0) {
+          message.innerHTML = `
+            <div style="padding:26px; line-height:1.7;">
+              <strong>This file is empty.</strong>
+              <p>There is no content to preview yet.</p>
+              <p><a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download file</a></p>
+            </div>
+          `;
+          message.style.display = 'block';
+          return;
+        }
+
+        const safeText = escapeHtmlJS(text).replace(/\n/g, '<br>');
+        iframe.srcdoc = `
+          <html>
+            <body style="font-family:Segoe UI, sans-serif; padding:20px; line-height:1.6; white-space:pre-wrap; background:#fff; color:#0f172a;">
+              ${safeText}
+            </body>
+          </html>
+        `;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      const fallbackWindow = window.open(resourceUrl, '_blank', 'noopener,noreferrer');
+      if (fallbackWindow) {
+        modal.style.display = 'none';
+      } else {
+        message.innerHTML = `
+          <div style="padding:26px; line-height:1.7;">
+            <strong>Preview is not available for this file type.</strong>
+            <p>Open it in a separate tab or download it to your computer.</p>
+            <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
+          </div>
+        `;
+        message.style.display = 'block';
+      }
+    })
+    .catch((err) => {
+      message.innerHTML = `
+        <div style="padding:26px; line-height:1.7;">
+          <strong>Unable to open this file.</strong>
+          <p>${escapeHtmlJS(err.message || 'The preview could not be generated.')}</p>
+          <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
+        </div>
+      `;
+      message.style.display = 'block';
+    });
+}
+
+const submissionViewerCloseBtn = document.getElementById('submission-viewer-close');
+if (submissionViewerCloseBtn) {
+  submissionViewerCloseBtn.addEventListener('click', () => {
+    const modal = document.getElementById('submission-viewer-modal');
+    const iframe = document.getElementById('submission-viewer-iframe');
+    const message = document.getElementById('submission-viewer-message');
+    if (modal) modal.style.display = 'none';
+    if (iframe) iframe.src = 'about:blank';
+    if (message) message.style.display = 'none';
+  });
+}
+
+// ─── STUDENT SUBMISSIONS BROWSER (Teacher) ────────────────────────
+async function loadTeacherSubmissionLabs() {
+  const root = document.getElementById('teacher-submissions-root');
+  if (!root) return;
+  const teacherId = currentUser?.teacherId;
+  if (!teacherId) { root.innerHTML = '<div class="empty-state">Not logged in as a teacher.</div>'; return; }
+
+  root.innerHTML = '<div class="empty-state">Loading your submission folders…</div>';
+  try {
+    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/labs`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
+    renderTeacherLabsList(data.labs || []);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submissions: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+function renderTeacherLabsList(labs) {
+  const root = document.getElementById('teacher-submissions-root');
+  if (!labs.length) {
+    root.innerHTML = '<div class="empty-state">You have no course labs assigned yet.</div>';
+    return;
+  }
+  root.innerHTML = `
+    <div class="folder-grid">
+      ${labs.map(lab => `
+        <button class="folder-card" data-co-id="${lab.course_offering_id}">
+          <div class="folder-icon">📁</div>
+          <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
+          <div class="folder-meta">${lab.submission_count} submission${lab.submission_count === 1 ? '' : 's'}</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  root.querySelectorAll('.folder-card').forEach((card, i) => {
+    card.addEventListener('click', () => loadLabStudents(labs[i].course_offering_id, labs[i].label));
+  });
+}
+
+async function loadLabStudents(courseOfferingId, labLabel) {
+  const root = document.getElementById('teacher-submissions-root');
+  const teacherId = currentUser?.teacherId;
+  root.innerHTML = '<div class="empty-state">Loading students…</div>';
+  try {
+    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/students`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load students.');
+    const students = data.students || [];
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-teacher-labs">Student Submissions</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(labLabel)}</span>
+      </div>
+      ${students.length === 0 ? '<div class="empty-state">No students have submitted for this lab yet.</div>' : `
+      <div class="folder-grid">
+        ${students.map(s => `
+          <button class="folder-card" data-student-id="${s.student_id}">
+            <div class="folder-icon">🧑‍🎓</div>
+            <div class="folder-name">${escapeHtmlJS(s.registration_no)}</div>
+            <div class="folder-meta">${escapeHtmlJS(s.name)} · ${s.file_count} file${s.file_count === 1 ? '' : 's'}</div>
+          </button>
+        `).join('')}
+      </div>`}
+    `;
+    document.getElementById('back-to-teacher-labs').addEventListener('click', loadTeacherSubmissionLabs);
+    root.querySelectorAll('.folder-card[data-student-id]').forEach((card, i) => {
+      card.addEventListener('click', () => loadStudentSubmissionDetail(courseOfferingId, students[i].student_id, labLabel, students[i].registration_no));
+    });
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load students: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel, regNo) {
+  const root = document.getElementById('teacher-submissions-root');
+  const teacherId = currentUser?.teacherId;
+  root.innerHTML = '<div class="empty-state">Loading submission…</div>';
+  try {
+    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/student/${studentId}/files`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load submission.');
+    const files = data.files || [];
+    const submission = data.submission || {};
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-teacher-labs2">Student Submissions</button>
+        <span class="crumb-sep">/</span>
+        <button class="crumb-link" id="back-to-lab-students">${escapeHtmlJS(labLabel)}</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(regNo)}</span>
+      </div>
+      ${submission.has_report ? `
+      <div class="report-download-bar">
+        <div>
+          <div style="font-weight:800; font-size:13px; color:var(--navy);">📋 Security Log Report</div>
+          <div style="font-size:11.5px; color:var(--grey-500); margin-top:2px;">Filterable by severity (Critical / High / Medium / Low) — open in browser or download at any time.</div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a class="report-btn" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false', 'Security Log Report'); return false;">📖 Open Security Log Report</a>
+          <a class="file-download" href="${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true" target="_blank">⬇ Download</a>
+        </div>
+      </div>` : ''}
+      ${files.length === 0 ? '<div class="empty-state">No files in this submission.</div>' : `
+      <table class="file-list-table">
+        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+        <tbody>
+          ${files.map(f => `
+            <tr>
+              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+              <td>${formatFileSize(f.file_size)}</td>
+              <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                <a class="file-download" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=false', '${escapeHtmlJS(f.relative_path)}'); return false;">Open</a>
+                <a class="file-download" href="${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=true" target="_blank">Download</a>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    `;
+    document.getElementById('back-to-teacher-labs2').addEventListener('click', loadTeacherSubmissionLabs);
+    document.getElementById('back-to-lab-students').addEventListener('click', () => loadLabStudents(courseOfferingId, labLabel));
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submission: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
 
 // ─── CHANGE PASSWORD ──────────────────────────────────────────────
 const changePwdForm = document.getElementById('change-pwd-form');

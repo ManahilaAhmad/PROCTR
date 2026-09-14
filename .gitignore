@@ -21,5 +21,8 @@ Thumbs.db
 # Python cache
 .pytest_cache/
 
+# Upload artifacts
+backend/uploads/submissions/
+
 # Logs
 *.log

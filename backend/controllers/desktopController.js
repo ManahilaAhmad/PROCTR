@@ -185,19 +185,13 @@ export const joinLiveSession = async (req, res) => {
       );
     }
 
-    // Check if student has already submitted work
-    if (student_id) {
-      const subCheck = await pool.query(
-        `SELECT submission_id FROM student_submission WHERE exam_id = $1 AND student_id = $2`,
-        [session.exam_id, student_id]
-      );
-      if (subCheck.rows.length > 0) {
-        return res.status(403).json({
-          status: 'error',
-          message: 'Exam Completed: You have already submitted your solution. Re-joining is disabled.'
-        });
-      }
-    }
+    // NOTE: previously this blocked rejoining if a student_submission row
+    // already existed for this exam. That conflicts with allowing both
+    // auto-submit (at session end/timer expiry) AND manual resubmission —
+    // a student needs to be able to rejoin and fix/redo their submission
+    // as long as the live session itself is still ACTIVE (already
+    // enforced above). The session ending is what should lock things,
+    // not the mere existence of an earlier submission attempt.
 
     res.status(200).json({
       status: 'success',

@@ -84,8 +84,8 @@
             <span>Security Log</span>
           </button>
           <button class="nav-item" data-section="s-submission">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <span>Submit Work</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            <span>Submitted Work</span>
           </button>
         </nav>
         <div class="sidebar-footer">
@@ -404,19 +404,16 @@
           </div>
         </section>
 
-        <!-- ── SUBMIT SECTION ── -->
+        <!-- ── SUBMITTED WORK (viewer, not a submit action) ── -->
         <section id="section-s-submission" class="content-section">
           <div class="page-header">
             <div>
-              <h2>Submit Your Work</h2>
-              <p class="subtitle">Submit your solution files to the invigilator's local server</p>
+              <h2>Submitted Work</h2>
+              <p class="subtitle">Everything you've submitted, organized by lab</p>
             </div>
           </div>
-          <div class="submit-card">
-            <div class="submit-icon">📤</div>
-            <p>Your solution files will be collected from your exam workspace folder and submitted to the invigilator's server. Make sure all files are saved before submitting.</p>
-            <button class="btn-primary" id="btn-submit-exam">Submit Exam Work</button>
-            <div id="submit-status" style="display:none;" class="submit-status"></div>
+          <div id="student-submitted-work-root">
+            <div class="empty-state">Loading your submitted work…</div>
           </div>
         </section>
 
@@ -526,7 +523,6 @@
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
               <div style="font-size:11px; font-weight:800; color:var(--grey-500);">TIME LEFT <strong id="teacher-timer" style="font-size:16px; color:var(--navy);">—</strong></div>
-              <button class="btn-secondary" id="btn-exit-live-room" style="padding:6px 14px; font-size:11px;">✖ Exit Session</button>
               <button class="btn-secondary" id="btn-clear-student-filter" style="display:none; padding:5px 12px; font-size:11px;" onclick="clearStudentCandidateFilter()">
                 🔄 Show All Candidates
               </button>
@@ -599,14 +595,28 @@
           <div class="page-header">
             <div>
               <h2>Student Submissions</h2>
-              <p class="subtitle">Submitted files from all students in this session</p>
+              <p class="subtitle">One folder per lab you teach — click in to see student roll-number folders</p>
             </div>
           </div>
-          <div class="submissions-list" id="submissions-list">
-            <div class="empty-state">No submissions received yet.</div>
+          <div id="teacher-submissions-root">
+            <div class="empty-state">Loading your submission folders…</div>
           </div>
         </section>
       </main>
+    </div>
+  </div>
+
+  <!-- ─── FILE PREVIEW MODAL ─────────────────────────── -->
+  <div class="modal-overlay" id="submission-viewer-modal" style="display:none;">
+    <div class="modal-card" style="width:min(1100px, 92vw); max-height:90vh; padding:0; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(148,163,184,0.25); background:#f8fafc;">
+        <div id="submission-viewer-title" style="font-size:15px; font-weight:800; color:var(--navy);">Submission Viewer</div>
+        <button class="btn-secondary" id="submission-viewer-close" style="padding:7px 12px; font-size:11px;">Close</button>
+      </div>
+      <div style="padding:16px; background:#eef2ff;">
+        <iframe id="submission-viewer-iframe" style="width:100%; height:75vh; border:1px solid #dbe3f0; border-radius:12px; background:#fff; display:none;"></iframe>
+        <div id="submission-viewer-message" class="empty-state" style="display:none; min-height:200px; border:1px solid #dbe3f0; background:#fff; border-radius:12px;">Loading preview…</div>
+      </div>
     </div>
   </div>
 

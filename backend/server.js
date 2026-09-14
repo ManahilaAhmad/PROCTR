@@ -18,6 +18,7 @@ import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
 import desktopRoutes from './routes/desktopRoutes.js';
 import proctoringRoutes from './routes/proctoringRoutes.js';
+import submissionRoutes from './routes/submissionRoutes.js';
 import { setIO } from './socketRegistry.js';
 
 // Controllers (for legacy flat-path aliases)
@@ -98,6 +99,7 @@ app.use('/api/coordinator', coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
 app.use('/api/desktop', desktopRoutes);        // Desktop app sessions & violations
 app.use('/api/proctoring', proctoringRoutes);      // Fuzzy AI evaluation + generic proctoring events
+app.use('/api/submission', submissionRoutes);      // Student work submissions (teacher/student browsing)
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
