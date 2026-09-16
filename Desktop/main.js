@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const http = require('http');
 const { spawn } = require('child_process');
 
 // Suppress harmless Chromium GPU cache warnings on Windows
@@ -126,6 +128,88 @@ app.on('will-quit', () => {
   runRestoreDefaultsSync();
 });
 
+// ─── HELPER: POST JSON to the backend (main process, no browser fetch needed) ──
+function postJson(urlString, bodyObj) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlString);
+      const body = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
+      const req = http.request({
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': body.length
+        },
+        timeout: 30000
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed = null;
+          try { parsed = JSON.parse(data); } catch { parsed = { status: 'error', message: 'Invalid response from server.' }; }
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => { req.destroy(new Error('Request timed out')); });
+      req.write(body);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ─── HELPER: Recursively collect every file inside a folder.
+// Optionally skip specific top-level subfolder names (by exact name match
+// at the root level only, e.g. 'logs' — local sensor logs, not solution work).
+// Whatever is on disk gets read and submitted exactly as-is — including
+// empty files. No retries, no validation, no second-guessing content.
+function collectFilesRecursive(rootDir, currentDir, out, skipTopLevelNames = []) {
+  if (!fs.existsSync(currentDir)) return out;
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    const isTopLevel = currentDir === rootDir;
+    if (isTopLevel && entry.isDirectory() && skipTopLevelNames.includes(entry.name)) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      collectFilesRecursive(rootDir, fullPath, out, skipTopLevelNames);
+    } else if (entry.isFile()) {
+      const relativePath = path.relative(rootDir, fullPath).split(path.sep).join('/');
+      const buffer = fs.readFileSync(fullPath);
+      out.push({
+        relativePath,
+        contentBase64: buffer.toString('base64'),
+        size: buffer.length
+      });
+    }
+  }
+  return out;
+}
+
+// ─── HELPER: Get this machine's MAC address (schema.sql requires it,
+// NOT NULL, on every student_submission row) ────────────────────────
+function getMacAddress() {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+          return iface.mac;
+        }
+      }
+    }
+  } catch {}
+  return '00:00:00:00:00:00';
+}
+
+let currentApiBase = 'http://localhost:5000/api';
+
 // IPC Handler to stop sensors manually if needed
 ipcMain.handle('stop-sensors', () => {
   if (pythonProcess) {
@@ -241,5 +325,57 @@ ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }
   } catch (err) {
     console.error('[Electron] Failed to write local log:', err.message);
     return { status: 'error', message: err.message };
+  }
+});
+
+// IPC Handler — Submit a student's exam work.
+// Reads every file inside <workspacePath>/Submissions/ from disk (the
+// student's own PC — this is why it happens in the main process, which has
+// real filesystem access) and uploads it to the backend, which files it
+// under the right teacher/lab/roll-number folder and generates the
+// security log report. Called both automatically (session end / timer
+// expiry) and manually (Submit button) — the backend safely overwrites
+// on re-submission rather than duplicating.
+ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCode, workspacePath, submissionType, apiBase }) => {
+  try {
+    if (!workspacePath) {
+      return { status: 'error', message: 'No active exam workspace to submit from.' };
+    }
+    if (!examId || !studentId) {
+      return { status: 'error', message: 'Missing exam or student identity — cannot submit.' };
+    }
+
+    // Only the contents of the Submissions folder are collected — that's
+    // the folder students are expected to place their final work in.
+    // Everything else in the workspace (starter_code, logs) is ignored.
+    const submissionsFolder = path.join(workspacePath, 'Submissions');
+    const files = collectFilesRecursive(submissionsFolder, submissionsFolder, []);
+
+    console.log(`[Electron] Submit triggered (${submissionType || 'MANUAL'}). Scanning: ${submissionsFolder}`);
+    console.log(`[Electron] Found ${files.length} file(s):`, files.map(f => f.relativePath));
+
+    const base = apiBase || currentApiBase;
+    const result = await postJson(`${base}/submission/upload`, {
+      exam_id: examId,
+      student_id: studentId,
+      mac_address: getMacAddress(),
+      files
+    });
+
+    if (!result.ok) {
+      console.error(`[Electron] Upload failed (HTTP ${result.status}):`, result.body?.message);
+      return { status: 'error', message: result.body?.message || `Upload failed (HTTP ${result.status}).` };
+    }
+
+    console.log(`[Electron] Submission uploaded: ${files.length} file(s) for student ${studentId}, exam ${examId}`);
+    return {
+      status: 'success',
+      message: result.body.message,
+      file_count: result.body.file_count,
+      submission_id: result.body.submission_id
+    };
+  } catch (err) {
+    console.error('[Electron] Error submitting exam work:', err.message);
+    return { status: 'error', message: `Could not reach the backend server to submit: ${err.message}` };
   }
 });

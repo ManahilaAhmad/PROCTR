@@ -852,3 +852,48 @@ body {
   .sidebar-nav { display: flex; overflow-x: auto; gap: 4px; }
   .stats-row { grid-template-columns: 1fr; }
 }
+
+/* ─── SUBMISSION / SUBMITTED-WORK FOLDER BROWSER ───────────────── */
+.breadcrumb-bar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+  font-size: 13px; color: var(--grey-500); flex-wrap: wrap;
+}
+.breadcrumb-bar .crumb-link {
+  color: var(--navy); font-weight: 700; cursor: pointer; background: none; border: none; padding: 0; font-size: 13px;
+}
+.breadcrumb-bar .crumb-link:hover { text-decoration: underline; }
+.breadcrumb-bar .crumb-sep { color: var(--grey-300); }
+.breadcrumb-bar .crumb-current { color: var(--grey-800); font-weight: 700; }
+
+.folder-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;
+}
+.folder-card {
+  background: #fff; border: 1px solid var(--grey-200); border-radius: 12px; padding: 18px;
+  cursor: pointer; transition: box-shadow .15s ease, transform .15s ease; text-align: left;
+}
+.folder-card:hover { box-shadow: 0 6px 18px rgba(26,43,75,.10); transform: translateY(-1px); border-color: var(--grey-300); }
+.folder-card .folder-icon { font-size: 26px; margin-bottom: 8px; }
+.folder-card .folder-name { font-size: 13.5px; font-weight: 800; color: var(--navy); line-height: 1.35; }
+.folder-card .folder-meta { font-size: 11.5px; color: var(--grey-500); margin-top: 6px; }
+
+.file-list-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--grey-200); border-radius: 10px; overflow: hidden; }
+.file-list-table th, .file-list-table td { text-align: left; padding: 10px 14px; font-size: 12.5px; border-bottom: 1px solid var(--grey-200); }
+.file-list-table th { background: var(--grey-50); text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; color: var(--grey-500); }
+.file-list-table tr:last-child td { border-bottom: none; }
+.file-list-table .file-name { font-family: var(--font-mono, monospace); font-weight: 700; color: var(--grey-800); }
+.file-list-table .file-download {
+  border: 1px solid var(--grey-200); background: #fff; color: var(--navy); font-weight: 700;
+  font-size: 11.5px; padding: 5px 12px; border-radius: 7px; cursor: pointer; text-decoration: none; display: inline-block;
+}
+.file-list-table .file-download:hover { background: var(--grey-50); }
+
+.report-download-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.report-download-bar .report-btn {
+  border: none; background: var(--navy); color: #fff; font-weight: 700; font-size: 12.5px;
+  padding: 9px 18px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block;
+}
+.report-download-bar .report-btn:hover { opacity: .92; }
