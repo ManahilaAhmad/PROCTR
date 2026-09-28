@@ -300,10 +300,31 @@ CREATE TABLE student_submission (
     student_id       INT NOT NULL REFERENCES student(student_id),
     exam_id          INT NOT NULL REFERENCES exam(exam_id),
     submission_path  VARCHAR(500) NOT NULL,
+    submission_manifest JSONB, -- Cloudinary asset metadata; null for legacy disk submissions
+    submission_attempt_id BIGINT,
     ip_address       VARCHAR(45) NOT NULL,  -- lab local IP, verifies correct subnet
     mac_address      VARCHAR(17) NOT NULL,  -- physical NIC address, prevents proxy submissions
     submitted_at     TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (student_id, exam_id)
+);
+
+CREATE TABLE submission_attempt (
+    request_id UUID PRIMARY KEY,
+    attempt_id BIGSERIAL UNIQUE NOT NULL,
+    student_id INT NOT NULL REFERENCES student(student_id),
+    exam_id INT NOT NULL REFERENCES exam(exam_id),
+    content_hash TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','complete','superseded')),
+    submission_id INT,
+    manifest JSONB,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE submission_access_session (
+    token_hash TEXT PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE ai_evaluation (

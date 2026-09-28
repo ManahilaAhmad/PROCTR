@@ -14,6 +14,7 @@ import InvigilatorPage from "./pages/InvigilatorPage";
 import DECPage from "./pages/DECPage";
 import LiveDashboardPage from "./pages/LiveDashboardPage";
 import PostExamReportPage from "./pages/PostExamReportPage";
+import SubmissionsPage from './pages/SubmissionsPage';
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
@@ -63,6 +64,8 @@ export default function App() {
 
   function renderDashboardContent() {
     switch (page) {
+      case 'submissions':
+        return ['student', 'teacher'].includes(user?.userType) ? <SubmissionsPage user={user} /> : <p>Access denied.</p>;
       case "teacher":
         return <TeacherPage activePage="teacher" setPage={navigateTo} user={user} />;
       case "upload":
@@ -120,7 +123,7 @@ export default function App() {
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["submissions", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (

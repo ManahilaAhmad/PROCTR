@@ -1,20 +1,10 @@
 import pool from '../db.js';
-import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Physical root for all submissions, nested under the existing /uploads
-// static mount so files are directly reachable at /uploads/submissions/...
-const SUBMISSIONS_ROOT = path.join(__dirname, '..', 'uploads', 'submissions');
-if (!fs.existsSync(SUBMISSIONS_ROOT)) fs.mkdirSync(SUBMISSIONS_ROOT, { recursive: true });
-
-// The schema's student_submission table has no dedicated column for the
-// report path, so it's always written to this fixed filename inside the
-// submission's own folder — no DB column needed to find it again.
-const REPORT_FILENAME = 'security_log_report.html';
+import { beginSubmissionAttempt, commitSubmissionAttempt, receiptResponse } from '../service/submissionReceipts.js';
+import {
+  prepareSubmissionFiles, normalizeSubmissionPath, uploadSubmissionAssets,
+  deleteSubmissionAssets, readSubmissionAsset
+} from '../service/submissionStorage.js';
 
 // Same H-code labels used by the live monitoring feed (desktop_violation_log)
 // — kept in sync so a violation reads the same way whether it's live or in
@@ -31,38 +21,37 @@ const HUMAN_MAP = {
   'N1': 'Unauthorized Network Subnet / Hotspot Breach'
 };
 
-const sanitizeSegment = (s) => String(s || '').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 100);
-
-/* ===========================================================
-   Recursively list every file under a folder (relative paths),
-   used instead of a student_submission_file table — the real
-   schema only stores one submission_path per row, so file
-   listing happens straight off disk.
-=========================================================== */
-function listFilesRecursive(rootDir, currentDir, out) {
-  if (!fs.existsSync(currentDir)) return out;
-  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      listFilesRecursive(rootDir, fullPath, out);
-    } else if (entry.isFile()) {
-      if (entry.name === REPORT_FILENAME) continue; // the report isn't a "submitted file"
-      const stat = fs.statSync(fullPath);
-      out.push({
-        relative_path: path.relative(rootDir, fullPath).split(path.sep).join('/'),
-        file_size: stat.size
-      });
-    }
+// PostgreSQL holds filenames and Cloudinary identifiers, never file contents.
+// Old disk submissions must be migrated explicitly; there is no disk fallback.
+function requireManifest(row) {
+  if (row.submission_manifest?.provider !== 'cloudinary') {
+    const error = new Error('This older submission must be migrated to Cloudinary. Run npm run migrate:submissions in the backend.');
+    error.status = 409;
+    throw error;
   }
-  return out;
+  return row.submission_manifest;
 }
 
-function safeJoin(rootDir, relativePath) {
-  const normalized = path.normalize(relativePath || '').replace(/^(\.\.[/\\])+/, '');
-  const dest = path.join(rootDir, normalized);
-  if (!dest.startsWith(rootDir)) return null; // path traversal guard
-  return dest;
+function listManifestFiles(manifest) {
+  return manifest.files.map(({ relative_path, file_size }) => ({ relative_path, file_size }));
+}
+
+function sendError(res, error, fallback) {
+  return res.status(error.status || 500).json({
+    status: 'error', message: error.status ? error.message : fallback
+  });
+}
+
+async function sendAsset(res, asset, fileName, shouldDownload) {
+  const content = await readSubmissionAsset(asset);
+  // Express safely encodes filenames in Content-Disposition, including Unicode.
+  res.attachment(fileName);
+  if (!shouldDownload) {
+    res.set('Content-Disposition', res.get('Content-Disposition').replace(/^attachment/, 'inline'));
+  }
+  res.set('Cache-Control', 'private, no-store');
+  res.set('X-Content-Type-Options', 'nosniff');
+  return res.send(content);
 }
 
 /* ===========================================================
@@ -205,7 +194,14 @@ export const uploadSubmission = async (req, res) => {
     return res.status(400).json({ status: 'error', message: 'files must be an array.' });
   }
 
+  let manifest;
+  let committed = false;
+  let commitAttempted = false;
   try {
+    const preparedFiles = prepareSubmissionFiles(files);
+    const attempt = req.body.request_id
+      ? await beginSubmissionAttempt(req.body.request_id, student_id, exam_id, preparedFiles) : null;
+    if (attempt && attempt.state !== 'pending') return res.status(200).json(receiptResponse(attempt));
     // Resolve the lab (course_offering) + teacher this exam belongs to —
     // derived server-side from exam_id via schema.sql's real relationships,
     // never trusted from the client.
@@ -236,34 +232,6 @@ export const uploadSubmission = async (req, res) => {
     const regNo = studentInfo.rows[0].registration_no || `STU${student_id}`;
     const studentName = studentInfo.rows[0].name || 'Candidate';
 
-    // ── Build the physical folder: teacher / lab / roll-number ──
-    // (One folder per student per lab — a second exam submitted under the
-    // same course_offering will overwrite this folder's contents, matching
-    // the single-submission-per-lab structure requested.)
-    const labFolderName = sanitizeSegment(`${course_code}_${section_name}`);
-    const studentFolder = path.join(SUBMISSIONS_ROOT, `teacher_${teacher_id}`, labFolderName, sanitizeSegment(regNo));
-    fs.mkdirSync(studentFolder, { recursive: true });
-
-    // Re-submitting replaces the previous file set cleanly.
-    if (fs.existsSync(studentFolder)) {
-      for (const entry of fs.readdirSync(studentFolder)) {
-        fs.rmSync(path.join(studentFolder, entry), { recursive: true, force: true });
-      }
-    }
-
-    let savedCount = 0;
-    for (const f of files) {
-      // Submit whatever the student has, as-is — including empty files.
-      // Only skip an entry if it's structurally broken (no path, or the
-      // content field is missing entirely), never based on file size.
-      if (!f || !f.relativePath || f.contentBase64 == null) continue;
-      const destPath = safeJoin(studentFolder, f.relativePath);
-      if (!destPath) continue;
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, Buffer.from(f.contentBase64, 'base64'));
-      savedCount++;
-    }
-
     // ── Generate the security log report for this student on this exam ──
     // (still reads desktop_violation_log — see note at top of file)
     const violationsRes = await pool.query(
@@ -272,7 +240,12 @@ export const uploadSubmission = async (req, res) => {
        WHERE les.exam_id = $1 AND dvl.student_id = $2
        ORDER BY dvl.detected_at ASC`,
       [exam_id, student_id]
-    ).catch(() => ({ rows: [] }));
+    ).catch(error => {
+      // The log table is created when the first event is recorded. Other
+      // database errors must retry rather than generate a false clean report.
+      if (error.code === '42P01') return { rows: [] };
+      throw error;
+    });
 
     const reportHtml = buildSecurityReportHtml({
       studentName,
@@ -281,35 +254,82 @@ export const uploadSubmission = async (req, res) => {
       examLabel: exam_type || 'Lab Exam',
       violations: violationsRes.rows || []
     });
-    fs.writeFileSync(path.join(studentFolder, REPORT_FILENAME), reportHtml, 'utf-8');
+    manifest = await uploadSubmissionAssets({
+      examId: exam_id, studentId: student_id, teacherId: teacher_id,
+      files: preparedFiles, reportHtml
+    });
+    if (attempt) {
+      // Verify delivery before issuing a receipt; the desktop keeps its backup
+      // throughout, including during an uncertain database commit.
+      for (const asset of [...manifest.files, manifest.report]) await readSubmissionAsset(asset);
+    }
 
     // ── IP / MAC — both NOT NULL in schema.sql, capture them for real ──
     const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
-    const ipAddress = String(rawIp).replace('::ffff:', '').trim() || '0.0.0.0';
+    const ipAddress = String(rawIp).split(',')[0].replace('::ffff:', '').trim() || '0.0.0.0';
     const macAddress = (mac_address && String(mac_address).trim()) || '00:00:00:00:00:00';
 
-    // ── Upsert the one-row-per-(student,exam) submission record ──
-    const subResult = await pool.query(
-      `INSERT INTO student_submission (student_id, exam_id, submission_path, ip_address, mac_address, submitted_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       ON CONFLICT (student_id, exam_id) DO UPDATE
-       SET submission_path = EXCLUDED.submission_path,
-           ip_address = EXCLUDED.ip_address,
-           mac_address = EXCLUDED.mac_address,
-           submitted_at = NOW()
-       RETURNING submission_id`,
-      [student_id, exam_id, studentFolder, ipAddress, macAddress]
-    );
+    if (attempt) {
+      const result = await commitSubmissionAttempt(attempt, manifest, ipAddress, macAddress);
+      committed = true;
+      res.status(200).json(result.receipt);
+      if (result.discardNew) await deleteSubmissionAssets(manifest).catch(() => {});
+      return;
+    }
 
+    // Each attempt has its own cloud folder. Only replace the database pointer
+    // after every upload succeeds, and serialize concurrent submissions.
+    const client = await pool.connect();
+    let previousManifest;
+    let subResult;
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`submission:${student_id}:${exam_id}`]);
+      const previous = await client.query(
+        'SELECT submission_manifest FROM student_submission WHERE student_id = $1 AND exam_id = $2 FOR UPDATE',
+        [student_id, exam_id]
+      );
+      previousManifest = previous.rows[0]?.submission_manifest;
+      subResult = await client.query(
+        `INSERT INTO student_submission (student_id, exam_id, submission_path, ip_address, mac_address, submission_manifest, submitted_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
+         ON CONFLICT (student_id, exam_id) DO UPDATE
+         SET submission_path = EXCLUDED.submission_path,
+             submission_manifest = EXCLUDED.submission_manifest,
+             ip_address = EXCLUDED.ip_address,
+             mac_address = EXCLUDED.mac_address,
+             submitted_at = NOW()
+         RETURNING submission_id`,
+        [student_id, exam_id, `cloudinary://${manifest.folder}`, ipAddress, macAddress, JSON.stringify(manifest)]
+      );
+      commitAttempted = true;
+      await client.query('COMMIT');
+      committed = true;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
     res.status(200).json({
       status: 'success',
-      message: `Submission saved: ${savedCount} file(s) uploaded.`,
+      message: `Submission saved to Cloudinary: ${preparedFiles.length} file(s) uploaded.`,
       submission_id: subResult.rows[0].submission_id,
-      file_count: savedCount
+      file_count: preparedFiles.length
     });
+    // Send confirmation before cleanup: a slow deletion must not cause the
+    // desktop to time out after the new submission has already been saved.
+    if (previousManifest) {
+      await deleteSubmissionAssets(previousManifest).catch(() => {
+        console.warn('Could not clean up the previous Cloudinary submission.');
+      });
+    }
   } catch (error) {
-    console.error('Error uploading submission:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to save submission.' });
+    // A dropped connection during COMMIT has an uncertain outcome. Retain the
+    // uploaded assets in that case so a committed row cannot lose its files.
+    if (manifest && !committed && !commitAttempted && !error.retainAssets) await deleteSubmissionAssets(manifest).catch(() => {});
+    console.error('Error uploading submission:', error.message);
+    sendError(res, error, 'Could not confirm the submission was saved. Please check your submitted work and retry.');
   }
 };
 
@@ -367,7 +387,7 @@ export const getLabStudents = async (req, res) => {
 
     const result = await pool.query(
       `SELECT DISTINCT ON (ss.student_id)
-              ss.submission_id, ss.student_id, ss.submitted_at, ss.submission_path,
+              ss.submission_id, ss.student_id, ss.submitted_at, ss.submission_manifest,
               s.registration_no, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
@@ -379,15 +399,15 @@ export const getLabStudents = async (req, res) => {
     );
 
     const students = result.rows.map(r => {
-      let fileCount = 0;
-      try { fileCount = listFilesRecursive(r.submission_path, r.submission_path, []).length; } catch {}
+      const manifest = r.submission_manifest;
       return {
         submission_id: r.submission_id,
         student_id: r.student_id,
         submitted_at: r.submitted_at,
         registration_no: r.registration_no,
         name: r.name,
-        file_count: fileCount
+        file_count: manifest?.files?.length || 0,
+        migration_required: manifest?.provider !== 'cloudinary'
       };
     });
 
@@ -413,7 +433,7 @@ export const getStudentSubmissionFiles = async (req, res) => {
     }
 
     const subRes = await pool.query(
-      `SELECT ss.submission_id, ss.submitted_at, ss.submission_path
+      `SELECT ss.submission_id, ss.submitted_at, ss.submission_manifest
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        WHERE e.course_offering_id = $1 AND ss.student_id = $2
@@ -424,8 +444,9 @@ export const getStudentSubmissionFiles = async (req, res) => {
       return res.status(404).json({ status: 'error', message: 'No submission found for this student.' });
     }
     const submission = subRes.rows[0];
-    const hasReport = fs.existsSync(path.join(submission.submission_path, REPORT_FILENAME));
-    const files = listFilesRecursive(submission.submission_path, submission.submission_path, []);
+    const manifest = requireManifest(submission);
+    const hasReport = Boolean(manifest.report);
+    const files = listManifestFiles(manifest);
 
     res.status(200).json({
       status: 'success',
@@ -438,7 +459,7 @@ export const getStudentSubmissionFiles = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching student submission files:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch submission files.' });
+    sendError(res, error, 'Failed to fetch submission files.');
   }
 };
 
@@ -484,7 +505,7 @@ export const getStudentOwnFiles = async (req, res) => {
   const { studentId, courseOfferingId } = req.params;
   try {
     const subRes = await pool.query(
-      `SELECT ss.submission_id, ss.submitted_at, ss.submission_path
+      `SELECT ss.submission_id, ss.submitted_at, ss.submission_manifest
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        WHERE e.course_offering_id = $1 AND ss.student_id = $2
@@ -495,7 +516,7 @@ export const getStudentOwnFiles = async (req, res) => {
       return res.status(404).json({ status: 'error', message: 'No submission found.' });
     }
     const submission = subRes.rows[0];
-    const files = listFilesRecursive(submission.submission_path, submission.submission_path, [])
+    const files = listManifestFiles(requireManifest(submission))
       .map(f => ({ ...f, submission_id: submission.submission_id }));
 
     res.status(200).json({
@@ -505,7 +526,7 @@ export const getStudentOwnFiles = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching student\'s own files:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch submitted files.' });
+    sendError(res, error, 'Failed to fetch submitted files.');
   }
 };
 
@@ -521,7 +542,7 @@ export const downloadFile = async (req, res) => {
 
   try {
     const subRes = await pool.query(
-      `SELECT ss.submission_path, ss.student_id, e.course_offering_id, co.teacher_id
+      `SELECT ss.submission_manifest, ss.student_id, e.course_offering_id, co.teacher_id
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
@@ -540,24 +561,18 @@ export const downloadFile = async (req, res) => {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this file.' });
     }
 
-    const filePath = safeJoin(row.submission_path, relativePath);
-    if (!filePath || !fs.existsSync(filePath)) {
+    const manifest = requireManifest(row);
+    const normalizedPath = normalizeSubmissionPath(relativePath);
+    // Only submitted work is downloadable here; reports use the teacher route.
+    const asset = manifest.files.find(file => file.relative_path === normalizedPath);
+    if (!asset) {
       return res.status(404).json({ status: 'error', message: 'File not found.' });
     }
 
-    const fileName = path.basename(filePath);
-    if (shouldDownload) {
-      return res.download(filePath, fileName);
-    }
-
-    return res.sendFile(filePath, {
-      headers: {
-        'Content-Disposition': `inline; filename="${fileName}"`
-      }
-    });
+    return await sendAsset(res, asset, path.posix.basename(asset.relative_path), shouldDownload);
   } catch (error) {
     console.error('Error downloading file:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to download file.' });
+    sendError(res, error, 'Failed to download file.');
   }
 };
 
@@ -571,7 +586,7 @@ export const downloadReport = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT ss.submission_path, co.teacher_id, s.registration_no
+      `SELECT ss.submission_manifest, co.teacher_id, s.registration_no
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
@@ -585,22 +600,14 @@ export const downloadReport = async (req, res) => {
     if (String(result.rows[0].teacher_id) !== String(teacherId)) {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this report.' });
     }
-    const reportPath = path.join(result.rows[0].submission_path, REPORT_FILENAME);
-    if (!fs.existsSync(reportPath)) {
-      return res.status(404).json({ status: 'error', message: 'Report file not found on disk.' });
+    const report = requireManifest(result.rows[0]).report;
+    if (!report) {
+      return res.status(404).json({ status: 'error', message: 'Report file not found.' });
     }
     const fileName = `security_log_${result.rows[0].registration_no}.html`;
-    if (shouldDownload) {
-      return res.download(reportPath, fileName);
-    }
-
-    return res.sendFile(reportPath, {
-      headers: {
-        'Content-Disposition': `inline; filename="${fileName}"`
-      }
-    });
+    return await sendAsset(res, report, fileName, shouldDownload);
   } catch (error) {
     console.error('Error downloading report:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to download report.' });
+    sendError(res, error, 'Failed to download report.');
   }
 };

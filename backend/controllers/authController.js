@@ -1,6 +1,7 @@
 import pool from '../db.js';
 import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
+import { issueSubmissionToken } from '../middleware/submissionAuth.js';
 
 /* ===========================================================
    LOGIN
@@ -158,6 +159,7 @@ export const login = async (req, res) => {
         userType: user.user_type,
         profilePictureUrl: user.profile_picture_url,
         ...extra,
+        accessToken: await issueSubmissionToken(user.user_id),
       }
     });
   } catch (error) {

@@ -1,4 +1,6 @@
 import express from 'express';
+import { authenticateSubmission, checkSubmissionOwner } from '../middleware/submissionAuth.js';
+import { getSubmissionReceipt } from '../service/submissionReceipts.js';
 import {
   uploadSubmission,
   getTeacherLabs,
@@ -11,6 +13,10 @@ import {
 } from '../controllers/submissionController.js';
 
 const router = express.Router();
+router.use(authenticateSubmission);
+router.param('teacherId', checkSubmissionOwner);
+router.param('studentId', checkSubmissionOwner);
+router.get('/receipt/:requestId', getSubmissionReceipt);
 
 // Mounted at /api/submission
 

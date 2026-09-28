@@ -3,7 +3,7 @@
  * Connected to Express.js Backend (http://localhost:5000/api) & Neon PostgreSQL
  */
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = window.proctrAPI?.apiBase || 'http://localhost:5000/api';
 const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
 
 // ─── LIVE SOCKET CONNECTION (instant violation push to teacher dashboard) ──
@@ -97,6 +97,7 @@ const whitelist = [
 // ─── SESSION PERSISTENCE (survive normal + forced reloads) ─────────
 function saveSession() {
   if (!currentUser) return;
+  window.proctrAPI?.setSubmissionUser(currentUser).catch(console.error);
   localStorage.setItem('proctr_session', JSON.stringify({ role: currentRole, user: currentUser }));
 }
 
@@ -113,6 +114,7 @@ function restoreSession() {
 
     currentRole = role;
     currentUser = user;
+    window.proctrAPI?.setSubmissionUser(user).catch(console.error);
 
     if (role === 'student') {
       populateStudentProfile(user);
@@ -232,7 +234,11 @@ loginForm.addEventListener('submit', async (e) => {
 });
 
 // ─── LOGOUT ──────────────────────────────────────────────────────
-document.getElementById('student-logout').addEventListener('click', () => {
+document.getElementById('student-logout').addEventListener('click', async () => {
+  const saved = await window.proctrAPI?.finishExamWork();
+  if (saved?.status === 'error') { alert(saved.message); return; }
+  if (saved?.pending) alert('Your backup is saved, but cloud confirmation is pending. PROCTR will keep retrying while running. Please notify the invigilator.');
+  window.proctrAPI?.setSubmissionUser(null);
   currentUser = null;
   currentSessionId = null;
   currentRole = 'student';
@@ -1129,9 +1135,10 @@ if (joinExamForm) {
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         const result = await window.proctrAPI.startExamWorkspace({
-          examId: examCode,
-          studentId: regNo,
-          courseCode: examCode
+          examId: window.activeExamId,
+          studentId: currentUser.studentId,
+          courseCode: examCode,
+          sessionCode: examCode
         });
 
         if (result.status === 'success') {
@@ -1229,9 +1236,9 @@ function startStudentSessionPoll(sessionCode) {
               // Full Cloudinary or external HTTPS URL — use directly
             } else if (paperUrl.startsWith('file:///') || paperUrl.includes(':\\')) {
               const filename = paperUrl.split('/').pop().split('\\').pop();
-              paperUrl = `http://localhost:5000/uploads/${filename}`;
+              paperUrl = `${SOCKET_BASE}/uploads/${filename}`;
             } else {
-              paperUrl = `http://localhost:5000${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
+              paperUrl = `${SOCKET_BASE}${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
             }
 
             const isWordDoc = paperUrl.toLowerCase().includes('.docx') || paperUrl.toLowerCase().includes('.doc');
@@ -1387,8 +1394,56 @@ function startExamTimer() {
 // manually via the Submit button. Safe to call more than once — the backend
 // upserts on (exam_id, student_id), so a later call just replaces the files.
 let autoSubmitTriggered = false;
+let submissionInFlight = null;
 
 async function performExamSubmission(type) {
+  if (submissionInFlight) return submissionInFlight;
+  submissionInFlight = submitExamAndShowResult(type);
+  try {
+    return await submissionInFlight;
+  } finally {
+    submissionInFlight = null;
+  }
+}
+
+async function submitExamAndShowResult(type) {
+  const button = document.getElementById('btn-submit-exam');
+  const status = document.getElementById('submit-status');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Submitting...';
+  }
+  if (status) {
+    status.textContent = 'Uploading your submission...';
+    status.style.display = 'block';
+    status.style.color = 'var(--grey-500)';
+  }
+
+  let result;
+  try {
+    result = await uploadExamSubmission(type);
+    if (!result || !['success', 'pending'].includes(result.status)) {
+      throw new Error(result?.message || 'Submission failed — you can try again.');
+    }
+  } catch (error) {
+    result = { status: 'error', message: error.message || 'Submission failed — you can try again.' };
+  }
+
+  const succeeded = result.status === 'success';
+  if (button) {
+    button.disabled = succeeded;
+    button.textContent = succeeded ? '✓ Submitted' : result.status === 'pending' ? 'Retry saved submission' : '✓ Submit Solution';
+  }
+  if (status) {
+    status.textContent = succeeded
+      ? `✅ ${result.message || 'Your submission has been saved successfully.'}`
+      : `${result.status === 'pending' ? 'Saved copy: ' : '✖ '}${result.message}`;
+    status.style.color = succeeded ? 'var(--teal)' : result.status === 'pending' ? '#b45309' : '#dc2626';
+  }
+  return result;
+}
+
+async function uploadExamSubmission(type) {
   if (!window.proctrAPI || !window.proctrAPI.submitExamWork) {
     return { status: 'error', message: 'Submission is not available in this environment.' };
   }
@@ -1410,28 +1465,7 @@ async function performExamSubmission(type) {
 const submitExamBtn = document.getElementById('btn-submit-exam');
 if (submitExamBtn) {
   submitExamBtn.addEventListener('click', async () => {
-    const status = document.getElementById('submit-status');
-    submitExamBtn.disabled = true;
-    submitExamBtn.textContent = 'Submitting...';
-
-    const result = await performExamSubmission('MANUAL');
-
-    if (result.status === 'success') {
-      submitExamBtn.textContent = '✓ Submitted';
-      if (status) {
-        status.textContent = `✅ ${result.message || 'Your submission has been sent successfully.'}`;
-        status.style.display = 'block';
-        status.style.color = 'var(--teal)';
-      }
-    } else {
-      submitExamBtn.disabled = false;
-      submitExamBtn.textContent = '✓ Submit Solution';
-      if (status) {
-        status.textContent = `✖ ${result.message || 'Submission failed — you can try again.'}`;
-        status.style.display = 'block';
-        status.style.color = '#dc2626';
-      }
-    }
+    await performExamSubmission('MANUAL');
   });
 }
 
@@ -1457,13 +1491,21 @@ async function loadStudentSubmittedWork() {
 
   root.innerHTML = '<div class="empty-state">Loading your submitted work…</div>';
   try {
-    const res = await fetch(`${API_BASE}/submission/student/${studentId}/labs`);
+    const res = await submissionFetch(`${API_BASE}/submission/student/${studentId}/labs`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
     renderStudentLabsList(data.labs || []);
   } catch (err) {
     root.innerHTML = `<div class="empty-state">Could not load submitted work: ${escapeHtmlJS(err.message)}</div>`;
   }
+  const backups = await window.proctrAPI?.getSubmissionBackups().catch(() => []) || [];
+  const pending = backups.filter(job => job.state !== 'synced');
+  if (pending.length) root.insertAdjacentHTML('afterbegin', `<div class="empty-state" style="color:#b45309">
+    <strong>${pending.length} saved backup(s) still need cloud confirmation.</strong>
+    <p>Keep PROCTR running to retry. Ask the invigilator for help before leaving if this remains pending.</p>
+    ${pending.map(job => `<p>Exam ${escapeHtmlJS(job.examId)}: ${escapeHtmlJS(job.message || 'Waiting to upload')}</p>`).join('')}
+    <p>Use the PROCTR tray menu to open the backup folder.</p>
+  </div>`);
 }
 
 function renderStudentLabsList(labs) {
@@ -1493,7 +1535,7 @@ async function loadStudentLabFiles(courseOfferingId, labLabel) {
   const studentId = currentUser?.studentId || currentUser?.userId;
   root.innerHTML = '<div class="empty-state">Loading files…</div>';
   try {
-    const res = await fetch(`${API_BASE}/submission/student/${studentId}/lab/${courseOfferingId}/files`);
+    const res = await submissionFetch(`${API_BASE}/submission/student/${studentId}/lab/${courseOfferingId}/files`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load files.');
     const files = data.files || [];
@@ -1511,7 +1553,7 @@ async function loadStudentLabFiles(courseOfferingId, labLabel) {
             <tr>
               <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
               <td>${formatFileSize(f.file_size)}</td>
-              <td><a class="file-download" href="${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}" target="_blank">Download</a></td>
+              <td><a class="file-download" href="${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}&download=true" target="_blank">Download</a></td>
             </tr>
           `).join('')}
         </tbody>
@@ -1540,10 +1582,11 @@ function openResourceInViewer(resourceUrl, title) {
   const titleEl = document.getElementById('submission-viewer-title');
 
   if (!modal || !iframe || !message || !titleEl) {
-    window.open(resourceUrl, '_blank', 'noopener,noreferrer');
+    void downloadSubmission(resourceUrl);
     return;
   }
 
+  iframe.setAttribute('sandbox', 'allow-scripts allow-downloads');
   titleEl.textContent = title || 'Submission Viewer';
   iframe.src = 'about:blank';
   iframe.srcdoc = '';
@@ -1551,7 +1594,7 @@ function openResourceInViewer(resourceUrl, title) {
   message.style.display = 'none';
   modal.style.display = 'flex';
 
-  fetch(resourceUrl, { credentials: 'include' })
+  submissionFetch(resourceUrl)
     .then(async (res) => {
       if (!res.ok) throw new Error('The file could not be opened.');
 
@@ -1613,7 +1656,7 @@ function openResourceInViewer(resourceUrl, title) {
         return;
       }
 
-      const fallbackWindow = window.open(resourceUrl, '_blank', 'noopener,noreferrer');
+      const fallbackWindow = window.open(objectUrl, '_blank', 'noopener,noreferrer');
       if (fallbackWindow) {
         modal.style.display = 'none';
       } else {
@@ -1660,7 +1703,7 @@ async function loadTeacherSubmissionLabs() {
 
   root.innerHTML = '<div class="empty-state">Loading your submission folders…</div>';
   try {
-    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/labs`);
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/labs`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
     renderTeacherLabsList(data.labs || []);
@@ -1696,7 +1739,7 @@ async function loadLabStudents(courseOfferingId, labLabel) {
   const teacherId = currentUser?.teacherId;
   root.innerHTML = '<div class="empty-state">Loading students…</div>';
   try {
-    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/students`);
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/students`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load students.');
     const students = data.students || [];
@@ -1731,7 +1774,7 @@ async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel
   const teacherId = currentUser?.teacherId;
   root.innerHTML = '<div class="empty-state">Loading submission…</div>';
   try {
-    const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/student/${studentId}/files`);
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/student/${studentId}/files`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load submission.');
     const files = data.files || [];
@@ -1997,3 +2040,50 @@ document.addEventListener('keydown', (e) => {
 // ─── AUTO-RESTORE SESSION ON PAGE LOAD / RELOAD ──────────────────
 // This must run AFTER all functions are defined.
 restoreSession();
+
+
+// Submission credentials stay in headers, including downloads (never in URLs).
+function submissionFetch(url, options = {}) {
+  const target = new URL(url, API_BASE);
+  const base = new URL(API_BASE);
+  const headers = new Headers(options.headers);
+  if (target.origin === base.origin && target.pathname.startsWith(`${base.pathname}/submission/`) && currentUser?.accessToken) {
+    headers.set('Authorization', `Bearer ${currentUser.accessToken}`);
+  }
+  return fetch(url, { ...options, headers });
+}
+async function downloadSubmission(url) {
+  try {
+    const response = await submissionFetch(url);
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.message || 'Could not download the submitted file.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = new URL(url).searchParams.get('relativePath')?.split('/').pop() || 'security_log_report.html';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+  } catch (error) { alert(error.message); }
+}
+document.addEventListener('click', event => {
+  const anchor = event.target.closest('a');
+  if (anchor?.href?.startsWith(`${API_BASE}/submission/`)) {
+    event.preventDefault();
+    void downloadSubmission(anchor.href);
+  }
+}, true);
+window.proctrAPI?.onSubmissionState(job => {
+  if (String(job.studentId) !== String(currentUser?.studentId) || String(job.examId) !== String(window.activeExamId)) return;
+  const status = document.getElementById('submit-status');
+  const button = document.getElementById('btn-submit-exam');
+  if (status) {
+    status.style.display = 'block';
+    status.textContent = job.state === 'synced' ? 'Submitted: cloud receipt confirmed. Backup copy retained.' : job.message;
+    status.style.color = job.state === 'synced' ? 'var(--teal)' : '#b45309';
+  }
+  if (button) { button.disabled = job.state === 'synced'; button.textContent = job.state === 'synced' ? 'Submitted' : 'Retry saved submission'; }
+});
+window.proctrAPI?.onSubmissionStorageError(message => alert(message));

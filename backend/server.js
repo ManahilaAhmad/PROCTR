@@ -20,6 +20,7 @@ import desktopRoutes from './routes/desktopRoutes.js';
 import proctoringRoutes from './routes/proctoringRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
 import { setIO } from './socketRegistry.js';
+import { ensureSubmissionSchema } from './service/submissionSchema.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -36,9 +37,27 @@ const PORT = process.env.PORT || 5000;
 
 // ── Core Middleware ─────────────────────────────────────────
 app.use(cors());
+// Desktop sends base64 files in JSON (40 MB decoded total plus encoding).
+app.use('/api/submission/upload', express.json({ limit: '64mb' }));
 app.use(express.json());
 
 // Serve uploaded exam papers statically
+app.use('/uploads', (req, res, next) => {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(req.path).replace(/\\/g, '/');
+  } catch {
+    return res.sendStatus(400);
+  }
+  // Match the path that static serving resolves, including encoded separators
+  // and Windows aliases such as "submissions." or "submissions ".
+  const normalizedPath = path.posix.normalize(decodedPath);
+  const firstSegment = normalizedPath.split('/').find(Boolean) || '';
+  if (firstSegment.replace(/[. ]+$/g, '').toLowerCase() === 'submissions') {
+    return res.sendStatus(404);
+  }
+  next();
+});
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Health & DB Check ───────────────────────────────────────
@@ -121,6 +140,9 @@ app.get('/api/director/papers', getSharedPapers);
 
 // ── Multer Error Handler ────────────────────────────────────
 app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ status: 'error', message: 'Submission is too large. Submit at most 40 MB of files in total.' });
+  }
   if (err instanceof multer.MulterError || err?.message?.includes('PDF and DOCX')) {
     return res.status(400).json({ status: 'error', message: err.message });
   }
@@ -164,6 +186,7 @@ io.on('connection', (socket) => {
 setIO(io);
 
 // ── Start Server ────────────────────────────────────────────
+await ensureSubmissionSchema();
 httpServer.listen(PORT, () => {
   console.log(`PROCTR Backend Server (HTTP + Socket.IO) is listening on port ${PORT}`);
 });
