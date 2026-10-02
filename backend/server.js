@@ -15,6 +15,7 @@ import studentRoutes from './routes/studentRoutes.js';
 import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
 import desktopRoutes from './routes/desktopRoutes.js';
+import networkRoutes from './routes/networkRoutes.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -93,6 +94,7 @@ app.use('/api/student', studentRoutes);        // GET  /api/student/:userId/sche
 app.use('/api/coordinator', coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
 app.use('/api/desktop', desktopRoutes);        // Desktop app sessions & violations
+app.use('/api/network', networkRoutes);        // Lab network validation
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
@@ -121,6 +123,6 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start Server ────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`PROCTR Backend Server is listening on port ${PORT}`);
 });
