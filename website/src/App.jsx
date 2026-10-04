@@ -17,6 +17,7 @@ import PostExamReportPage from "./pages/PostExamReportPage";
 import AdminPage from "./pages/AdminPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import SubmissionsPage from "./pages/SubmissionsPage";
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
@@ -70,6 +71,8 @@ export default function App() {
 
   function renderDashboardContent() {
     switch (page) {
+      case "submissions":
+        return ["student", "teacher"].includes(user?.userType) ? <SubmissionsPage user={user} /> : <p>Access denied.</p>;
       case "admin":
       case "admin-labs":
       case "admin-settings":
@@ -134,7 +137,7 @@ export default function App() {
     if (page === "reset-password") return <ResetPasswordPage token={resetToken} setPage={navigateTo} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["admin-labs", "admin-settings", "admin-users", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["submissions", "admin-labs", "admin-settings", "admin-users", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (
