@@ -11,24 +11,34 @@
   <!-- ─── LOGIN VIEW ─────────────────────────────────── -->
   <div id="view-login" class="view active">
     <div class="login-bg">
+      <div class="login-frame">
+        <aside class="login-brand-panel">
+          <div class="login-logo brand-logo">
+            <div class="logo-badge">
+              <div class="logo-badge-ring"></div>
+              <div class="logo-badge-inner">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+            </div>
+            <div>
+              <div class="login-logo-name">PROCTR</div>
+              <div class="login-logo-sub">Secure Lab Exams</div>
+            </div>
+          </div>
+          <div class="login-brand-content">
+            <h1>Secure.<br />Smarter.<br />Exams.</h1>
+            <div class="login-feature-list" aria-hidden="true">
+              <div class="login-feature"><span>✓</span><div><strong>Trusted &amp; secure</strong><small>Protected exam access</small></div></div>
+              <div class="login-feature"><span>◎</span><div><strong>Role-based access</strong><small>For every university role</small></div></div>
+              <div class="login-feature"><span>↗</span><div><strong>Streamlined process</strong><small>Efficient exam management</small></div></div>
+            </div>
+          </div>
+        </aside>
       <div class="login-card">
 
         <!-- Logo — exact match to website LoginPage.jsx -->
-        <div class="login-logo">
-          <div class="logo-badge">
-            <div class="logo-badge-ring"></div>
-            <div class="logo-badge-inner">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            </div>
-          </div>
-          <div>
-            <div class="login-logo-name">PROCTR</div>
-            <div class="login-logo-sub">Secure Lab Exams</div>
-          </div>
-        </div>
-
         <h2 class="login-welcome">Welcome back</h2>
-        <p class="login-sub">Sign in with your university credentials</p>
+        <p class="login-sub">Sign in to your account</p>
 
         <div id="login-error" class="error-banner" style="display:none;"></div>
 
@@ -49,9 +59,12 @@
           <button type="submit" class="btn-primary" id="login-btn">
             <span id="login-btn-text">Sign in to PROCTR</span>
           </button>
+          <div class="login-options">
+            <label class="login-remember"><input type="checkbox" />Remember me</label>
+            <span class="login-forgot">Forgot password?</span>
+          </div>
         </form>
-
-        <div class="login-footer">Need access? Contact your department administrator</div>
+      </div>
       </div>
     </div>
   </div>
