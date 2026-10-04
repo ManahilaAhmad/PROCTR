@@ -614,6 +614,11 @@ export const updateSchedule = async (req, res) => {
         if (!await coordinatorOwnsSchedule(req, schedule_id)) {
             return res.status(403).json({ status: "error", message: "You can only update schedules in your department." });
         }
+        const departmentId = await getCoordinatorDepartmentId(req);
+        const labScope = await pool.query('SELECT 1 FROM lab WHERE lab_id=$1 AND ($2::int IS NULL OR department_id=$2)', [lab_id, departmentId]);
+        if (!labScope.rowCount) {
+            return res.status(403).json({ status: "error", message: "You can only schedule exams in labs belonging to your department." });
+        }
         if (start_time && end_time && end_time <= start_time) {
             return res.status(400).json({
                 status: "error",
@@ -968,9 +973,7 @@ export const getAvailableLabs = async (req, res) => {
     } = req.query;
 
     try {
-        if (!await coordinatorOwnsSchedule(req, schedule_id)) {
-            return res.status(403).json({ status: "error", message: "You can only publish schedules in your department." });
-        }
+        const departmentId = await getCoordinatorDepartmentId(req);
 
         const result = await pool.query(
 

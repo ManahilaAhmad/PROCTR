@@ -7,6 +7,7 @@ const navItems = {
     { id: "admin-labs", icon: Icon.server, label: "Labs & Networks" },
     { id: "admin-settings", icon: Icon.shield, label: "System Settings" },
     { id: "admin-users", icon: Icon.users, label: "User Management" },
+    { id: "admin-security", icon: Icon.shield, label: "Security Audit" },
   ],
   teacher: [
     { id: "submissions", icon: Icon.fileText, label: "Submitted Work" },

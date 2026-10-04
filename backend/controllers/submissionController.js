@@ -2,6 +2,7 @@ import pool from '../db.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { auditSecurityEvent, clientIp } from '../middleware/security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,9 +60,10 @@ function listFilesRecursive(rootDir, currentDir, out) {
 }
 
 function safeJoin(rootDir, relativePath) {
-  const normalized = path.normalize(relativePath || '').replace(/^(\.\.[/\\])+/, '');
-  const dest = path.join(rootDir, normalized);
-  if (!dest.startsWith(rootDir)) return null; // path traversal guard
+  if (typeof relativePath !== 'string' || relativePath.length < 1 || relativePath.length > 500) return null;
+  const root = path.resolve(rootDir);
+  const dest = path.resolve(root, relativePath);
+  if (dest !== root && !dest.startsWith(`${root}${path.sep}`)) return null;
   return dest;
 }
 
@@ -198,11 +200,36 @@ function escapeHtml(str) {
 export const uploadSubmission = async (req, res) => {
   const { exam_id, student_id, mac_address, files } = req.body;
 
-  if (!exam_id || !student_id) {
+  if (!/^\d+$/.test(String(exam_id || '')) || !/^\d+$/.test(String(student_id || ''))) {
     return res.status(400).json({ status: 'error', message: 'exam_id and student_id are required.' });
   }
   if (!Array.isArray(files)) {
     return res.status(400).json({ status: 'error', message: 'files must be an array.' });
+  }
+  if (files.length > 2000) {
+    return res.status(413).json({ status: 'error', message: 'A submission may contain at most 2000 files.' });
+  }
+
+  const validatedFiles = [];
+  const seenPaths = new Set();
+  let totalBytes = 0;
+  for (const file of files) {
+    if (!file || typeof file.relativePath !== 'string' || typeof file.contentBase64 !== 'string') {
+      return res.status(400).json({ status: 'error', message: 'Every submitted file must contain a path and Base64 content.' });
+    }
+    const normalizedPath = file.relativePath.replace(/\\/g, '/');
+    if (!normalizedPath || normalizedPath.includes('\0') || normalizedPath.length > 500 || seenPaths.has(normalizedPath) || !safeJoin(SUBMISSIONS_ROOT, normalizedPath)) {
+      return res.status(400).json({ status: 'error', message: 'Submission contains a missing, duplicate, or overlong file path.' });
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(file.contentBase64) || file.contentBase64.length % 4 !== 0) {
+      return res.status(400).json({ status: 'error', message: `Invalid file encoding: ${normalizedPath}` });
+    }
+    const buffer = Buffer.from(file.contentBase64, 'base64');
+    if (buffer.length > 10 * 1024 * 1024) return res.status(413).json({ status: 'error', message: `File exceeds 10 MB: ${normalizedPath}` });
+    totalBytes += buffer.length;
+    if (totalBytes > 20 * 1024 * 1024) return res.status(413).json({ status: 'error', message: 'Submission exceeds the 20 MB total limit.' });
+    seenPaths.add(normalizedPath);
+    validatedFiles.push({ relativePath: normalizedPath, buffer });
   }
 
   try {
@@ -252,15 +279,14 @@ export const uploadSubmission = async (req, res) => {
     }
 
     let savedCount = 0;
-    for (const f of files) {
+    for (const f of validatedFiles) {
       // Submit whatever the student has, as-is — including empty files.
       // Only skip an entry if it's structurally broken (no path, or the
       // content field is missing entirely), never based on file size.
-      if (!f || !f.relativePath || f.contentBase64 == null) continue;
       const destPath = safeJoin(studentFolder, f.relativePath);
-      if (!destPath) continue;
+      if (!destPath) return res.status(400).json({ status: 'error', message: `Unsafe file path: ${f.relativePath}` });
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, Buffer.from(f.contentBase64, 'base64'));
+      fs.writeFileSync(destPath, f.buffer);
       savedCount++;
     }
 
@@ -284,9 +310,9 @@ export const uploadSubmission = async (req, res) => {
     fs.writeFileSync(path.join(studentFolder, REPORT_FILENAME), reportHtml, 'utf-8');
 
     // ── IP / MAC — both NOT NULL in schema.sql, capture them for real ──
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
-    const ipAddress = String(rawIp).replace('::ffff:', '').trim() || '0.0.0.0';
-    const macAddress = (mac_address && String(mac_address).trim()) || '00:00:00:00:00:00';
+    const ipAddress = clientIp(req) || '0.0.0.0';
+    const suppliedMac = String(mac_address || '').trim().toLowerCase();
+    const macAddress = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(suppliedMac) ? suppliedMac : '00:00:00:00:00:00';
 
     // ── Upsert the one-row-per-(student,exam) submission record ──
     const subResult = await pool.query(
@@ -300,6 +326,8 @@ export const uploadSubmission = async (req, res) => {
        RETURNING submission_id`,
       [student_id, exam_id, studentFolder, ipAddress, macAddress]
     );
+
+    await auditSecurityEvent(req, { eventType: 'EXAM_SUBMISSION_UPLOADED', outcome: 'SUCCESS', objectType: 'student_submission', objectId: subResult.rows[0].submission_id, metadata: { examId: Number(exam_id), fileCount: savedCount, totalBytes } });
 
     res.status(200).json({
       status: 'success',
@@ -516,15 +544,18 @@ export const getStudentOwnFiles = async (req, res) => {
 =========================================================== */
 export const downloadFile = async (req, res) => {
   const { submissionId } = req.params;
-  const { relativePath, teacherId, studentId, download } = req.query;
+  const { relativePath, download } = req.query;
   const shouldDownload = String(download || '').toLowerCase() === 'true';
 
   try {
     const subRes = await pool.query(
-      `SELECT ss.submission_path, ss.student_id, e.course_offering_id, co.teacher_id
+      `SELECT ss.submission_path, ss.student_id, e.course_offering_id, co.teacher_id,
+              s.user_id AS student_user_id, t.user_id AS teacher_user_id
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       JOIN student s ON s.student_id=ss.student_id
+       JOIN teacher t ON t.teacher_id=co.teacher_id
        WHERE ss.submission_id = $1`,
       [submissionId]
     );
@@ -534,9 +565,11 @@ export const downloadFile = async (req, res) => {
     const row = subRes.rows[0];
 
     // Ownership: either the owning student, or the owning teacher — nobody else.
-    const isOwningStudent = studentId && String(row.student_id) === String(studentId);
-    const isOwningTeacher = teacherId && String(row.teacher_id) === String(teacherId);
-    if (!isOwningStudent && !isOwningTeacher) {
+    const actorId = String(req.sessionUser?.sub || '');
+    const authorized = req.sessionUser?.role === 'admin'
+      || (req.sessionUser?.role === 'student' && actorId === String(row.student_user_id))
+      || (req.sessionUser?.role === 'teacher' && actorId === String(row.teacher_user_id));
+    if (!authorized) {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this file.' });
     }
 
@@ -571,10 +604,11 @@ export const downloadReport = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT ss.submission_path, co.teacher_id, s.registration_no
+      `SELECT ss.submission_path, co.teacher_id, s.registration_no, t.user_id AS teacher_user_id
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       JOIN teacher t ON t.teacher_id=co.teacher_id
        JOIN student s ON ss.student_id = s.student_id
        WHERE ss.submission_id = $1`,
       [submissionId]
@@ -582,7 +616,8 @@ export const downloadReport = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Submission not found.' });
     }
-    if (String(result.rows[0].teacher_id) !== String(teacherId)) {
+    if (req.sessionUser?.role !== 'admin' && (String(result.rows[0].teacher_id) !== String(teacherId)
+        || String(result.rows[0].teacher_user_id) !== String(req.sessionUser?.sub))) {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this report.' });
     }
     const reportPath = path.join(result.rows[0].submission_path, REPORT_FILENAME);
@@ -594,6 +629,7 @@ export const downloadReport = async (req, res) => {
       return res.download(reportPath, fileName);
     }
 
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'");
     return res.sendFile(reportPath, {
       headers: {
         'Content-Disposition': `inline; filename="${fileName}"`

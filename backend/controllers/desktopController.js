@@ -1,7 +1,10 @@
 import pool from '../db.js';
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
 import { emitToSession } from '../socketRegistry.js';
 import { isAllowedLabIp } from '../middleware/labNetwork.js';
+import { auditSecurityEvent, clientIp as requestClientIp } from '../middleware/security.js';
 
 /* ===========================================================
    Human-readable titles for hard violation codes (H1-H4b, H5, N1).
@@ -27,7 +30,8 @@ export const createLiveSession = async (req, res) => {
   const { exam_id, course_code, invigilator_id, duration } = req.body;
   try {
     const session_code = (course_code || 'EXAM').toUpperCase().trim();
-    const passcode = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit random passcode
+    const passcode = crypto.randomInt(100000, 1000000).toString();
+    const passcodeHash = await bcrypt.hash(passcode, 12);
 
     const completedSession = await pool.query(
       `SELECT 1 FROM live_exam_session WHERE exam_id=$1 AND status IN ('ENDED','COMPLETED') LIMIT 1`,
@@ -59,17 +63,19 @@ export const createLiveSession = async (req, res) => {
     // it behaves like a genuinely fresh session, not a continuation of
     // whatever was left over from the last time this code was used.
     const result = await pool.query(
-      `INSERT INTO live_exam_session (exam_id, session_code, passcode, invigilator_id, duration_minutes, is_paper_revealed, is_timer_started, status)
-       VALUES ($1, $2, $3, $4, $5, FALSE, FALSE, 'ACTIVE')
+      `INSERT INTO live_exam_session (exam_id, session_code, passcode, passcode_hash, passcode_expires_at, invigilator_id, duration_minutes, is_paper_revealed, is_timer_started, status)
+       VALUES ($1, $2, '******', $3, NOW() + INTERVAL '8 hours', $4, $5, FALSE, FALSE, 'ACTIVE')
        ON CONFLICT (session_code) DO UPDATE
-       SET passcode = EXCLUDED.passcode,
+       SET passcode = '******',
+           passcode_hash = EXCLUDED.passcode_hash,
+           passcode_expires_at = EXCLUDED.passcode_expires_at,
            status = 'ACTIVE',
            is_paper_revealed = FALSE,
            is_timer_started = FALSE,
            timer_start_time = NULL,
            duration_minutes = EXCLUDED.duration_minutes
-       RETURNING live_session_id, session_code, passcode, duration_minutes, is_paper_revealed, is_timer_started, status`,
-      [exam_id || null, session_code, passcode, invigilator_id || null, duration || 90]
+       RETURNING live_session_id, session_code, duration_minutes, is_paper_revealed, is_timer_started, status`,
+      [exam_id || null, session_code, passcodeHash, invigilator_id || null, duration || 90]
     );
 
     const newLiveSessionId = result.rows[0].live_session_id;
@@ -82,10 +88,11 @@ export const createLiveSession = async (req, res) => {
     await pool.query(`DELETE FROM desktop_violation_log WHERE session_id = $1`, [newLiveSessionId]).catch(() => {});
     await pool.query(`DELETE FROM desktop_exam_session WHERE live_session_id = $1`, [newLiveSessionId]).catch(() => {});
 
+    await auditSecurityEvent(req, { eventType: 'LIVE_SESSION_CREATED', outcome: 'SUCCESS', objectType: 'exam', objectId: exam_id });
     res.status(200).json({
       status: 'success',
       message: 'Live exam session created successfully.',
-      session: result.rows[0],
+      session: { ...result.rows[0], passcode },
     });
   } catch (error) {
     console.error('Error creating live exam session:', error);
@@ -113,14 +120,31 @@ export const joinLiveSession = async (req, res) => {
     );
 
     if (sessResult.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'Exam Session ID not found or session has ended.' });
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_FAILED', outcome: 'DENIED', metadata: { reason: 'unknown_session' } });
+      return res.status(401).json({ status: 'error', message: 'Invalid exam session or passcode.' });
     }
 
     const session = sessResult.rows[0];
 
-    // Verify passcode
-    if (session.passcode !== passcode.trim()) {
-      return res.status(401).json({ status: 'error', message: 'Incorrect exam passcode.' });
+    const joinIp = requestClientIp(req) || 'unknown';
+    const recentFailures = await pool.query(`
+      SELECT COUNT(*)::int AS failures FROM exam_join_attempt
+      WHERE live_session_id=$1 AND student_id=$2 AND ip_address=$3 AND succeeded=FALSE
+        AND attempted_at > NOW() - INTERVAL '10 minutes'
+    `, [session.live_session_id, student_id || null, joinIp]);
+    if (recentFailures.rows[0].failures >= 5) {
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_LOCKED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id });
+      return res.status(429).json({ status: 'error', message: 'Too many incorrect exam passcodes. Wait 10 minutes or contact the invigilator.' });
+    }
+
+    const passcodeExpired = session.passcode_expires_at && new Date(session.passcode_expires_at).getTime() <= Date.now();
+    const passcodeMatches = session.passcode_hash
+      ? await bcrypt.compare(passcode.trim(), session.passcode_hash)
+      : session.passcode === passcode.trim();
+    if (passcodeExpired || !passcodeMatches) {
+      await pool.query(`INSERT INTO exam_join_attempt (live_session_id,student_id,ip_address,succeeded) VALUES ($1,$2,$3,FALSE)`, [session.live_session_id, student_id || null, joinIp]);
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_FAILED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id, metadata: { reason: passcodeExpired ? 'expired_passcode' : 'incorrect_passcode' } });
+      return res.status(401).json({ status: 'error', message: 'Invalid exam session or passcode.' });
     }
 
     if (!student_id) {
@@ -133,6 +157,7 @@ export const joinLiveSession = async (req, res) => {
       WHERE les.live_session_id=$1 AND en.student_id=$2 AND en.status='Active'
     `, [session.live_session_id, student_id]);
     if (!enrollment.rowCount) {
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_NOT_ENROLLED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id });
       return res.status(403).json({ status: 'error', message: 'You are not actively enrolled in the course for this exam.' });
     }
 
@@ -223,6 +248,8 @@ export const joinLiveSession = async (req, res) => {
     const policyResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
     const securityPolicy = Object.fromEntries(policyResult.rows.map(row => [row.setting_key, row.setting_value]));
 
+    await pool.query(`INSERT INTO exam_join_attempt (live_session_id,student_id,ip_address,succeeded) VALUES ($1,$2,$3,TRUE)`, [session.live_session_id, student_id, joinIp]);
+    await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_SUCCEEDED', outcome: 'SUCCESS', objectType: 'exam', objectId: session.exam_id });
     res.status(200).json({
       status: 'success',
       message: 'Successfully connected to exam session!',
@@ -418,11 +445,11 @@ export const getSessionStatus = async (req, res) => {
         : [{ timestamp: v.detected_at, title: v.title, description: v.description || '', severity: v.severity || 'HIGH' }],
     }));
 
+    const canMonitor = ['teacher', 'admin'].includes(req.sessionUser?.role);
     res.status(200).json({
       status: 'success',
       session: {
         sessionCode: session.session_code,
-        passcode: session.passcode,
         status: session.status,
         isSessionEnded: session.status === 'ENDED' || session.status === 'COMPLETED',
         isPaperRevealed: session.is_paper_revealed,
@@ -434,9 +461,9 @@ export const getSessionStatus = async (req, res) => {
         examPaperUrl: session.is_paper_revealed && session.exam_paper_url ? getFileUrl(req, session.exam_paper_url) : null,
         starterFileUrl: session.is_paper_revealed && session.starter_file_url ? getFileUrl(req, session.starter_file_url) : null,
         starterFileName: session.is_paper_revealed ? session.starter_file_name : null,
-        connectedStudents: studentsRes.rows.length,
-        connectedList: studentsRes.rows,
-        recentViolations: formattedViolations
+        connectedStudents: canMonitor ? studentsRes.rows.length : undefined,
+        connectedList: canMonitor ? studentsRes.rows : undefined,
+        recentViolations: canMonitor ? formattedViolations : undefined
       }
     });
   } catch (error) {

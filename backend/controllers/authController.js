@@ -1,16 +1,54 @@
 import pool from '../db.js';
 import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
-import { createSessionToken } from '../middleware/sessionAuth.js';
+import {
+  expiredSessionCookie,
+  issueSession,
+  revokeAllUserSessions,
+  revokeCurrentSession,
+  sessionCookie,
+} from '../middleware/sessionAuth.js';
+import { auditSecurityEvent, clientIp, hashIdentifier } from '../middleware/security.js';
+
+const ALLOWED_ROLES = new Set(['student', 'teacher', 'hod', 'coordinator', 'director', 'dec', 'admin']);
+const LOGIN_WINDOW_MINUTES = 15;
+const LOGIN_FAILURE_LIMIT = 5;
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('PROCTR-invalid-password-placeholder', 12);
+
+async function recordLoginAttempt(identifierHash, ip, succeeded) {
+  await pool.query(
+    `INSERT INTO authentication_attempt (identifier_hash,ip_address,succeeded) VALUES ($1,$2,$3)`,
+    [identifierHash, ip || 'unknown', succeeded]
+  );
+}
+
+async function loginIsLocked(identifierHash, ip) {
+  const result = await pool.query(`
+    SELECT COUNT(*)::int AS failures
+    FROM authentication_attempt
+    WHERE identifier_hash=$1 AND ip_address=$2 AND succeeded=FALSE
+      AND attempted_at > NOW() - ($3 * INTERVAL '1 minute')
+  `, [identifierHash, ip || 'unknown', LOGIN_WINDOW_MINUTES]);
+  return result.rows[0].failures >= LOGIN_FAILURE_LIMIT;
+}
 
 /* ===========================================================
    LOGIN
 =========================================================== */
 export const login = async (req, res) => {
-  const { email, password, user_type } = req.body;
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const user_type = String(req.body?.user_type || '').trim().toLowerCase();
+  const identifierHash = hashIdentifier(`${user_type}:${email}`);
+  const ip = clientIp(req);
   try {
-    if (!email || !password || !user_type) {
+    if (!email || !password || !ALLOWED_ROLES.has(user_type) || email.length > 255 || password.length > 128) {
       return res.status(400).json({ status: 'error', message: 'All fields are required.' });
+    }
+
+    if (await loginIsLocked(identifierHash, ip)) {
+      await auditSecurityEvent(req, { eventType: 'LOGIN_LOCKED', outcome: 'DENIED', metadata: { role: user_type } });
+      return res.status(429).json({ status: 'error', message: 'Too many unsuccessful login attempts. Please wait 15 minutes and try again.' });
     }
 
     let result;
@@ -30,18 +68,27 @@ export const login = async (req, res) => {
     }
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ status: 'error', message: 'Invalid email/registration number or user role.' });
+      // Keep the response timing close to a real account lookup so attackers
+      // cannot reliably enumerate registered email addresses.
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+      await recordLoginAttempt(identifierHash, ip, false);
+      await auditSecurityEvent(req, { eventType: 'LOGIN_FAILED', outcome: 'DENIED', metadata: { role: user_type } });
+      return res.status(401).json({ status: 'error', message: 'Invalid credentials or user role.' });
     }
 
     const user = result.rows[0];
 
     if (!user.is_active) {
-      return res.status(403).json({ status: 'error', message: 'Your account is currently disabled.' });
+      await recordLoginAttempt(identifierHash, ip, false);
+      await auditSecurityEvent(req, { eventType: 'LOGIN_DISABLED_ACCOUNT', outcome: 'DENIED', userId: user.user_id });
+      return res.status(403).json({ status: 'error', message: 'Invalid credentials or account unavailable.' });
     }
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      return res.status(401).json({ status: 'error', message: 'Incorrect password.' });
+      await recordLoginAttempt(identifierHash, ip, false);
+      await auditSecurityEvent(req, { eventType: 'LOGIN_FAILED', outcome: 'DENIED', userId: user.user_id, metadata: { role: user_type } });
+      return res.status(401).json({ status: 'error', message: 'Invalid credentials or user role.' });
     }
 
     await pool.query('UPDATE users SET last_login_at = NOW() WHERE user_id = $1', [user.user_id]);
@@ -148,15 +195,18 @@ export const login = async (req, res) => {
       }
     }
 
-    let sessionToken = null;
+    const clientType = req.get('x-proctr-client') === 'desktop' ? 'desktop' : 'web';
+    let sessionToken;
     try {
-      sessionToken = createSessionToken(user);
+      sessionToken = await issueSession(user, req, clientType);
     } catch (tokenError) {
-      if (user.user_type === 'admin') {
-        return res.status(503).json({ status: 'error', message: 'Admin login is unavailable until SESSION_SECRET is configured on the server.' });
-      }
-      console.warn('Session tokens are disabled:', tokenError.message);
+      console.error('Could not issue security session:', tokenError.message);
+      return res.status(503).json({ status: 'error', message: 'Secure login is unavailable. Run the security migration and check the server session configuration.' });
     }
+
+    await recordLoginAttempt(identifierHash, ip, true);
+    await auditSecurityEvent(req, { eventType: 'LOGIN_SUCCEEDED', outcome: 'SUCCESS', userId: user.user_id, metadata: { role: user_type, clientType } });
+    if (clientType === 'web') res.setHeader('Set-Cookie', sessionCookie(sessionToken));
 
     res.status(200).json({
       status: 'success',
@@ -168,7 +218,7 @@ export const login = async (req, res) => {
         email: user.email,
         userType: user.user_type,
         profilePictureUrl: user.profile_picture_url,
-        sessionToken,
+        sessionToken: clientType === 'desktop' ? sessionToken : undefined,
         ...extra,
       }
     });
@@ -187,8 +237,8 @@ export const changePassword = async (req, res) => {
     if (!user_id || !current_password || !new_password) {
       return res.status(400).json({ status: 'error', message: 'All fields are required.' });
     }
-    if (new_password.length < 6) {
-      return res.status(400).json({ status: 'error', message: 'New password must be at least 6 characters.' });
+    if (new_password.length < 8 || new_password.length > 128) {
+      return res.status(400).json({ status: 'error', message: 'New password must be between 8 and 128 characters.' });
     }
     const userResult = await pool.query('SELECT password_hash FROM users WHERE user_id = $1', [user_id]);
     if (userResult.rows.length === 0) {
@@ -203,18 +253,44 @@ export const changePassword = async (req, res) => {
       'UPDATE users SET password_hash=$1,password_changed_at=NOW(),session_version=session_version+1 WHERE user_id=$2',
       [newHash, user_id]
     );
-    res.status(200).json({ status: 'success', message: 'Password updated successfully.' });
+    await revokeAllUserSessions(user_id, 'PASSWORD_CHANGED');
+    await auditSecurityEvent(req, { eventType: 'PASSWORD_CHANGED', outcome: 'SUCCESS', userId: user_id });
+    res.setHeader('Set-Cookie', expiredSessionCookie());
+    res.status(200).json({ status: 'success', message: 'Password updated successfully. Please sign in again.', requiresReauthentication: true });
   } catch (error) {
     console.error('Error changing password:', error);
     res.status(500).json({ status: 'error', message: 'Failed to update password.' });
   }
 };
 
+export const logout = async (req, res) => {
+  try {
+    await revokeCurrentSession(req);
+    await auditSecurityEvent(req, { eventType: 'LOGOUT', outcome: 'SUCCESS' });
+    res.setHeader('Set-Cookie', expiredSessionCookie());
+    return res.status(200).json({ status: 'success', message: 'Signed out securely.' });
+  } catch (error) {
+    console.error('Logout failed:', error);
+    return res.status(500).json({ status: 'error', message: 'Could not complete logout.' });
+  }
+};
+
+export const sessionStatus = async (req, res) => {
+  res.status(200).json({
+    status: 'success',
+    session: {
+      userId: Number(req.sessionUser.sub),
+      userType: req.sessionUser.role,
+      expiresAt: new Date(req.sessionUser.exp * 1000).toISOString(),
+    },
+  });
+};
+
 /* ===========================================================
    UPDATE PROFILE PICTURE (Multer Image Upload)
 =========================================================== */
 export const updateProfilePicture = async (req, res) => {
-  const { user_id } = req.body;
+  const user_id = req.sessionUser?.sub;
   try {
     if (!user_id) {
       return res.status(400).json({ status: 'error', message: 'user_id is required.' });
@@ -223,7 +299,7 @@ export const updateProfilePicture = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
     }
 
-    const fileUrl = getFileUrl(req, req.file.filename);
+    const fileUrl = getFileUrl(req, req.file);
 
     // Ensure profile_picture_url column exists on users table
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture_url TEXT NULL');

@@ -1,5 +1,7 @@
 import { isIP } from 'node:net';
 import pool from '../db.js';
+import { auditSecurityEvent } from '../middleware/security.js';
+import { revokeAllUserSessions } from '../middleware/sessionAuth.js';
 
 const LAB_STATUSES = new Set(['Available', 'InUse', 'Maintenance']);
 const SETTING_DEFINITIONS = {
@@ -68,6 +70,7 @@ export const createLab = async (req, res) => {
   const { department_id, lab_name, total_pcs, capacity, network_range, status } = req.body;
   try {
     const result = await pool.query(`INSERT INTO lab (department_id,lab_name,total_pcs,capacity,network_range,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [department_id, lab_name.trim(), Number(total_pcs), Number(capacity), network_range.trim(), status]);
+    await auditSecurityEvent(req, { eventType: 'ADMIN_LAB_CREATED', outcome: 'SUCCESS', objectType: 'lab', objectId: result.rows[0].lab_id });
     res.status(201).json({ status: 'success', message: 'Lab created successfully.', lab: result.rows[0] });
   } catch (error) {
     res.status(error.code === '23505' ? 409 : 500).json({ status: 'error', message: error.code === '23505' ? 'A lab with this name already exists.' : 'Failed to create lab.' });
@@ -81,6 +84,7 @@ export const updateLab = async (req, res) => {
   try {
     const result = await pool.query(`UPDATE lab SET department_id=$1,lab_name=$2,total_pcs=$3,capacity=$4,network_range=$5,status=$6 WHERE lab_id=$7 RETURNING *`, [department_id, lab_name.trim(), Number(total_pcs), Number(capacity), network_range.trim(), status, req.params.labId]);
     if (!result.rows.length) return res.status(404).json({ status: 'error', message: 'Lab not found.' });
+    await auditSecurityEvent(req, { eventType: 'ADMIN_LAB_UPDATED', outcome: 'SUCCESS', objectType: 'lab', objectId: req.params.labId });
     res.json({ status: 'success', message: 'Lab updated successfully.', lab: result.rows[0] });
   } catch (error) {
     res.status(error.code === '23505' ? 409 : 500).json({ status: 'error', message: error.code === '23505' ? 'A lab with this name already exists.' : 'Failed to update lab.' });
@@ -93,6 +97,7 @@ export const deleteLab = async (req, res) => {
     if (used.rows.length) return res.status(409).json({ status: 'error', message: 'This lab is used by an exam schedule. Set it to Maintenance instead.' });
     const result = await pool.query('DELETE FROM lab WHERE lab_id=$1 RETURNING lab_id', [req.params.labId]);
     if (!result.rows.length) return res.status(404).json({ status: 'error', message: 'Lab not found.' });
+    await auditSecurityEvent(req, { eventType: 'ADMIN_LAB_DELETED', outcome: 'SUCCESS', objectType: 'lab', objectId: req.params.labId });
     res.json({ status: 'success', message: 'Lab deleted successfully.' });
   } catch (error) {
     res.status(500).json({ status: 'error', message: 'Failed to delete lab.' });
@@ -122,6 +127,7 @@ export const updateSettings = async (req, res) => {
       await client.query(`INSERT INTO system_setting (setting_key,setting_value,description,updated_by,updated_at) VALUES ($1,$2::jsonb,$3,$4,NOW()) ON CONFLICT (setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value,description=EXCLUDED.description,updated_by=EXCLUDED.updated_by,updated_at=NOW()`, [key, JSON.stringify(value), SETTING_DEFINITIONS[key].description, req.sessionUser.sub]);
     }
     await client.query('COMMIT');
+    await auditSecurityEvent(req, { eventType: 'ADMIN_SETTINGS_UPDATED', outcome: 'SUCCESS', objectType: 'system_setting', metadata: { keys: Object.keys(settings) } });
     res.json({ status: 'success', message: 'System settings updated successfully.' });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -147,8 +153,46 @@ export const setUserActive = async (req, res) => {
   try {
     const result = await pool.query('UPDATE users SET is_active=$1 WHERE user_id=$2 RETURNING user_id', [isActive, req.params.userId]);
     if (!result.rows.length) return res.status(404).json({ status: 'error', message: 'User not found.' });
+    if (!isActive) await revokeAllUserSessions(req.params.userId, 'ACCOUNT_DISABLED');
+    await auditSecurityEvent(req, { eventType: isActive ? 'ADMIN_USER_ENABLED' : 'ADMIN_USER_DISABLED', outcome: 'SUCCESS', objectType: 'user', objectId: req.params.userId });
     res.json({ status: 'success', message: `User ${isActive ? 'enabled' : 'disabled'} successfully.` });
   } catch (error) {
     res.status(500).json({ status: 'error', message: 'Failed to update user status.' });
+  }
+};
+
+export const revokeUserSessions = async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId < 1) return res.status(400).json({ status: 'error', message: 'Invalid user ID.' });
+  try {
+    const exists = await pool.query('SELECT 1 FROM users WHERE user_id=$1', [userId]);
+    if (!exists.rowCount) return res.status(404).json({ status: 'error', message: 'User not found.' });
+    await revokeAllUserSessions(userId, 'ADMIN_REVOKED');
+    await auditSecurityEvent(req, { eventType: 'ADMIN_SESSIONS_REVOKED', outcome: 'SUCCESS', objectType: 'user', objectId: userId });
+    res.json({ status: 'success', message: 'All active sessions for this user were revoked.' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: 'Failed to revoke user sessions.' });
+  }
+};
+
+export const getSecurityEvents = async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number.parseInt(req.query.limit, 10) || 200));
+  const eventType = String(req.query.event_type || '').trim().slice(0, 80) || null;
+  const outcome = String(req.query.outcome || '').trim().slice(0, 30) || null;
+  try {
+    const result = await pool.query(`
+      SELECT sal.audit_id,sal.event_type,sal.outcome,sal.ip_address,sal.method,
+             sal.request_path,sal.object_type,sal.object_id,sal.metadata,sal.created_at,
+             u.first_name,u.last_name,u.email,u.user_type
+      FROM security_audit_log sal
+      LEFT JOIN users u ON u.user_id=sal.user_id
+      WHERE ($1::text IS NULL OR sal.event_type=$1)
+        AND ($2::text IS NULL OR sal.outcome=$2)
+      ORDER BY sal.created_at DESC
+      LIMIT $3
+    `, [eventType, outcome, limit]);
+    res.json({ status: 'success', events: result.rows });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: 'Failed to load security events.' });
   }
 };

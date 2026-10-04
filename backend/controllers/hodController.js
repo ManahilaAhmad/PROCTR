@@ -50,14 +50,19 @@ export const getQueue = async (req, res) => {
 export const reviewExam = async (req, res) => {
   const { exam_id, decision, comment } = req.body;
   try {
+    if (!/^\d+$/.test(String(exam_id || '')) || !['Approved', 'Rejected'].includes(decision)) {
+      return res.status(400).json({ status: 'error', message: 'A valid exam and decision are required.' });
+    }
+    if (String(comment || '').length > 2000) return res.status(400).json({ status: 'error', message: 'Review comment is too long.' });
     const departmentId = await getHodDepartmentId(req);
-    const newStatus = decision === 'Approved' ? 'Approved' : 'Rejected';
+    const newStatus = decision;
     const approvedAt = newStatus === 'Approved' ? new Date() : null;
 
     const result = await pool.query(`
       UPDATE exam
       SET status = $1, hod_comment = $2, approved_at = $3
       WHERE exam_id = $4
+        AND status='PendingHOD'
         AND EXISTS (
           SELECT 1 FROM course_offering co
           JOIN course c ON c.course_id=co.course_id

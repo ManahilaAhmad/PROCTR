@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld('proctrAPI', {
   setScreenProtection: (enable) => ipcRenderer.invoke('set-screen-protection', enable),
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
   writeLocalLog: (data) => ipcRenderer.invoke('write-local-log', data),
-  submitExamWork: (data) => ipcRenderer.invoke('submit-exam-work', data)
+  submitExamWork: (data) => ipcRenderer.invoke('submit-exam-work', data),
+  storeSessionToken: (token) => ipcRenderer.invoke('store-session-token', token),
+  getSessionToken: () => ipcRenderer.invoke('get-session-token'),
+  clearSessionToken: () => ipcRenderer.invoke('clear-session-token')
 });

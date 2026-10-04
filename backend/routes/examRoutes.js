@@ -6,7 +6,9 @@ import {
   submitToHOD,
   shareToDEC,
 } from '../controllers/teacherController.js';
-import { requireRole, requireSession } from '../middleware/sessionAuth.js';
+import { requireRole, requireSelfBody, requireSession } from '../middleware/sessionAuth.js';
+import { requireBodyExamManage, requireParamExamManage } from '../middleware/examAuthorization.js';
+import { createRateLimiter } from '../middleware/security.js';
 
 const router = express.Router();
 router.use(requireSession, requireRole('teacher', 'admin'));
@@ -19,9 +21,9 @@ router.use(requireSession, requireRole('teacher', 'admin'));
 
 // IMPORTANT: /upload and /submit-hod must be defined BEFORE /:examId
 // to prevent Express matching them as an examId parameter
-router.post('/upload', upload.single('file'), uploadPaper);
-router.post('/submit-hod', submitToHOD);
-router.post('/:examId/share-dec', shareToDEC);
-router.post('/', createExam);
+router.post('/upload', createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 30 }), upload.single('file'), requireBodyExamManage, uploadPaper);
+router.post('/submit-hod', requireBodyExamManage, submitToHOD);
+router.post('/:examId/share-dec', requireParamExamManage, shareToDEC);
+router.post('/', requireSelfBody('user_id', 'admin'), createExam);
 
 export default router;

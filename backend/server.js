@@ -1,11 +1,14 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { securityHeaders, createRateLimiter, auditSecurityEvent, verifyRequestOrigin } from './middleware/security.js';
+import { extractSessionToken, validateSessionToken } from './middleware/sessionAuth.js';
+import { userHasExamAccess } from './middleware/examAuthorization.js';
 
 // Route files (namespaced)
 import authRoutes from './routes/authRoutes.js';
@@ -31,8 +34,6 @@ import { listTeachers, getSharedPapers } from './controllers/teacherController.j
 import { assignInvigilator, createSwapRequest, listSwapRequests, reviewSwapRequest } from './controllers/decController.js';
 import { getSchedule as coordGetSchedule, getLabs } from './controllers/coordinatorController.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -40,12 +41,35 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 
-// ── Core Middleware ─────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
+const configuredOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
+].map(value => value.replace(/\/$/, '')));
 
-// Serve uploaded exam papers statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const corsOptions = {
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin || configuredOrigins.has(origin.replace(/\/$/, ''))) return callback(null, true);
+    return callback(new Error('Origin is not allowed by PROCTR CORS policy.'));
+  },
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-PROCTR-Client'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+};
+
+// ── Core Middleware ─────────────────────────────────────────
+app.use(securityHeaders);
+app.use(cors(corsOptions));
+app.use(verifyRequestOrigin(configuredOrigins));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb', strict: true }));
+app.use(createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 600 }));
+
+// Submission paths are never public; ownership-checked API routes deliver them.
+app.use('/uploads/submissions', (req, res) => res.status(404).json({ status: 'error', message: 'File not found.' }));
+// Local fallback files also require a valid account. Cloudinary deployments
+// should use authenticated/private delivery for equivalent protection.
+app.use('/uploads', requireSession, express.static(path.join(__dirname, 'uploads')));
 
 // ── Health & DB Check ───────────────────────────────────────
 import pool from './db.js';
@@ -139,7 +163,15 @@ app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err?.message?.includes('files are allowed') || err?.message?.includes('Starter code must') || err?.message?.includes('Question papers and rubrics')) {
     return res.status(400).json({ status: 'error', message: err.message });
   }
-  next(err);
+  if (err?.message?.includes('CORS policy')) {
+    auditSecurityEvent(req, { eventType: 'CORS_ORIGIN_DENIED', outcome: 'DENIED' }).catch(() => {});
+    return res.status(403).json({ status: 'error', message: 'Request origin is not allowed.' });
+  }
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ status: 'error', message: 'Request body is too large.' });
+  }
+  console.error('Unhandled request error:', err);
+  return res.status(500).json({ status: 'error', message: 'Internal server error.' });
 });
 
 // ── Socket.IO — Live Monitoring Push Layer ──────────────────
@@ -151,18 +183,54 @@ app.use((err, req, res, next) => {
 const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
-  cors: { origin: '*' }
+  cors: corsOptions
+});
+
+io.use(async (socket, next) => {
+  try {
+    const bearer = socket.handshake.headers.authorization;
+    const token = socket.handshake.auth?.token
+      || (bearer?.startsWith('Bearer ') ? bearer.slice(7) : '')
+      || extractSessionToken({ headers: socket.handshake.headers, get: (name) => socket.handshake.headers[name.toLowerCase()] });
+    socket.data.sessionToken = token;
+    socket.data.requestContext = {
+      ip: socket.handshake.address,
+      socket: { remoteAddress: socket.handshake.address },
+      get: (name) => socket.handshake.headers[name.toLowerCase()],
+    };
+    socket.data.sessionUser = await validateSessionToken(token, socket.data.requestContext);
+    next();
+  } catch {
+    next(new Error('Authentication required'));
+  }
 });
 
 io.on('connection', (socket) => {
   console.log(`[Socket] Client connected: ${socket.id}`);
+  const revalidationTimer = setInterval(async () => {
+    try {
+      socket.data.sessionUser = await validateSessionToken(socket.data.sessionToken, socket.data.requestContext);
+    } catch {
+      socket.disconnect(true);
+    }
+  }, 60_000);
+  revalidationTimer.unref?.();
 
-  // Teacher (or anyone) joins the live room for a specific exam session
-  socket.on('join_room', ({ sessionCode }) => {
-    if (!sessionCode) return;
-    const room = `session:${String(sessionCode).trim().toUpperCase()}`;
-    socket.join(room);
-    console.log(`[Socket] ${socket.id} joined room ${room}`);
+  socket.on('join_room', async ({ sessionCode } = {}, acknowledge = () => {}) => {
+    try {
+      socket.data.sessionUser = await validateSessionToken(socket.data.sessionToken, socket.data.requestContext);
+      if (!sessionCode || !['teacher', 'admin'].includes(socket.data.sessionUser.role)) throw new Error('Access denied');
+      const normalized = String(sessionCode).trim().toUpperCase();
+      const result = await pool.query('SELECT exam_id FROM live_exam_session WHERE session_code=$1', [normalized]);
+      const examId = result.rows[0]?.exam_id;
+      if (!examId || !await userHasExamAccess(socket.data.sessionUser.sub, socket.data.sessionUser.role, examId, 'manage')) throw new Error('Access denied');
+      const room = `session:${normalized}`;
+      socket.join(room);
+      console.log(`[Socket] ${socket.id} joined room ${room}`);
+      acknowledge({ status: 'success' });
+    } catch {
+      acknowledge({ status: 'error', message: 'You are not authorized to monitor this exam.' });
+    }
   });
 
   socket.on('leave_room', ({ sessionCode }) => {
@@ -172,6 +240,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    clearInterval(revalidationTimer);
     console.log(`[Socket] Client disconnected: ${socket.id}`);
   });
 });

@@ -198,7 +198,8 @@ export default function LoginPage({ setPage, setRole, setUser }) {
     setLoading(true);
     fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-PROCTR-Client": "web" },
+      credentials: "include",
       body: JSON.stringify({ email: email.trim(), password: pass.trim(), user_type: selectedRole }),
     })
       .then(async (res) => {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -12,6 +12,30 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 let mainWindow;
 let pythonProcess = null;
+
+function sessionTokenPath() {
+  return path.join(app.getPath('userData'), 'secure-session.bin');
+}
+
+ipcMain.handle('store-session-token', (_event, token) => {
+  if (!safeStorage.isEncryptionAvailable() || typeof token !== 'string' || !token) return false;
+  fs.writeFileSync(sessionTokenPath(), safeStorage.encryptString(token), { mode: 0o600 });
+  return true;
+});
+
+ipcMain.handle('get-session-token', () => {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(sessionTokenPath())) return null;
+    return safeStorage.decryptString(fs.readFileSync(sessionTokenPath()));
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('clear-session-token', () => {
+  try { if (fs.existsSync(sessionTokenPath())) fs.rmSync(sessionTokenPath()); } catch {}
+  return true;
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -31,6 +55,13 @@ function createWindow() {
   mainWindow.setContentProtection(false);
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  // The desktop renderer is a local application, so it must never be
+  // navigated to content supplied by an exam file or database value.
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (!navigationUrl.startsWith('file:')) event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // Intercept window close to warn student
   mainWindow.on('close', (e) => {
@@ -92,7 +123,7 @@ function startPythonSensors(examId, studentId, securityPolicy = {}) {
 
 // ─── ENSURE ROOT EXAMS DIRECTORY ON APP STARTUP ────────────────────
 function ensureRootExamsDirectory() {
-  const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+  const rootDir = getExamRoot();
   try {
     if (!fs.existsSync(rootDir)) {
       fs.mkdirSync(rootDir, { recursive: true });
@@ -174,10 +205,32 @@ function postJson(urlString, bodyObj, sessionToken = null) {
   });
 }
 
+function getExamRoot() {
+  return path.resolve(process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(os.homedir(), 'PROCTR_Exams'));
+}
+
+function requireExamWorkspace(candidatePath) {
+  const root = getExamRoot();
+  const resolved = path.resolve(String(candidatePath || ''));
+  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error('The requested path is outside the PROCTR exam workspace.');
+  }
+  return resolved;
+}
+
 function downloadBuffer(urlString, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
-    const client = String(urlString).startsWith('https:') ? https : http;
-    const request = client.get(urlString, { timeout: 30000 }, response => {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(urlString);
+      const hostname = parsedUrl.hostname.toLowerCase();
+      const allowedCloudinaryHost = hostname === 'res.cloudinary.com' || hostname.endsWith('.cloudinary.com') || hostname.endsWith('.cloudinary.net');
+      if (parsedUrl.protocol !== 'https:' || !allowedCloudinaryHost) throw new Error('Starter code must use an approved HTTPS Cloudinary URL.');
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const request = https.get(parsedUrl, { timeout: 30000 }, response => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirectsLeft > 0) {
         response.resume();
         return resolve(downloadBuffer(new URL(response.headers.location, urlString).toString(), redirectsLeft - 1));
@@ -217,8 +270,12 @@ function collectFilesRecursive(rootDir, currentDir, out, skipTopLevelNames = [])
     if (entry.isDirectory()) {
       collectFilesRecursive(rootDir, fullPath, out, skipTopLevelNames);
     } else if (entry.isFile()) {
+      if (out.length >= 2000) throw new Error('Submission contains too many files (maximum 2000).');
       const relativePath = path.relative(rootDir, fullPath).split(path.sep).join('/');
       const buffer = fs.readFileSync(fullPath);
+      if (buffer.length > 10 * 1024 * 1024) throw new Error(`Submission file is larger than 10 MB: ${relativePath}`);
+      const currentTotal = out.reduce((sum, file) => sum + file.size, 0);
+      if (currentTotal + buffer.length > 20 * 1024 * 1024) throw new Error('Submission is larger than the 20 MB total limit.');
       out.push({
         relativePath,
         contentBase64: buffer.toString('base64'),
@@ -262,7 +319,7 @@ ipcMain.handle('stop-sensors', () => {
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
 ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, isStudent, securityPolicy }) => {
-  const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+  const rootDir = getExamRoot();
   
   // Ensure Root directory exists
   if (!fs.existsSync(rootDir)) {
@@ -310,14 +367,18 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
 ipcMain.handle('install-starter-code', async (event, { workspacePath, fileUrl, originalName }) => {
   try {
     if (!workspacePath || !fileUrl) return { status: 'error', message: 'Starter-code location is missing.' };
-    const starterRoot = path.resolve(workspacePath, 'starter_code');
+    const starterRoot = path.resolve(requireExamWorkspace(workspacePath), 'starter_code');
     fs.mkdirSync(starterRoot, { recursive: true });
     const buffer = await downloadBuffer(fileUrl);
     const requestedName = path.basename(originalName || new URL(fileUrl).pathname || 'starter_code');
 
     if (requestedName.toLowerCase().endsWith('.zip')) {
       const archive = new AdmZip(buffer);
-      for (const entry of archive.getEntries()) {
+      const entries = archive.getEntries();
+      if (entries.length > 2000) throw new Error('Starter-code archive contains too many files.');
+      const expandedBytes = entries.reduce((sum, entry) => sum + Number(entry.header?.size || 0), 0);
+      if (expandedBytes > 200 * 1024 * 1024) throw new Error('Starter-code archive expands beyond the 200 MB limit.');
+      for (const entry of entries) {
         const destination = path.resolve(starterRoot, entry.entryName);
         if (destination !== starterRoot && !destination.startsWith(`${starterRoot}${path.sep}`)) {
           throw new Error('Unsafe path detected in starter-code archive.');
@@ -344,7 +405,7 @@ ipcMain.handle('install-starter-code', async (event, { workspacePath, fileUrl, o
 ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
   if (!folderPath) return { status: 'error', message: 'No folder path provided' };
   try {
-    await shell.openPath(folderPath);
+    await shell.openPath(requireExamWorkspace(folderPath));
     return { status: 'success' };
   } catch (err) {
     return { status: 'error', message: err.message };
@@ -422,13 +483,17 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
     // Only the contents of the Submissions folder are collected — that's
     // the folder students are expected to place their final work in.
     // Everything else in the workspace (starter_code, logs) is ignored.
-    const submissionsFolder = path.join(workspacePath, 'Submissions');
+    const submissionsFolder = path.join(requireExamWorkspace(workspacePath), 'Submissions');
     const files = collectFilesRecursive(submissionsFolder, submissionsFolder, []);
 
     console.log(`[Electron] Submit triggered (${submissionType || 'MANUAL'}). Scanning: ${submissionsFolder}`);
     console.log(`[Electron] Found ${files.length} file(s):`, files.map(f => f.relativePath));
 
     const base = apiBase || currentApiBase;
+    const parsedBase = new URL(base);
+    if (!['localhost', '127.0.0.1'].includes(parsedBase.hostname) || parsedBase.protocol !== 'http:' || parsedBase.pathname.replace(/\/$/, '') !== '/api') {
+      throw new Error('The submission API address is not trusted.');
+    }
     const result = await postJson(`${base}/submission/upload`, {
       exam_id: examId,
       student_id: studentId,

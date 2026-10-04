@@ -12,6 +12,7 @@ import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
 import NotificationBell from "../components/common/NotificationBell";
 import { API_BASE_URL } from "../config/apiConfig";
+import { openTrustedFile } from "../utils/safeUrl";
 
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -636,7 +637,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                     <div style={{ fontWeight: 700, color: C.navy, fontSize: 13 }}>{e.course_code} {e.exam_type}</div>
                     <div style={{ fontSize: 12, color: C.grey400 }}>{e.section_name} · {new Date(e.exam_date).toLocaleDateString()}</div>
                   </div>
-                  <Btn variant="ghost" size="sm" onClick={() => window.open(e.exam_paper_url, "_blank")}>View</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => openTrustedFile(e.exam_paper_url)}>View</Btn>
                 </div>
               ))}
             </div>
@@ -726,7 +727,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                     </div>
                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                       {a.exam_paper_url && (
-                        <Btn variant="ghost" size="sm" onClick={() => window.open(a.exam_paper_url, "_blank")}>View Paper</Btn>
+                        <Btn variant="ghost" size="sm" onClick={() => openTrustedFile(a.exam_paper_url)}>View Paper</Btn>
                       )}
                       <Btn variant="ghost" size="sm" style={alreadyRequested ? { borderColor: C.amber, color: C.amber } : {}} onClick={() => !alreadyRequested && setSwapModal(a)}>
                         {alreadyRequested ? "Swap Pending" : "Request Swap"}

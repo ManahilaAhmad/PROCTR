@@ -11,22 +11,26 @@ const emptyLab = { department_id: '', lab_name: '', total_pcs: 1, capacity: 1, n
 const fieldStyle = { width: '100%', padding: '10px 12px', borderRadius: 8, border: `1.5px solid ${C.grey200}`, boxSizing: 'border-box', fontFamily: 'inherit', color: C.navy, background: C.white };
 
 export default function AdminPage({ activePage, user }) {
+  const sessionToken = user?.sessionToken;
   const [overview, setOverview] = useState({});
   const [labs, setLabs] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [settings, setSettings] = useState({});
   const [definitions, setDefinitions] = useState({});
   const [users, setUsers] = useState([]);
+  const [securityEvents, setSecurityEvents] = useState([]);
   const [labForm, setLabForm] = useState(null);
   const [editingLabId, setEditingLabId] = useState(null);
   const [message, setMessage] = useState(null);
 
   const request = useCallback(async (path, options = {}) => {
-    const response = await fetch(`${API_BASE_URL}/admin${path}`, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user?.sessionToken || ''}`, ...(options.headers || {}) } });
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+    const response = await fetch(`${API_BASE_URL}/admin${path}`, { ...options, credentials: 'include', headers });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.message || 'Request failed.');
     return data;
-  }, [user?.sessionToken]);
+  }, [sessionToken]);
 
   const showMessage = (text, type = 'success') => {
     setMessage({ text, type });
@@ -40,11 +44,12 @@ export default function AdminPage({ activePage, user }) {
     setDefinitions(data.definitions || {});
   }), [request]);
   const loadUsers = useCallback(() => request('/users').then(data => setUsers(data.users)), [request]);
+  const loadSecurityEvents = useCallback(() => request('/security-events?limit=200').then(data => setSecurityEvents(data.events || [])), [request]);
 
   useEffect(() => {
-    const loader = activePage === 'admin-labs' ? loadLabs : activePage === 'admin-settings' ? loadSettings : activePage === 'admin-users' ? loadUsers : loadOverview;
+    const loader = activePage === 'admin-labs' ? loadLabs : activePage === 'admin-settings' ? loadSettings : activePage === 'admin-users' ? loadUsers : activePage === 'admin-security' ? loadSecurityEvents : loadOverview;
     loader().catch(error => showMessage(error.message, 'error'));
-  }, [activePage, loadLabs, loadOverview, loadSettings, loadUsers]);
+  }, [activePage, loadLabs, loadOverview, loadSecurityEvents, loadSettings, loadUsers]);
 
   async function saveLab() {
     try {
@@ -80,6 +85,14 @@ export default function AdminPage({ activePage, user }) {
       const data = await request(`/users/${target.user_id}/status`, { method: 'PATCH', body: JSON.stringify({ is_active: !target.is_active }) });
       showMessage(data.message);
       await loadUsers();
+    } catch (error) { showMessage(error.message, 'error'); }
+  }
+
+  async function revokeSessions(target) {
+    if (!window.confirm(`Sign ${target.first_name} ${target.last_name} out from every device?`)) return;
+    try {
+      const data = await request(`/users/${target.user_id}/revoke-sessions`, { method: 'POST', body: '{}' });
+      showMessage(data.message);
     } catch (error) { showMessage(error.message, 'error'); }
   }
 
@@ -122,8 +135,16 @@ export default function AdminPage({ activePage, user }) {
   if (activePage === 'admin-users') return (
     <PageWrap title="User Administration" subtitle="View accounts and immediately enable or disable access">
       {notice}<Card style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}><thead><tr>{['Name', 'Email', 'Role', 'Status', 'Last login', 'Action'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
-        {users.map(target => <tr key={target.user_id}><td style={td}><strong>{target.first_name} {target.last_name}</strong></td><td style={td}>{target.email}</td><td style={{ ...td, textTransform: 'capitalize' }}>{target.user_type}</td><td style={td}><span style={{ color: target.is_active ? C.teal : C.red, fontWeight: 800 }}>{target.is_active ? 'Active' : 'Disabled'}</span></td><td style={td}>{target.last_login_at ? new Date(target.last_login_at).toLocaleString() : 'Never'}</td><td style={td}><Btn size="sm" variant={target.is_active ? 'danger' : 'success'} onClick={() => toggleUser(target)}>{target.is_active ? 'Disable' : 'Enable'}</Btn></td></tr>)}
+        {users.map(target => <tr key={target.user_id}><td style={td}><strong>{target.first_name} {target.last_name}</strong></td><td style={td}>{target.email}</td><td style={{ ...td, textTransform: 'capitalize' }}>{target.user_type}</td><td style={td}><span style={{ color: target.is_active ? C.teal : C.red, fontWeight: 800 }}>{target.is_active ? 'Active' : 'Disabled'}</span></td><td style={td}>{target.last_login_at ? new Date(target.last_login_at).toLocaleString() : 'Never'}</td><td style={td}><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Btn size="sm" variant={target.is_active ? 'danger' : 'success'} onClick={() => toggleUser(target)}>{target.is_active ? 'Disable' : 'Enable'}</Btn><Btn size="sm" variant="ghost" onClick={() => revokeSessions(target)}>Sign out all</Btn></div></td></tr>)}
       </tbody></table></Card>
+    </PageWrap>
+  );
+
+  if (activePage === 'admin-security') return (
+    <PageWrap title="Security Audit" subtitle="Authentication, authorization, session, and rate-limit events" actions={<Btn onClick={loadSecurityEvents}>Refresh</Btn>}>
+      {notice}<Card style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['Time', 'Event', 'Outcome', 'User', 'IP address', 'Request', 'Object'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead><tbody>
+        {securityEvents.map(event => <tr key={event.audit_id}><td style={td}>{new Date(event.created_at).toLocaleString()}</td><td style={{ ...td, fontFamily: 'monospace', fontWeight: 700 }}>{event.event_type}</td><td style={td}><span style={{ color: event.outcome === 'DENIED' ? C.red : C.teal, fontWeight: 800 }}>{event.outcome}</span></td><td style={td}>{event.email || 'Anonymous'}{event.user_type ? ` (${event.user_type})` : ''}</td><td style={{ ...td, fontFamily: 'monospace' }}>{event.ip_address || '—'}</td><td style={{ ...td, maxWidth: 270, wordBreak: 'break-word' }}>{event.method ? `${event.method} ` : ''}{event.request_path || '—'}</td><td style={td}>{event.object_type ? `${event.object_type}: ${event.object_id || '—'}` : '—'}</td></tr>)}
+      </tbody></table>{securityEvents.length === 0 && <p style={{ color: C.grey500 }}>No security events have been recorded yet.</p>}</Card>
     </PageWrap>
   );
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireRole, requireSession } from '../middleware/sessionAuth.js';
-import { createLab, deleteLab, getLabs, getOverview, getSettings, getUsers, setUserActive, updateLab, updateSettings } from '../controllers/adminController.js';
+import { createLab, deleteLab, getLabs, getOverview, getSecurityEvents, getSettings, getUsers, revokeUserSessions, setUserActive, updateLab, updateSettings } from '../controllers/adminController.js';
 
 const router = express.Router();
 router.use(requireSession, requireRole('admin'));
@@ -13,5 +13,7 @@ router.get('/settings', getSettings);
 router.put('/settings', updateSettings);
 router.get('/users', getUsers);
 router.patch('/users/:userId/status', setUserActive);
+router.post('/users/:userId/revoke-sessions', revokeUserSessions);
+router.get('/security-events', getSecurityEvents);
 
 export default router;

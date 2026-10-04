@@ -16,6 +16,7 @@ import {
   requireRole,
   requireSession,
 } from '../middleware/sessionAuth.js';
+import { requireExamAccessByBody } from '../middleware/examAuthorization.js';
 
 const router = express.Router();
 router.use(requireSession);
@@ -23,7 +24,7 @@ router.use(requireSession);
 // Mounted at /api/submission
 
 // Desktop app → upload a student's work (auto at session end, or manual button)
-router.post('/upload', requireRole('student', 'admin'), requireOwnStudentBodyProfile(), uploadSubmission);
+router.post('/upload', requireRole('student', 'admin'), requireOwnStudentBodyProfile(), requireExamAccessByBody('exam_id', 'participate'), uploadSubmission);
 
 // Teacher browsing: labs (course_offerings) → students (roll numbers) → files
 router.get('/teacher/:teacherId/labs', requireOwnTeacherProfile(), getTeacherLabs);
@@ -36,6 +37,6 @@ router.get('/student/:studentId/labs', requireOwnStudentProfile(), getStudentOwn
 router.get('/student/:studentId/lab/:courseOfferingId/files', requireOwnStudentProfile(), getStudentOwnFiles);
 
 // Shared: download an individual file (path-based — pass ?relativePath=...&teacherId=... or &studentId=...)
-router.get('/file/:submissionId', requireRole('student', 'teacher', 'hod', 'dec', 'admin'), downloadFile);
+router.get('/file/:submissionId', requireRole('student', 'teacher', 'admin'), downloadFile);
 
 export default router;

@@ -14,7 +14,7 @@ export function installAuthenticatedFetch() {
 
   window.fetch = (input, options = {}) => {
     const rawUrl = typeof input === 'string' ? input : input?.url;
-    let isBackendRequest = false;
+    let isBackendRequest;
     try {
       isBackendRequest = new URL(rawUrl, window.location.origin).origin === new URL(SERVER_BASE_URL).origin;
     } catch {
@@ -32,7 +32,7 @@ export function installAuthenticatedFetch() {
     } catch {
       // A damaged local session is handled normally by the API's 401 response.
     }
-    return nativeFetch(input, { ...options, headers });
+    return nativeFetch(input, { ...options, headers, credentials: options.credentials || 'include' });
   };
 
   window.__proctrAuthenticatedFetchInstalled = true;

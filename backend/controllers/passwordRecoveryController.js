@@ -199,6 +199,11 @@ export async function resetPassword(req, res) {
       [passwordHash, user.user_id]
     );
     await client.query(
+      `UPDATE security_session SET revoked_at=NOW(),revoke_reason='PASSWORD_RESET'
+       WHERE user_id=$1 AND revoked_at IS NULL`,
+      [user.user_id]
+    );
+    await client.query(
       `UPDATE password_reset_token SET used_at=NOW()
        WHERE user_id=$1 AND used_at IS NULL`,
       [user.user_id]

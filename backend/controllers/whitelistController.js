@@ -34,7 +34,7 @@ export const getExamWhitelist = async (req, res) => {
 =========================================================== */
 export const addDomainToWhitelist = async (req, res) => {
   const { examId } = req.params;
-  const { domain, user_id } = req.body;
+  const { domain } = req.body;
 
   if (!domain || !domain.trim()) {
     return res.status(400).json({ status: 'error', message: 'Domain string is required.' });
@@ -43,15 +43,19 @@ export const addDomainToWhitelist = async (req, res) => {
   // Clean domain input (remove protocol or path if user pasted full URL)
   let cleanDomain = domain.trim().toLowerCase()
     .replace(/^https?:\/\//, '')
-    .replace(/\/.*$/, '');
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '');
+
+  if (cleanDomain.length > 253 || !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(cleanDomain)) {
+    return res.status(400).json({ status: 'error', message: 'Enter a valid domain name without a path or wildcard.' });
+  }
 
   try {
-    // Get teacher_id from user_id (or default if null)
-    let teacherId = 1;
-    if (user_id) {
-      const tRes = await pool.query('SELECT teacher_id FROM teacher WHERE user_id = $1', [user_id]);
-      if (tRes.rows.length > 0) teacherId = tRes.rows[0].teacher_id;
-    }
+    const tRes = await pool.query('SELECT teacher_id FROM teacher WHERE user_id = $1', [req.sessionUser.sub]);
+    const teacherId = req.sessionUser.role === 'admin'
+      ? (await pool.query('SELECT teacher_id FROM exam WHERE exam_id=$1', [examId])).rows[0]?.teacher_id
+      : tRes.rows[0]?.teacher_id;
+    if (!teacherId) return res.status(403).json({ status: 'error', message: 'A valid teacher profile is required.' });
 
     const result = await pool.query(`
       INSERT INTO exam_whitelist (exam_id, domain, added_by)

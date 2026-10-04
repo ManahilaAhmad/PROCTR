@@ -9,10 +9,12 @@
     "dev": "nodemon server.js",
     "migrate-admin": "node migrateAdmin.mjs",
     "migrate-password-recovery": "node migratePasswordRecovery.mjs",
+    "migrate-security": "node migrateSecurity.mjs",
     "create-admin": "node createAdmin.mjs",
     "create-recovery-test-user": "node createRecoveryTestUser.mjs",
     "create-test-course": "node createTestCourse.mjs",
-    "verify-email": "node verifyEmail.mjs"
+    "verify-email": "node verifyEmail.mjs",
+    "test": "node --test --test-isolation=none tests/*.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
