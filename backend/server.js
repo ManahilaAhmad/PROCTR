@@ -20,6 +20,7 @@ import desktopRoutes from './routes/desktopRoutes.js';
 import proctoringRoutes from './routes/proctoringRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
 import { setIO } from './socketRegistry.js';
+import networkRoutes from './routes/networkRoutes.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -51,10 +52,17 @@ app.get('/api/health', (req, res) => {
 app.get('/api/test-db', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
-    res.status(200).json({ status: 'success', message: 'Connected to PostgreSQL.', time: result.rows[0].now });
+    res.status(200).json({
+      status: 'success',
+      message: 'Connected to PostgreSQL.',
+      time: result.rows[0].now
+    });
   } catch (error) {
     console.error('DB connection test failed:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to connect to Neon PostgreSQL.' });
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to connect to Neon PostgreSQL.'
+    });
   }
 });
 
@@ -89,21 +97,20 @@ pool.query(`
 `).catch(err => console.log("Database constraint check:", err.message));
 
 // ── Primary Namespaced Routes ───────────────────────────────
-app.use('/api/auth', authRoutes);           // POST /api/auth/login, /api/auth/change-password
-app.use('/api/teacher', teacherRoutes);        // GET  /api/teacher/:userId/schedule
-app.use('/api/exams', examRoutes);           // POST /api/exams, /api/exams/upload, etc.
-app.use('/api/hod', hodRoutes);            // GET  /api/hod/queue, POST /api/hod/review, etc.
-app.use('/api/dec', decRoutes);            // POST /api/dec/invigilator/assign, etc.
-app.use('/api/student', studentRoutes);        // GET  /api/student/:userId/schedule
-app.use('/api/coordinator', coordinatorRoutes);    // Full coordinator CRUD
-app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
-app.use('/api/desktop', desktopRoutes);        // Desktop app sessions & violations
-app.use('/api/proctoring', proctoringRoutes);      // Fuzzy AI evaluation + generic proctoring events
-app.use('/api/submission', submissionRoutes);      // Student work submissions (teacher/student browsing)
+app.use('/api/auth', authRoutes);
+app.use('/api/teacher', teacherRoutes);
+app.use('/api/exams', examRoutes);
+app.use('/api/hod', hodRoutes);
+app.use('/api/dec', decRoutes);
+app.use('/api/student', studentRoutes);
+app.use('/api/coordinator', coordinatorRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/desktop', desktopRoutes);
+app.use('/api/proctoring', proctoringRoutes);
+app.use('/api/submission', submissionRoutes);
+app.use('/api/network', networkRoutes);
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
-// These map old un-namespaced paths directly to controllers,
-// avoiding any double-prefix issues from router re-use.
 
 // GET /api/teachers
 app.get('/api/teachers', listTeachers);

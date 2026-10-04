@@ -7,10 +7,12 @@ import Btn from "../components/common/Btn";
 import Input from "../components/common/Input";
 import Badge from "../components/common/Badge";
 import StatCard from "../components/common/StatCard";
+import JoinExamModal from "../components/JoinExamModal";
 import { API_BASE_URL } from "../config/apiConfig";
 
 export default function StudentPage({ activePage, user }) {
   const [selectedExam, setSelectedExam] = useState(null);
+  const [showJoinExam, setShowJoinExam] = useState(false);
 
   // Profile states
   const [currentPass, setCurrentPass] = useState("");
@@ -139,6 +141,10 @@ export default function StudentPage({ activePage, user }) {
   if (activePage === "student") {
     return (
       <PageWrap title="Student Dashboard" subtitle="Manage your profile, update credentials, and check announcements">
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
+            <Btn variant="navy" onClick={() => setShowJoinExam(true)}>Join Exam</Btn>
+          </div>
+          {showJoinExam && <JoinExamModal onClose={() => setShowJoinExam(false)} />}
         {toast && (
           <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: toast.type === "warn" ? C.amber : C.navy, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10 }}>
             {toast.type === "warn" ? Icon.alertTriangle : Icon.check} {toast.msg}
