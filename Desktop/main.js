@@ -216,8 +216,10 @@ ipcMain.handle('stop-sensors', () => {
     console.log('[Electron] Stopping Python Sensor Process PID:', pythonProcess.pid);
     pythonProcess.kill();
     pythonProcess = null;
+    runRestoreDefaultsSync();
     return { status: 'stopped' };
   }
+  runRestoreDefaultsSync();
   return { status: 'no_process' };
 });
 

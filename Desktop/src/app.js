@@ -122,6 +122,7 @@ function restoreSession() {
     if (role === 'student') {
       populateStudentProfile(user);
       showView('view-student');
+      showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
       loadStudentData(user.userId);
     } else {
       populateTeacherHeader(user);
@@ -221,6 +222,7 @@ loginForm.addEventListener('submit', async (e) => {
       if (currentRole === 'student') {
         populateStudentProfile(currentUser);
         showView('view-student');
+        showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
         loadStudentData(currentUser.userId);
       } else {
         populateTeacherHeader(currentUser);
@@ -244,6 +246,7 @@ loginForm.addEventListener('submit', async (e) => {
 
 // ─── LOGOUT ──────────────────────────────────────────────────────
 document.getElementById('student-logout').addEventListener('click', () => {
+  if (window.proctrAPI && window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
   currentUser = null;
   currentSessionId = null;
   currentRole = 'student';
@@ -256,6 +259,7 @@ document.getElementById('student-logout').addEventListener('click', () => {
 });
 
 document.getElementById('teacher-logout').addEventListener('click', () => {
+  if (window.proctrAPI && window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
   currentUser = null;
   clearSession(); // Wipe saved session on explicit logout
   showView('view-login');
