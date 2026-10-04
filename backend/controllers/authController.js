@@ -1,6 +1,7 @@
 import pool from '../db.js';
 import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
+import { createSessionToken } from '../middleware/sessionAuth.js';
 
 /* ===========================================================
    LOGIN
@@ -15,7 +16,7 @@ export const login = async (req, res) => {
     let result;
     if (user_type === 'student') {
       result = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, u.email, u.password_hash, u.user_type, u.is_active, u.profile_picture_url 
+        `SELECT u.user_id, u.first_name, u.last_name, u.email, u.password_hash, u.user_type, u.is_active, u.profile_picture_url, u.session_version
          FROM users u 
          LEFT JOIN student s ON u.user_id = s.user_id 
          WHERE (u.email = $1 OR s.registration_no = $1) AND u.user_type = $2`,
@@ -23,7 +24,7 @@ export const login = async (req, res) => {
       );
     } else {
       result = await pool.query(
-        'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active, profile_picture_url FROM users WHERE email = $1 AND user_type = $2',
+        'SELECT user_id, first_name, last_name, email, password_hash, user_type, is_active, profile_picture_url, session_version FROM users WHERE email = $1 AND user_type = $2',
         [email, user_type]
       );
     }
@@ -147,6 +148,16 @@ export const login = async (req, res) => {
       }
     }
 
+    let sessionToken = null;
+    try {
+      sessionToken = createSessionToken(user);
+    } catch (tokenError) {
+      if (user.user_type === 'admin') {
+        return res.status(503).json({ status: 'error', message: 'Admin login is unavailable until SESSION_SECRET is configured on the server.' });
+      }
+      console.warn('Session tokens are disabled:', tokenError.message);
+    }
+
     res.status(200).json({
       status: 'success',
       user: {
@@ -157,6 +168,7 @@ export const login = async (req, res) => {
         email: user.email,
         userType: user.user_type,
         profilePictureUrl: user.profile_picture_url,
+        sessionToken,
         ...extra,
       }
     });
@@ -186,8 +198,11 @@ export const changePassword = async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ status: 'error', message: 'Current password is incorrect.' });
     }
-    const newHash = await bcrypt.hash(new_password, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE user_id = $2', [newHash, user_id]);
+    const newHash = await bcrypt.hash(new_password, 12);
+    await pool.query(
+      'UPDATE users SET password_hash=$1,password_changed_at=NOW(),session_version=session_version+1 WHERE user_id=$2',
+      [newHash, user_id]
+    );
     res.status(200).json({ status: 'success', message: 'Password updated successfully.' });
   } catch (error) {
     console.error('Error changing password:', error);

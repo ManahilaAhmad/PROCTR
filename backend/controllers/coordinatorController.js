@@ -1,10 +1,31 @@
 import pool from "../db.js";
 
+async function getCoordinatorDepartmentId(req) {
+    if (req.sessionUser?.role === 'admin') return null;
+    const result = await pool.query('SELECT department_id FROM coordinator WHERE user_id=$1', [req.sessionUser.sub]);
+    return result.rows[0]?.department_id || 0;
+}
+
+async function coordinatorOwnsSchedule(req, scheduleId) {
+    if (req.sessionUser?.role === 'admin') return true;
+    const result = await pool.query(`
+        SELECT 1 FROM exam_schedule es
+        JOIN exam e ON e.exam_id=es.exam_id
+        JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+        JOIN course c ON c.course_id=co.course_id
+        JOIN program p ON p.program_id=c.program_id
+        JOIN coordinator cr ON cr.user_id=$2
+        WHERE es.schedule_id=$1 AND p.department_id=cr.department_id
+    `, [scheduleId, req.sessionUser.sub]);
+    return result.rowCount > 0;
+}
+
 /* ===========================================================
    GET ALL LABS
 =========================================================== */
 export const getLabs = async (req, res) => {
     try {
+        const departmentId = await getCoordinatorDepartmentId(req);
         const query = `
             SELECT
                 lab_id,
@@ -14,10 +35,11 @@ export const getLabs = async (req, res) => {
                 network_range,
                 status
             FROM lab
+            WHERE ($1::int IS NULL OR department_id=$1)
             ORDER BY lab_name ASC;
         `;
 
-        const result = await pool.query(query);
+        const result = await pool.query(query, [departmentId]);
 
         return res.status(200).json({
             status: "success",
@@ -40,6 +62,7 @@ export const getLabs = async (req, res) => {
 export const getApprovedExams = async (req, res) => {
 
     try {
+        const departmentId = await getCoordinatorDepartmentId(req);
 
         const query = `
             SELECT
@@ -59,6 +82,9 @@ export const getApprovedExams = async (req, res) => {
             JOIN course c
                 ON co.course_id = c.course_id
 
+            JOIN program p
+                ON c.program_id = p.program_id
+
             JOIN section s
                 ON co.section_id = s.section_id
 
@@ -67,11 +93,12 @@ export const getApprovedExams = async (req, res) => {
 
             WHERE e.status='Approved'
               AND es.schedule_id IS NULL
+              AND ($1::int IS NULL OR p.department_id=$1)
 
             ORDER BY c.course_code;
         `;
 
-        const result = await pool.query(query);
+        const result = await pool.query(query, [departmentId]);
 
         return res.status(200).json({
 
@@ -107,6 +134,7 @@ export const getApprovedExams = async (req, res) => {
 export const getSchedule = async (req, res) => {
 
     try {
+        const departmentId = await getCoordinatorDepartmentId(req);
 
         const query = `
 
@@ -158,6 +186,9 @@ export const getSchedule = async (req, res) => {
             JOIN course c
                 ON co.course_id = c.course_id
 
+            JOIN program p
+                ON c.program_id = p.program_id
+
             JOIN section s
                 ON co.section_id = s.section_id
 
@@ -173,13 +204,15 @@ export const getSchedule = async (req, res) => {
             LEFT JOIN users u
                 ON t.user_id = u.user_id
 
+            WHERE ($1::int IS NULL OR p.department_id=$1)
+
             ORDER BY
                 es.exam_date,
                 es.start_time;
 
         `;
 
-        const result = await pool.query(query);
+        const result = await pool.query(query, [departmentId]);
 
         return res.status(200).json({
 
@@ -263,11 +296,11 @@ export const createSchedule = async (req, res) => {
 
         const coordinatorResult = await pool.query(
             `
-            SELECT coordinator_id
+            SELECT coordinator_id, department_id
             FROM coordinator
-            WHERE user_id = $1
+            WHERE user_id = $1 AND user_id = $2
             `,
-            [user_id]
+            [user_id, req.sessionUser.sub]
         );
 
         if (coordinatorResult.rows.length === 0) {
@@ -278,6 +311,23 @@ export const createSchedule = async (req, res) => {
         }
 
         const coordinator_id = coordinatorResult.rows[0].coordinator_id;
+        const coordinatorDepartmentId = coordinatorResult.rows[0].department_id;
+
+        const scopedResources = await pool.query(`
+            SELECT e.exam_id
+            FROM exam e
+            JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+            JOIN course c ON c.course_id=co.course_id
+            JOIN program p ON p.program_id=c.program_id
+            JOIN lab l ON l.lab_id=$2
+            WHERE e.exam_id=$1 AND p.department_id=$3 AND l.department_id=$3
+        `, [exam_id, lab_id, coordinatorDepartmentId]);
+        if (!scopedResources.rowCount) {
+            return res.status(403).json({
+                status: "error",
+                message: "The exam and lab must both belong to your department."
+            });
+        }
 
         // ==========================
         // Check exam already scheduled
@@ -561,6 +611,9 @@ export const updateSchedule = async (req, res) => {
     } = req.body;
 
     try {
+        if (!await coordinatorOwnsSchedule(req, schedule_id)) {
+            return res.status(403).json({ status: "error", message: "You can only update schedules in your department." });
+        }
         if (start_time && end_time && end_time <= start_time) {
             return res.status(400).json({
                 status: "error",
@@ -758,6 +811,9 @@ export const deleteSchedule = async (req, res) => {
     const { schedule_id } = req.params;
 
     try {
+        if (!await coordinatorOwnsSchedule(req, schedule_id)) {
+            return res.status(403).json({ status: "error", message: "You can only delete schedules in your department." });
+        }
         // Delete any duty swap requests for this schedule
         await pool.query(`
             DELETE FROM duty_swap_request 
@@ -830,6 +886,9 @@ export const publishSchedule = async (req, res) => {
     const { schedule_id } = req.params;
 
     try {
+        if (!await coordinatorOwnsSchedule(req, schedule_id)) {
+            return res.status(403).json({ status: "error", message: "You can only publish schedules in your department." });
+        }
 
         const result = await pool.query(
 
@@ -909,6 +968,9 @@ export const getAvailableLabs = async (req, res) => {
     } = req.query;
 
     try {
+        if (!await coordinatorOwnsSchedule(req, schedule_id)) {
+            return res.status(403).json({ status: "error", message: "You can only publish schedules in your department." });
+        }
 
         const result = await pool.query(
 
@@ -917,7 +979,8 @@ export const getAvailableLabs = async (req, res) => {
 
             FROM lab
 
-            WHERE lab_id NOT IN (
+            WHERE ($4::int IS NULL OR department_id=$4)
+              AND lab_id NOT IN (
                 SELECT lab_id
                 FROM exam_schedule
                 WHERE exam_date = $1
@@ -932,7 +995,8 @@ export const getAvailableLabs = async (req, res) => {
 
                 start_time,
 
-                end_time
+                end_time,
+                departmentId
 
             ]
 

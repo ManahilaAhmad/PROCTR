@@ -6,6 +6,20 @@
 const API_BASE = 'http://localhost:5000/api';
 const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
 
+// Attach the signed login session to every backend request while leaving
+// downloads or other third-party URLs untouched.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, options = {}) => {
+  const rawUrl = typeof input === 'string' ? input : input?.url;
+  if (!String(rawUrl || '').startsWith(SOCKET_BASE)) return nativeFetch(input, options);
+
+  const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+  if (currentUser?.sessionToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${currentUser.sessionToken}`);
+  }
+  return nativeFetch(input, { ...options, headers });
+};
+
 // ─── LIVE SOCKET CONNECTION (instant violation push to teacher dashboard) ──
 // Uses the socket.io client bundle vendored at src/vendor/socket.io.min.js
 // (loaded as a plain <script> tag before this file — no bundler in this app).
@@ -1048,6 +1062,7 @@ if (roomBtnEnd) {
         if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
       }
       showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
+      await loadTeacherData(currentUser.userId);
     } catch (err) {
       console.error('Error ending session:', err);
     }
@@ -1140,13 +1155,18 @@ if (joinExamForm) {
       window.activeSessionCode = examCode;
       window.activeExamId = sessionObj.examId || null;
       autoSubmitTriggered = false; // fresh exam session — allow auto-submit to fire again
+      starterCodeInstalledForSession = null;
 
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         const result = await window.proctrAPI.startExamWorkspace({
-          examId: examCode,
+          examId: sessionObj.examId || examCode,
           studentId: regNo,
-          courseCode: examCode
+          courseCode: examCode,
+          securityPolicy: {
+            ...(sessionObj.securityPolicy || {}),
+            allowed_subnet: sessionObj.labNetworkRange || null
+          }
         });
 
         if (result.status === 'success') {
@@ -1194,6 +1214,7 @@ if (joinExamForm) {
 // ─── STUDENT SESSION POLLING FOR PAPER REVEAL & TIMER START ───────
 let studentPollInterval = null;
 let studentLocalCountdown = null;
+let starterCodeInstalledForSession = null;
 
 function startStudentSessionPoll(sessionCode) {
   if (studentPollInterval) clearInterval(studentPollInterval);
@@ -1220,7 +1241,10 @@ function startStudentSessionPoll(sessionCode) {
         // Auto-submit whatever's in the workspace the moment the session ends
         if (!autoSubmitTriggered) {
           autoSubmitTriggered = true;
-          performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Session ended:', r));
+          performExamSubmission('AUTO').then(r => {
+            console.log('[AutoSubmit] Session ended:', r);
+            if (r?.status === 'success') enableLeaveExamButton();
+          });
         }
 
         const statusEl = document.getElementById('exam-status-text');
@@ -1282,6 +1306,21 @@ function startStudentSessionPoll(sessionCode) {
             doc.close();
           }
         }
+
+        if (session.starterFileUrl && activeWorkspacePath && starterCodeInstalledForSession !== sessionCode) {
+          starterCodeInstalledForSession = sessionCode;
+          const installed = await window.proctrAPI?.installStarterCode?.({
+            workspacePath: activeWorkspacePath,
+            fileUrl: session.starterFileUrl,
+            originalName: session.starterFileName
+          });
+          if (!installed || installed.status !== 'success') {
+            starterCodeInstalledForSession = null;
+            console.error('Starter-code installation failed:', installed?.message);
+          } else {
+            console.log(`Starter code installed at ${installed.starterPath}`);
+          }
+        }
       }
 
       // 2. Check if Invigilator Started Exam Timer — smooth client-side countdown
@@ -1300,7 +1339,10 @@ function startStudentSessionPoll(sessionCode) {
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
                 autoSubmitTriggered = true;
-                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+                performExamSubmission('AUTO').then(r => {
+                  console.log('[AutoSubmit] Timer expired:', r);
+                  if (r?.status === 'success') enableLeaveExamButton();
+                });
               }
               return;
             }
@@ -1309,7 +1351,7 @@ function startStudentSessionPoll(sessionCode) {
 
             // 5-Minute Warning: show pulsing banner
             if (warningEl) {
-              if (secs <= 300) {
+              if (secs <= (session.warningSeconds || 300)) {
                 warningEl.style.display = 'flex';
               } else {
                 warningEl.style.display = 'none';
@@ -1336,13 +1378,16 @@ function startStudentSessionPoll(sessionCode) {
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
                 autoSubmitTriggered = true;
-                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+                performExamSubmission('AUTO').then(r => {
+                  console.log('[AutoSubmit] Timer expired:', r);
+                  if (r?.status === 'success') enableLeaveExamButton();
+                });
               }
               return;
             }
             if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
             if (warningEl) {
-              warningEl.style.display = secs <= 300 ? 'flex' : 'none';
+              warningEl.style.display = secs <= (session.warningSeconds || 300) ? 'flex' : 'none';
             }
             secs--;
           };
@@ -1403,6 +1448,38 @@ function startExamTimer() {
 // upserts on (exam_id, student_id), so a later call just replaces the files.
 let autoSubmitTriggered = false;
 
+function enableLeaveExamButton() {
+  const button = document.getElementById('btn-leave-exam');
+  if (button) button.style.display = 'inline-flex';
+}
+
+async function leaveStudentExamEnvironment() {
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (window.activeSessionCode && studentId) {
+    const response = await fetch(`${API_BASE}/desktop/session/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_code: window.activeSessionCode, student_id: studentId })
+    });
+    if (!response.ok && response.status !== 404) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || 'Could not leave the exam environment.');
+    }
+  }
+  if (studentPollInterval) clearInterval(studentPollInterval);
+  if (studentLocalCountdown) clearInterval(studentLocalCountdown);
+  if (window.proctrAPI?.stopSensors) await window.proctrAPI.stopSensors();
+  if (window.proctrAPI?.setScreenProtection) await window.proctrAPI.setScreenProtection(false);
+  const leaveButton = document.getElementById('btn-leave-exam');
+  if (leaveButton) leaveButton.style.display = 'none';
+  window.activeSessionCode = null;
+  window.activeSessionId = null;
+  window.activeExamId = null;
+  activeWorkspacePath = null;
+  showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
+  await loadStudentData(currentUser.userId);
+}
+
 async function performExamSubmission(type) {
   if (!window.proctrAPI || !window.proctrAPI.submitExamWork) {
     return { status: 'error', message: 'Submission is not available in this environment.' };
@@ -1418,7 +1495,8 @@ async function performExamSubmission(type) {
     sessionCode: window.activeSessionCode,
     workspacePath: activeWorkspacePath,
     submissionType: type,
-    apiBase: API_BASE
+    apiBase: API_BASE,
+    sessionToken: currentUser?.sessionToken
   });
 }
 
@@ -1438,6 +1516,7 @@ if (submitExamBtn) {
         status.style.display = 'block';
         status.style.color = 'var(--teal)';
       }
+      enableLeaveExamButton();
     } else {
       submitExamBtn.disabled = false;
       submitExamBtn.textContent = '✓ Submit Solution';
@@ -1446,6 +1525,21 @@ if (submitExamBtn) {
         status.style.display = 'block';
         status.style.color = '#dc2626';
       }
+    }
+  });
+}
+
+const leaveExamBtn = document.getElementById('btn-leave-exam');
+if (leaveExamBtn) {
+  leaveExamBtn.addEventListener('click', async () => {
+    if (!confirm('Leave the secure exam environment? Make sure your final work has been submitted.')) return;
+    leaveExamBtn.disabled = true;
+    try {
+      await leaveStudentExamEnvironment();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      leaveExamBtn.disabled = false;
     }
   });
 }

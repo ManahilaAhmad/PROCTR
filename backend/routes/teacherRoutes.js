@@ -7,6 +7,7 @@ import {
   getOutgoingSwapRequests,
   respondToSwapRequest,
 } from '../controllers/teacherController.js';
+import { requireRole, requireSelfBody, requireSelfParam, requireSession } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
 
@@ -18,11 +19,12 @@ const router = express.Router();
 // GET /api/teacher/:userId/swap-requests/outgoing → getOutgoingSwapRequests
 // POST /api/teacher/swap-requests/:requestId/respond → respondToSwapRequest
 
+router.use(requireSession, requireRole('teacher', 'hod', 'dec', 'coordinator', 'director', 'admin'));
 router.get('/', listTeachers);
-router.get('/:userId/courses', getTeacherCourses);
-router.get('/:userId/schedule', getSchedule);
-router.get('/:userId/swap-requests/incoming', getIncomingSwapRequests);
-router.get('/:userId/swap-requests/outgoing', getOutgoingSwapRequests);
-router.post('/swap-requests/:requestId/respond', respondToSwapRequest);
+router.get('/:userId/courses', requireSelfParam('userId', 'admin'), getTeacherCourses);
+router.get('/:userId/schedule', requireSelfParam('userId', 'admin'), getSchedule);
+router.get('/:userId/swap-requests/incoming', requireSelfParam('userId', 'admin'), getIncomingSwapRequests);
+router.get('/:userId/swap-requests/outgoing', requireSelfParam('userId', 'admin'), getOutgoingSwapRequests);
+router.post('/swap-requests/:requestId/respond', requireSelfBody('user_id', 'admin'), respondToSwapRequest);
 
 export default router;

@@ -6,8 +6,10 @@ import {
   submitToHOD,
   shareToDEC,
 } from '../controllers/teacherController.js';
+import { requireRole, requireSession } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
+router.use(requireSession, requireRole('teacher', 'admin'));
 
 // Mounted at /api/exams
 // POST /api/exams              → create exam draft

@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
+const https = require('https');
+const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
 
 // Suppress harmless Chromium GPU cache warnings on Windows
@@ -40,7 +42,7 @@ function createWindow() {
   // Sensors are spawned ONLY when a student actively joins an exam workspace via start-exam-workspace.
 }
 
-function startPythonSensors(examId, studentId) {
+function startPythonSensors(examId, studentId, securityPolicy = {}) {
   const pythonScriptPath = path.join(__dirname, 'python_sensors', 'main.py');
   
   // Use python executable from system path
@@ -51,6 +53,14 @@ function startPythonSensors(examId, studentId) {
   ]);
 
   console.log('[Electron] Spawned Python Background Sensor Engine PID:', pythonProcess.pid);
+
+  const policyCommand = {
+    type: 'UPDATE_SECURITY_POLICY',
+    allowed_subnet: securityPolicy.allowed_subnet,
+    clipboard_threshold_chars: securityPolicy.clipboard_threshold_chars,
+    focus_loss_seconds: securityPolicy.focus_loss_seconds,
+  };
+  pythonProcess.stdin.write(`${JSON.stringify(policyCommand)}\n`);
 
   // Listen to JSON lines printed by Python sensors
   pythonProcess.stdout.on('data', (data) => {
@@ -129,7 +139,7 @@ app.on('will-quit', () => {
 });
 
 // ─── HELPER: POST JSON to the backend (main process, no browser fetch needed) ──
-function postJson(urlString, bodyObj) {
+function postJson(urlString, bodyObj, sessionToken = null) {
   return new Promise((resolve, reject) => {
     try {
       const url = new URL(urlString);
@@ -141,7 +151,8 @@ function postJson(urlString, bodyObj) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Content-Length': body.length
+          'Content-Length': body.length,
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
         },
         timeout: 30000
       }, (res) => {
@@ -160,6 +171,32 @@ function postJson(urlString, bodyObj) {
     } catch (err) {
       reject(err);
     }
+  });
+}
+
+function downloadBuffer(urlString, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const client = String(urlString).startsWith('https:') ? https : http;
+    const request = client.get(urlString, { timeout: 30000 }, response => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirectsLeft > 0) {
+        response.resume();
+        return resolve(downloadBuffer(new URL(response.headers.location, urlString).toString(), redirectsLeft - 1));
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        response.resume();
+        return reject(new Error(`Starter-code download failed (HTTP ${response.statusCode}).`));
+      }
+      const chunks = [];
+      let total = 0;
+      response.on('data', chunk => {
+        total += chunk.length;
+        if (total > 50 * 1024 * 1024) request.destroy(new Error('Starter-code package exceeds the 50 MB download limit.'));
+        else chunks.push(chunk);
+      });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    request.on('timeout', () => request.destroy(new Error('Starter-code download timed out.')));
+    request.on('error', reject);
   });
 }
 
@@ -224,7 +261,7 @@ ipcMain.handle('stop-sensors', () => {
 });
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
-ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, isStudent }) => {
+ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, isStudent, securityPolicy }) => {
   const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
   
   // Ensure Root directory exists
@@ -253,7 +290,7 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
       if (pythonProcess) {
         pythonProcess.kill();
       }
-      startPythonSensors(examId || 1, studentId || 101);
+      startPythonSensors(examId || 1, studentId || 101, securityPolicy || {});
     }
 
     return {
@@ -265,6 +302,41 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
   } catch (err) {
     console.error('Error creating course exam workspace:', err);
     return { status: 'error', message: err.message };
+  }
+});
+
+// Downloads the released Cloudinary starter package only after the backend
+// reports that the invigilator has revealed the exam materials.
+ipcMain.handle('install-starter-code', async (event, { workspacePath, fileUrl, originalName }) => {
+  try {
+    if (!workspacePath || !fileUrl) return { status: 'error', message: 'Starter-code location is missing.' };
+    const starterRoot = path.resolve(workspacePath, 'starter_code');
+    fs.mkdirSync(starterRoot, { recursive: true });
+    const buffer = await downloadBuffer(fileUrl);
+    const requestedName = path.basename(originalName || new URL(fileUrl).pathname || 'starter_code');
+
+    if (requestedName.toLowerCase().endsWith('.zip')) {
+      const archive = new AdmZip(buffer);
+      for (const entry of archive.getEntries()) {
+        const destination = path.resolve(starterRoot, entry.entryName);
+        if (destination !== starterRoot && !destination.startsWith(`${starterRoot}${path.sep}`)) {
+          throw new Error('Unsafe path detected in starter-code archive.');
+        }
+        if (entry.isDirectory) fs.mkdirSync(destination, { recursive: true });
+        else {
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.writeFileSync(destination, entry.getData());
+        }
+      }
+    } else {
+      const safeName = requestedName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'starter_code.txt';
+      fs.writeFileSync(path.join(starterRoot, safeName), buffer);
+    }
+
+    return { status: 'success', starterPath: starterRoot };
+  } catch (error) {
+    console.error('[StarterCode] Installation failed:', error.message);
+    return { status: 'error', message: error.message };
   }
 });
 
@@ -338,7 +410,7 @@ ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }
 // security log report. Called both automatically (session end / timer
 // expiry) and manually (Submit button) — the backend safely overwrites
 // on re-submission rather than duplicating.
-ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCode, workspacePath, submissionType, apiBase }) => {
+ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCode, workspacePath, submissionType, apiBase, sessionToken }) => {
   try {
     if (!workspacePath) {
       return { status: 'error', message: 'No active exam workspace to submit from.' };
@@ -362,7 +434,7 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
       student_id: studentId,
       mac_address: getMacAddress(),
       files
-    });
+    }, sessionToken);
 
     if (!result.ok) {
       console.error(`[Electron] Upload failed (HTTP ${result.status}):`, result.body?.message);

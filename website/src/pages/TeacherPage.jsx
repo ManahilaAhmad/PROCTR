@@ -41,10 +41,25 @@ export default function TeacherPage({ activePage, setPage, user }) {
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState(null);
+  const [rubricFile, setRubricFile] = useState(null);
+  const [starterFile, setStarterFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadNotes, setUploadNotes] = useState("");
   const fileInputRef = useRef(null);
+
+  async function uploadExamAsset(examId, fileType, file) {
+    if (!file) return;
+    const assetData = new FormData();
+    assetData.append("exam_id", examId);
+    assetData.append("file_type", fileType);
+    assetData.append("file", file);
+    const response = await fetch(`${API_BASE_URL}/exam-files/upload`, { method: "POST", body: assetData });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || `Failed to upload ${fileType.replace("_", " ")}.`);
+    }
+  }
 
   // Swap state
   const [swapModal,  setSwapModal]  = useState(null); // duty to swap
@@ -84,32 +99,33 @@ export default function TeacherPage({ activePage, setPage, user }) {
     if (!selectedFile) { alert("Please choose a file to upload."); return; }
 
     const formData = new FormData();
-    formData.append("file", selectedFile);
     formData.append("exam_id", selectedExamForUpload);
     if (uploadNotes.trim()) formData.append("notes", uploadNotes.trim());
+    formData.append("file", selectedFile);
 
     setUploading(true);
     fetch(`${API_BASE_URL}/exams/upload`, {
       method: "POST",
       body: formData, // no Content-Type header — browser sets multipart boundary automatically
     })
-      .then(res => res.json())
-      .then(data => {
-        setUploading(false);
-        if (data.status === "success") {
-          showToast("Exam paper uploaded successfully!");
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.status !== "success") throw new Error(data.message || "Failed to upload exam paper.");
+        await uploadExamAsset(selectedExamForUpload, "rubric", rubricFile);
+        await uploadExamAsset(selectedExamForUpload, "starter_file", starterFile);
+      })
+      .then(() => {
+          const attachments = [rubricFile && "rubric", starterFile && "starter code"].filter(Boolean);
+          showToast(`Exam paper uploaded${attachments.length ? ` with ${attachments.join(" and ")}` : ""}!`);
           setSelectedExamForUpload("");
           setSelectedFile(null);
+          setRubricFile(null);
+          setStarterFile(null);
           setUploadNotes("");
           fetchData();
-        } else {
-          alert(data.message || "Failed to upload exam paper.");
-        }
       })
-      .catch(() => {
-        setUploading(false);
-        alert("Network error. Upload failed.");
-      });
+      .catch(error => alert(error.message || "Network error. Upload failed."))
+      .finally(() => setUploading(false));
   }
 
   function shareWithDEC(examId) {
@@ -575,6 +591,19 @@ export default function TeacherPage({ activePage, setPage, user }) {
               >
                 {selectedFile ? "Choose a Different File" : "Browse Files"}
               </Btn>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
+              <label style={{ padding: 14, border: `1.5px solid ${rubricFile ? C.teal : C.grey200}`, borderRadius: 10, background: rubricFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Rubric (optional)</div>
+                <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rubricFile?.name || "PDF, DOC or DOCX"}</div>
+                <input type="file" accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={e => setRubricFile(e.target.files?.[0] || null)} />
+              </label>
+              <label style={{ padding: 14, border: `1.5px solid ${starterFile ? C.teal : C.grey200}`, borderRadius: 10, background: starterFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Starter Code (optional)</div>
+                <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{starterFile?.name || "ZIP or source-code file"}</div>
+                <input type="file" accept=".zip,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.h,.cs,.php,.rb,.go,.rs,.html,.css,.json,.xml,.sql,.txt,.md,.ipynb,.xlsx,.csv" style={{ display: "none" }} onChange={e => setStarterFile(e.target.files?.[0] || null)} />
+              </label>
             </div>
 
             <Input

@@ -5,8 +5,10 @@ import {
   removeDomainFromWhitelist,
   getDomainSuggestions,
 } from '../controllers/whitelistController.js';
+import { requireRole, requireSession } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
+router.use(requireSession, requireRole('teacher', 'admin'));
 
 // Mounted at /api/whitelist
 router.get('/suggest', getDomainSuggestions);

@@ -21,6 +21,10 @@ import proctoringRoutes from './routes/proctoringRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
 import { setIO } from './socketRegistry.js';
 import networkRoutes from './routes/networkRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import examFileRoutes from './routes/examFileRoutes.js';
+import whitelistRoutes from './routes/whitelistRoutes.js';
+import { requireRole, requireSelfBody, requireSession } from './middleware/sessionAuth.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -34,6 +38,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 
 // ── Core Middleware ─────────────────────────────────────────
 app.use(cors());
@@ -109,26 +114,29 @@ app.use('/api/desktop', desktopRoutes);
 app.use('/api/proctoring', proctoringRoutes);
 app.use('/api/submission', submissionRoutes);
 app.use('/api/network', networkRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/exam-files', examFileRoutes);
+app.use('/api/whitelist', whitelistRoutes);
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 
 // GET /api/teachers
-app.get('/api/teachers', listTeachers);
+app.get('/api/teachers', requireSession, requireRole('teacher', 'hod', 'dec', 'coordinator', 'director', 'admin'), listTeachers);
 
 // DEC - invigilator and swap
-app.post('/api/invigilator/assign', assignInvigilator);
-app.post('/api/swap-request', createSwapRequest);
-app.get('/api/swap-requests/dec', listSwapRequests);
-app.post('/api/swap-requests/dec/review', reviewSwapRequest);
+app.post('/api/invigilator/assign', requireSession, requireRole('dec', 'admin'), requireSelfBody('user_id', 'admin'), assignInvigilator);
+app.post('/api/swap-request', requireSession, requireRole('teacher', 'hod', 'dec', 'admin'), requireSelfBody('user_id', 'admin'), createSwapRequest);
+app.get('/api/swap-requests/dec', requireSession, requireRole('dec', 'admin'), listSwapRequests);
+app.post('/api/swap-requests/dec/review', requireSession, requireRole('dec', 'admin'), reviewSwapRequest);
 
 // Director + DEC use these flat paths
-app.get('/api/schedule', coordGetSchedule);
-app.get('/api/labs', getLabs);
-app.get('/api/director/papers', getSharedPapers);
+app.get('/api/schedule', requireSession, requireRole('director', 'dec', 'admin'), coordGetSchedule);
+app.get('/api/labs', requireSession, requireRole('director', 'dec', 'coordinator', 'admin'), getLabs);
+app.get('/api/director/papers', requireSession, requireRole('director', 'admin'), getSharedPapers);
 
 // ── Multer Error Handler ────────────────────────────────────
 app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError || err?.message?.includes('PDF and DOCX')) {
+  if (err instanceof multer.MulterError || err?.message?.includes('files are allowed') || err?.message?.includes('Starter code must') || err?.message?.includes('Question papers and rubrics')) {
     return res.status(400).json({ status: 'error', message: err.message });
   }
   next(err);

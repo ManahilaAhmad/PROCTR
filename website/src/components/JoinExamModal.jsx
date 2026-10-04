@@ -16,7 +16,11 @@ export default function JoinExamModal({ onClose }) {
   function handleJoin() {
     if (!code.trim()) return;
     setState("checking");
-    fetch(`${API_BASE_URL}/network/validate`, { method: "POST" })
+    fetch(`${API_BASE_URL}/network/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_code: code.trim().toUpperCase() }),
+    })
       .then((response) => {
         if (!response.ok) throw new Error("Outside lab network");
         return response.json();

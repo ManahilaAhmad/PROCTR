@@ -2,6 +2,12 @@ import { C } from "../../theme/colors";
 import { Icon } from "../../theme/icons";
 
 const navItems = {
+  admin: [
+    { id: "admin", icon: Icon.chart, label: "Control Center" },
+    { id: "admin-labs", icon: Icon.server, label: "Labs & Networks" },
+    { id: "admin-settings", icon: Icon.shield, label: "System Settings" },
+    { id: "admin-users", icon: Icon.users, label: "User Management" },
+  ],
   teacher: [
     { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
     { id: "upload", icon: Icon.upload, label: "Upload Exam" },

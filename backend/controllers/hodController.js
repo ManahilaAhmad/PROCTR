@@ -1,30 +1,40 @@
 import pool from '../db.js';
 import { getFileUrl } from '../middleware/upload.js';
 
+async function getHodDepartmentId(req) {
+  if (req.sessionUser?.role === 'admin') return null;
+  const result = await pool.query('SELECT department_id FROM hod WHERE user_id=$1', [req.sessionUser.sub]);
+  return result.rows[0]?.department_id || 0;
+}
+
 /* ===========================================================
    GET HOD REVIEW QUEUE (PendingHOD exams)
 =========================================================== */
 export const getQueue = async (req, res) => {
   try {
+    const departmentId = await getHodDepartmentId(req);
     const result = await pool.query(`
       SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, e.status, e.submitted_at,
-             qp.file_path AS exam_paper_url,
+             qp.file_path AS exam_paper_url, r.file_path AS rubric_url,
              c.course_code, c.course_title, s.section_name,
              u.first_name || ' ' || u.last_name as teacher_name
       FROM exam e
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
+      JOIN program p ON c.program_id = p.program_id
       JOIN section s ON co.section_id = s.section_id
       JOIN teacher t ON co.teacher_id = t.teacher_id
       JOIN users u ON t.user_id = u.user_id
       LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
-      WHERE e.status = 'PendingHOD'
+      LEFT JOIN LATERAL (SELECT file_path FROM rubric WHERE exam_id=e.exam_id ORDER BY version DESC, uploaded_at DESC LIMIT 1) r ON TRUE
+      WHERE e.status = 'PendingHOD' AND ($1::int IS NULL OR p.department_id=$1)
       ORDER BY e.submitted_at DESC NULLS LAST
-    `);
+    `, [departmentId]);
 
     const rows = result.rows.map(row => ({
       ...row,
-      exam_paper_url: row.exam_paper_url ? getFileUrl(req, row.exam_paper_url) : null
+      exam_paper_url: row.exam_paper_url ? getFileUrl(req, row.exam_paper_url) : null,
+      rubric_url: row.rubric_url ? getFileUrl(req, row.rubric_url) : null
     }));
 
     res.status(200).json({ status: 'success', queue: rows });
@@ -40,6 +50,7 @@ export const getQueue = async (req, res) => {
 export const reviewExam = async (req, res) => {
   const { exam_id, decision, comment } = req.body;
   try {
+    const departmentId = await getHodDepartmentId(req);
     const newStatus = decision === 'Approved' ? 'Approved' : 'Rejected';
     const approvedAt = newStatus === 'Approved' ? new Date() : null;
 
@@ -47,11 +58,18 @@ export const reviewExam = async (req, res) => {
       UPDATE exam
       SET status = $1, hod_comment = $2, approved_at = $3
       WHERE exam_id = $4
+        AND EXISTS (
+          SELECT 1 FROM course_offering co
+          JOIN course c ON c.course_id=co.course_id
+          JOIN program p ON p.program_id=c.program_id
+          WHERE co.course_offering_id=exam.course_offering_id
+            AND ($5::int IS NULL OR p.department_id=$5)
+        )
       RETURNING exam_id
-    `, [newStatus, comment || null, approvedAt, exam_id]);
+    `, [newStatus, comment || null, approvedAt, exam_id, departmentId]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'Exam paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Exam paper was not found in your department.' });
     }
 
     // Notify the teacher
@@ -116,6 +134,7 @@ export const reviewExam = async (req, res) => {
 =========================================================== */
 export const getDecisions = async (req, res) => {
   try {
+    const departmentId = await getHodDepartmentId(req);
     const result = await pool.query(`
       SELECT e.exam_id, e.exam_type, e.status as decision, e.hod_comment as notes, e.approved_at as date,
              c.course_code, c.course_title,
@@ -123,11 +142,12 @@ export const getDecisions = async (req, res) => {
       FROM exam e
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
+      JOIN program p ON c.program_id = p.program_id
       JOIN teacher t ON co.teacher_id = t.teacher_id
       JOIN users u ON t.user_id = u.user_id
-      WHERE e.status IN ('Approved', 'Rejected')
+      WHERE e.status IN ('Approved', 'Rejected') AND ($1::int IS NULL OR p.department_id=$1)
       ORDER BY e.approved_at DESC NULLS LAST
-    `);
+    `, [departmentId]);
     res.status(200).json({ status: 'success', decisions: result.rows });
   } catch (error) {
     console.error('Error fetching HOD decisions:', error);

@@ -14,12 +14,16 @@ import InvigilatorPage from "./pages/InvigilatorPage";
 import DECPage from "./pages/DECPage";
 import LiveDashboardPage from "./pages/LiveDashboardPage";
 import PostExamReportPage from "./pages/PostExamReportPage";
+import AdminPage from "./pages/AdminPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
-const dashboardPages = ["teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
+const dashboardPages = ["admin", "teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
 
 export default function App() {
+  const resetToken = new URLSearchParams(window.location.search).get("reset_token");
   const [user, setUser] = useState(() => {
     try {
       const saved = localStorage.getItem("proctr_user");
@@ -34,6 +38,7 @@ export default function App() {
   });
 
   const [page, setPage] = useState(() => {
+    if (resetToken) return "reset-password";
     const savedUser = localStorage.getItem("proctr_user");
     const savedPage = localStorage.getItem("proctr_page");
     if (savedUser && savedPage) {
@@ -47,7 +52,9 @@ export default function App() {
   const navigateTo = (p) => {
     setPage(p);
     setSidebarOpen(false);
-    if (p !== "login") {
+    if (p === "login" || p === "forgot-password" || p === "reset-password") {
+      localStorage.removeItem("proctr_page");
+    } else {
       localStorage.setItem("proctr_page", p);
     }
   };
@@ -63,6 +70,11 @@ export default function App() {
 
   function renderDashboardContent() {
     switch (page) {
+      case "admin":
+      case "admin-labs":
+      case "admin-settings":
+      case "admin-users":
+        return <AdminPage activePage={page} setPage={navigateTo} user={user} />;
       case "teacher":
         return <TeacherPage activePage="teacher" setPage={navigateTo} user={user} />;
       case "upload":
@@ -118,9 +130,11 @@ export default function App() {
     if (page === "home") return <Homepage setPage={navigateTo} />;
     if (page === "about") return <AboutPage setPage={navigateTo} />;
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
+    if (page === "forgot-password") return <ForgotPasswordPage setPage={navigateTo} />;
+    if (page === "reset-password") return <ResetPasswordPage token={resetToken} setPage={navigateTo} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["admin-labs", "admin-settings", "admin-users", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (

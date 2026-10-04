@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { C } from '../../theme/colors';
 import { Icon } from '../../theme/icons';
 import Btn from './Btn';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 export default function WhitelistBuilder({ examId, onChange }) {
   const [whitelist, setWhitelist] = useState([]);
@@ -12,7 +13,7 @@ export default function WhitelistBuilder({ examId, onChange }) {
   // Fetch initial whitelist if examId provided
   useEffect(() => {
     if (!examId) return;
-    fetch(`http://localhost:5000/api/whitelist/${examId}`)
+    fetch(`${API_BASE_URL}/whitelist/${examId}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
@@ -24,7 +25,7 @@ export default function WhitelistBuilder({ examId, onChange }) {
 
   // Fetch autocomplete suggestions as user types
   useEffect(() => {
-    fetch(`http://localhost:5000/api/whitelist/suggest?q=${encodeURIComponent(inputVal)}`)
+    fetch(`${API_BASE_URL}/whitelist/suggest?q=${encodeURIComponent(inputVal)}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
@@ -55,7 +56,7 @@ export default function WhitelistBuilder({ examId, onChange }) {
 
     // Save to API if examId exists
     if (examId) {
-      fetch(`http://localhost:5000/api/whitelist/${examId}`, {
+      fetch(`${API_BASE_URL}/whitelist/${examId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain: clean })
