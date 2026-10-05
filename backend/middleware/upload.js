@@ -43,6 +43,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 // ─── STORAGE ENGINES ─────────────────────────────────────────────
 let examPaperStorage;
 let imageStorage;
+let examAssetStorage;
 
 if (useCloudinary && CloudinaryStorage && cloudinary) {
   examPaperStorage = new CloudinaryStorage({
@@ -66,6 +67,19 @@ if (useCloudinary && CloudinaryStorage && cloudinary) {
       public_id: `avatar_${Date.now()}`,
     }),
   });
+
+  examAssetStorage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => {
+      const ext = path.extname(file.originalname).slice(1).toLowerCase() || 'bin';
+      const type = String(req.body?.file_type || 'attachment').replace(/[^a-z_]/gi, '');
+      return {
+        folder: `proctr/exam_assets/${type}`,
+        resource_type: 'raw',
+        public_id: `exam_${req.body?.exam_id || 'draft'}_${Date.now()}.${ext}`,
+      };
+    },
+  });
 } else {
   // Local disk storage fallback
   examPaperStorage = multer.diskStorage({
@@ -81,6 +95,13 @@ if (useCloudinary && CloudinaryStorage && cloudinary) {
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname);
       cb(null, `avatar_${Date.now()}_${Math.round(Math.random() * 1e4)}${ext}`);
+    },
+  });
+  examAssetStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+      const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `asset_${Date.now()}_${safeName}`);
     },
   });
 }
@@ -109,6 +130,27 @@ const imageFilter = (req, file, cb) => {
   }
 };
 
+const examAssetFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const fileType = req.body?.file_type;
+  const documentExtensions = ['.pdf', '.doc', '.docx'];
+  const starterExtensions = [
+    '.zip', '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.h',
+    '.cs', '.php', '.rb', '.go', '.rs', '.html', '.css', '.json', '.xml',
+    '.sql', '.txt', '.md', '.ipynb', '.xlsx', '.csv'
+  ];
+  const allowed = fileType === 'starter_file'
+    ? starterExtensions.includes(ext)
+    : documentExtensions.includes(ext);
+
+  if (allowed) return cb(null, true);
+  return cb(new Error(
+    fileType === 'starter_file'
+      ? 'Starter code must be a ZIP archive or a supported source-code file.'
+      : 'Question papers and rubrics must be PDF or Word files.'
+  ), false);
+};
+
 // ─── MULTER MIDDLEWARE EXPORTS ────────────────────────────────────
 export const uploadExamPaper = multer({
   storage: examPaperStorage,
@@ -120,6 +162,12 @@ export const uploadProfilePicture = multer({
   storage: imageStorage,
   fileFilter: imageFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
+export const uploadExamAsset = multer({
+  storage: examAssetStorage,
+  fileFilter: examAssetFilter,
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 // Aliases for backwards compatibility across existing routes

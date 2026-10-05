@@ -16,12 +16,10 @@
   "author": "PROCTR Development Team",
   "license": "MIT",
   "dependencies": {
+    "adm-zip": "^0.5.18",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "electron": "^28.2.0"
-  },
-  "dependencies": {
-    "socket.io-client": "^4.8.3"
   }
 }

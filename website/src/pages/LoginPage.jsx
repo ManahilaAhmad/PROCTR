@@ -182,6 +182,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
   const [shake, setShake] = useState(false);
 
   const roles = [
+    { id: "admin",       label: "System Administrator",  icon: Icon.server },
     { id: "student",     label: "Student",              icon: Icon.users },
     { id: "teacher",     label: "Teacher",              icon: Icon.clipboardList },
     { id: "hod",         label: "Head of Department",   icon: Icon.check },
@@ -197,14 +198,14 @@ export default function LoginPage({ setPage, setRole, setUser }) {
     setLoading(true);
     fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-PROCTR-Client": "web" },
+      credentials: "include",
       body: JSON.stringify({ email: email.trim(), password: pass.trim(), user_type: selectedRole }),
     })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error("Invalid credentials or server error.");
-        }
-        return res.json();
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || "Invalid credentials or server error.");
+        return data;
       })
       .then((data) => {
         setLoading(false);
@@ -212,6 +213,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
           setRole(data.user.userType);
           setUser(data.user);
           const dest = {
+            admin: "admin",
             student: "student",
             teacher: "teacher",
             hod: "hod",
@@ -318,6 +320,10 @@ export default function LoginPage({ setPage, setRole, setUser }) {
 
           <Input label="Email address" type="email" placeholder="you@university.edu" iconEl={Icon.mail} value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input label="Password" type="password" placeholder="••••••••" iconEl={Icon.lock} value={pass} onChange={(e) => setPass(e.target.value)} />
+
+          <button type="button" onClick={() => setPage("forgot-password")} style={{ display: "block", margin: "-8px 0 16px auto", border: 0, background: "transparent", color: C.teal, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            Forgot password?
+          </button>
 
           <button className="sign-btn" disabled={loading}
             onClick={handleLogin}

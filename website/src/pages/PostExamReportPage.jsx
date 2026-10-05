@@ -7,6 +7,7 @@ import Btn from '../components/common/Btn';
 import Table from '../components/common/Table';
 import StatCard from '../components/common/StatCard';
 import { RiskBadge, ViolationTimeline } from '../components/common/ExamMonitorComponents';
+import { API_BASE_URL } from '../config/apiConfig';
 
 export default function PostExamReportPage({ setPage, examId = 1 }) {
   const [summary, setSummary]   = useState([]);
@@ -16,14 +17,14 @@ export default function PostExamReportPage({ setPage, examId = 1 }) {
   const [studentEvents, setStudentEvents]     = useState([]);
 
   useEffect(() => {
-    fetch(`http://localhost:5000/api/proctoring/summary/${examId}`)
+    fetch(`${API_BASE_URL}/proctoring/summary/${examId}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') setSummary(data.summary);
       })
       .catch(() => {});
 
-    fetch(`http://localhost:5000/api/proctoring/events/${examId}`)
+    fetch(`${API_BASE_URL}/proctoring/events/${examId}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') setEvents(data.events);

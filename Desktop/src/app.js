@@ -6,6 +6,20 @@
 const API_BASE = window.proctrAPI?.apiBase || 'http://localhost:5000/api';
 const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
 
+// Attach the signed login session to every backend request while leaving
+// downloads or other third-party URLs untouched.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, options = {}) => {
+  const rawUrl = typeof input === 'string' ? input : input?.url;
+  if (!String(rawUrl || '').startsWith(SOCKET_BASE)) return nativeFetch(input, options);
+
+  const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+  if (currentUser?.sessionToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${currentUser.sessionToken}`);
+  }
+  return nativeFetch(input, { ...options, headers });
+};
+
 // ─── LIVE SOCKET CONNECTION (instant violation push to teacher dashboard) ──
 // Uses the socket.io client bundle vendored at src/vendor/socket.io.min.js
 // (loaded as a plain <script> tag before this file — no bundler in this app).
@@ -18,7 +32,10 @@ function getProctrSocket() {
     console.warn('[Socket] socket.io client not loaded — live push disabled, falling back to polling only.');
     return null;
   }
-  proctrSocket = io(SOCKET_BASE, { transports: ['websocket', 'polling'] });
+  proctrSocket = io(SOCKET_BASE, {
+    transports: ['websocket', 'polling'],
+    auth: { token: currentUser?.sessionToken || '' }
+  });
 
   proctrSocket.on('connect', () => {
     console.log('[Socket] Connected:', proctrSocket.id);
@@ -98,27 +115,48 @@ const whitelist = [
 function saveSession() {
   if (!currentUser) return;
   window.proctrAPI?.setSubmissionUser(currentUser).catch(console.error);
-  localStorage.setItem('proctr_session', JSON.stringify({ role: currentRole, user: currentUser }));
+  if (currentUser.sessionToken && window.proctrAPI?.storeSessionToken) {
+    window.proctrAPI.storeSessionToken(currentUser.sessionToken).catch(() => {});
+  }
+  const persistedUser = { ...currentUser };
+  delete persistedUser.sessionToken;
+  delete persistedUser.accessToken;
+  localStorage.setItem('proctr_session', JSON.stringify({ role: currentRole, user: persistedUser }));
 }
 
 function clearSession() {
   localStorage.removeItem('proctr_session');
+  window.proctrAPI?.clearSessionToken?.().catch(() => {});
 }
 
-function restoreSession() {
+async function restoreSession() {
   try {
     const saved = localStorage.getItem('proctr_session');
     if (!saved) return;
     const { role, user } = JSON.parse(saved);
     if (!user || !role) return;
 
+    const sessionToken = await window.proctrAPI?.getSessionToken?.();
+    if (!sessionToken) throw new Error('Secure session token is unavailable.');
     currentRole = role;
-    currentUser = user;
-    window.proctrAPI?.setSubmissionUser(user).catch(console.error);
+    currentUser = { ...user, sessionToken };
+    window.proctrAPI?.setSubmissionUser(currentUser).catch(console.error);
+
+    const sessionResponse = await fetch(`${API_BASE}/auth/session`);
+    const sessionData = await sessionResponse.json().catch(() => ({}));
+    if (!sessionResponse.ok || Number(sessionData.session?.userId) !== Number(user.userId) || sessionData.session?.userType !== user.userType) {
+      throw new Error('Saved session is no longer valid.');
+    }
+
+    // Sync the active role tab to match the restored session
+    document.querySelectorAll('.role-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.role === role);
+    });
 
     if (role === 'student') {
       populateStudentProfile(user);
       showView('view-student');
+      showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
       loadStudentData(user.userId);
     } else {
       populateTeacherHeader(user);
@@ -175,6 +213,12 @@ roleTabs.forEach(tab => {
     tab.classList.add('active');
     currentRole = tab.dataset.role;
 
+    // Clear any saved session so previous teacher/student session doesn't bleed into new login
+    clearSession();
+    loginError.style.display = 'none';
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+
     if (currentRole === 'teacher') {
       if (loginLabel) loginLabel.textContent = 'Teacher Email Address';
       if (loginUsername) loginUsername.placeholder = 'e.g. sumaira.naz@university.edu';
@@ -199,7 +243,7 @@ loginForm.addEventListener('submit', async (e) => {
   try {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-PROCTR-Client': 'desktop' },
       body: JSON.stringify({ email: username, password, user_type: currentRole }),
     });
 
@@ -212,6 +256,7 @@ loginForm.addEventListener('submit', async (e) => {
       if (currentRole === 'student') {
         populateStudentProfile(currentUser);
         showView('view-student');
+        showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
         loadStudentData(currentUser.userId);
       } else {
         populateTeacherHeader(currentUser);
@@ -234,11 +279,27 @@ loginForm.addEventListener('submit', async (e) => {
 });
 
 // ─── LOGOUT ──────────────────────────────────────────────────────
+async function revokeDesktopSession() {
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: currentUser?.sessionToken ? { Authorization: `Bearer ${currentUser.sessionToken}` } : {},
+    });
+  } catch {}
+  if (proctrSocket) {
+    proctrSocket.disconnect();
+    proctrSocket = null;
+    joinedSessionRoom = null;
+  }
+}
+
 document.getElementById('student-logout').addEventListener('click', async () => {
   const saved = await window.proctrAPI?.finishExamWork();
   if (saved?.status === 'error') { alert(saved.message); return; }
   if (saved?.pending) alert('Your backup is saved, but cloud confirmation is pending. PROCTR will keep retrying while running. Please notify the invigilator.');
   window.proctrAPI?.setSubmissionUser(null);
+  if (window.proctrAPI && window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+  await revokeDesktopSession();
   currentUser = null;
   currentSessionId = null;
   currentRole = 'student';
@@ -250,7 +311,9 @@ document.getElementById('student-logout').addEventListener('click', async () => 
   loginBtnTxt.textContent = 'Sign in to PROCTR';
 });
 
-document.getElementById('teacher-logout').addEventListener('click', () => {
+document.getElementById('teacher-logout').addEventListener('click', async () => {
+  if (window.proctrAPI && window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+  await revokeDesktopSession();
   currentUser = null;
   clearSession(); // Wipe saved session on explicit logout
   showView('view-login');
@@ -427,24 +490,27 @@ function renderStudentScheduleTable(schedule) {
       actionBtn = '<span style="font-size:11px; color:#94a3b8; font-style:italic;">—</span>';
     } else if (isLiveActive) {
       statusPill = '<span class="status-pill active-pill">⚡ Live Active</span>';
-      actionBtn = `<button class="btn-primary" style="padding:4px 10px; font-size:11px; width:auto;" onclick="selectExamToJoin('${item.course_code}')">⚡ Join Exam</button>`;
+      actionBtn = `<button class="btn-primary join-scheduled-exam" data-course-code="${escapeHtmlJS(item.course_code)}" style="padding:4px 10px; font-size:11px; width:auto;">⚡ Join Exam</button>`;
     } else {
       statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
-      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" onclick="alert('Session is not created yet. Please wait for your invigilator to create and start the live exam session.')">⏳ Waiting for Invigilator</button>`;
+      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" disabled title="Wait for your invigilator to create and start the session.">⏳ Waiting for Invigilator</button>`;
     }
 
     return `
       <tr>
-        <td><strong>${item.course_title}</strong></td>
-        <td class="mono">${item.course_code}</td>
-        <td>${dateStr}</td>
-        <td>${timeStr}</td>
-        <td>${roomStr}</td>
+        <td><strong>${escapeHtmlJS(item.course_title)}</strong></td>
+        <td class="mono">${escapeHtmlJS(item.course_code)}</td>
+        <td>${escapeHtmlJS(dateStr)}</td>
+        <td>${escapeHtmlJS(timeStr)}</td>
+        <td>${escapeHtmlJS(roomStr)}</td>
         <td>${statusPill}</td>
         <td>${actionBtn}</td>
       </tr>
     `;
   }).join('');
+  tbody.querySelectorAll('.join-scheduled-exam').forEach(button => {
+    button.addEventListener('click', () => selectExamToJoin(button.dataset.courseCode));
+  });
 }
 
 function selectExamToJoin(courseCode) {
@@ -476,10 +542,10 @@ function renderEnrolledCoursesGrid(schedule) {
   const courses = Array.from(coursesMap.values());
   container.innerHTML = courses.map(c => `
     <div class="course-card">
-      <div class="course-code">${c.course_code}</div>
-      <div class="course-name">${c.course_title}</div>
-      <div class="course-teacher">${c.teacher_name || 'Department Faculty'}</div>
-      <div class="course-credit">${c.credit_hours ? c.credit_hours + ' Credit Hours' : '3 Credit Hours'}</div>
+      <div class="course-code">${escapeHtmlJS(c.course_code)}</div>
+      <div class="course-name">${escapeHtmlJS(c.course_title)}</div>
+      <div class="course-teacher">${escapeHtmlJS(c.teacher_name || 'Department Faculty')}</div>
+      <div class="course-credit">${escapeHtmlJS(c.credit_hours ? c.credit_hours + ' Credit Hours' : '3 Credit Hours')}</div>
     </div>
   `).join('');
 }
@@ -527,10 +593,10 @@ function renderTeacherScheduleTable(schedule) {
   tbody.innerHTML = schedule.map(item => {
     const dateFormatted = item.exam_date ? new Date(item.exam_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Date TBD';
     const timeFormatted = (item.start_time && item.end_time) ? `${item.start_time.slice(0,5)} – ${item.end_time.slice(0,5)}` : 'Time TBD';
-    const roomStr = item.lab_name ? item.lab_name : '<span style="color:#94a3b8; font-style:italic;">Unassigned</span>';
-    const invigilatorStr = item.invigilator_name ? item.invigilator_name : '<span style="color:#94a3b8; font-style:italic;">Unassigned</span>';
+    const roomStr = item.lab_name ? escapeHtmlJS(item.lab_name) : '<span style="color:#94a3b8; font-style:italic;">Unassigned</span>';
+    const invigilatorStr = item.invigilator_name ? escapeHtmlJS(item.invigilator_name) : '<span style="color:#94a3b8; font-style:italic;">Unassigned</span>';
     const examId = item.exam_id || 0;
-    const courseCodeStr = (item.course_code || 'EXAM').replace(/'/g, "\\'");
+    const courseCodeStr = escapeHtmlJS(item.course_code || 'EXAM');
 
     // Role Tags
     let rolePills = '';
@@ -555,19 +621,19 @@ function renderTeacherScheduleTable(schedule) {
     let actionBtn = '';
     if (isCompleted) {
       // Exam was explicitly completed by invigilator
-      actionBtn = `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions & Logs</button>`;
+      actionBtn = `<button class="btn-action-secondary view-teacher-submissions">📁 View Submissions & Logs</button>`;
     } else if (isInvigilator) {
       // Assigned Invigilator can create & start live session
-      actionBtn = `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
+      actionBtn = `<button class="btn-action-primary create-live-session" data-exam-id="${Number(examId)}" data-course-code="${courseCodeStr}">⚡ Create Live Session</button>`;
     } else {
       // Course Instructor only (Not Invigilator)
-      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" disabled title="Only the assigned invigilator can start this session.">🔒 Invigilation: ${escapeHtmlJS(item.invigilator_name || 'Assigned')}</button>`;
     }
 
     return `
       <tr>
-        <td><strong style="color:var(--navy); font-size:13.5px;">${item.course_title}</strong></td>
-        <td class="mono">${item.course_code}</td>
+        <td><strong style="color:var(--navy); font-size:13.5px;">${escapeHtmlJS(item.course_title)}</strong></td>
+        <td class="mono">${escapeHtmlJS(item.course_code)}</td>
         <td>
           <div style="font-weight:600; color:var(--navy);">${dateFormatted}</div>
           <div style="font-size:11px; color:#64748b; margin-top:2px;">${timeFormatted}</div>
@@ -579,6 +645,12 @@ function renderTeacherScheduleTable(schedule) {
       </tr>
     `;
   }).join('');
+  tbody.querySelectorAll('.create-live-session').forEach(button => {
+    button.addEventListener('click', () => createInvigilationSession(Number(button.dataset.examId), button.dataset.courseCode));
+  });
+  tbody.querySelectorAll('.view-teacher-submissions').forEach(button => {
+    button.addEventListener('click', openTeacherSubmissions);
+  });
 }
 
 let activeInvigilationCode = null;
@@ -680,6 +752,8 @@ function clearStudentCandidateFilter() {
   }
 }
 window.clearStudentCandidateFilter = clearStudentCandidateFilter;
+document.getElementById('btn-clear-student-filter')?.addEventListener('click', clearStudentCandidateFilter);
+document.getElementById('clear-student-filter-inline')?.addEventListener('click', clearStudentCandidateFilter);
 
 function renderInvigilatorLiveRoomUI(session) {
   if (!session) return;
@@ -723,7 +797,7 @@ function renderInvigilatorLiveRoomUI(session) {
     } else {
       tbody.innerHTML = connectedList.map(s => `
         <tr>
-          <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
+          <td><strong>${escapeHtmlJS(s.name)}</strong> <span class="mono" style="font-size:11px;">(${escapeHtmlJS(s.reg_no)})</span></td>
           <td><span class="status-pill active-pill">Connected</span></td>
           <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
         </tr>
@@ -744,15 +818,15 @@ function renderInvigilatorLiveRoomUI(session) {
           : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">🟢 Clean</span>`;
 
         return `
-          <div class="candidate-card-item" data-reg-no="${studentReg}" onclick="selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
+          <div class="candidate-card-item" data-reg-no="${escapeHtmlJS(studentReg)}" data-student-name="${escapeHtmlJS(s.name)}" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <button type="button" title="View this student's notifications" onclick="event.stopPropagation(); selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="padding:0; border:0; background:none; font-size:14px; font-weight:800; color:var(--navy); cursor:pointer; text-align:left;">
-                ${s.name}
+              <button type="button" title="View this student's notifications" style="padding:0; border:0; background:none; font-size:14px; font-weight:800; color:var(--navy); cursor:pointer; text-align:left;">
+                ${escapeHtmlJS(s.name)}
               </button>
               ${violBadge}
             </div>
             <div style="font-size:12px; font-family:var(--font-mono); color:var(--grey-600); font-weight:600;">
-              Reg No: <span style="color:var(--teal);">${s.reg_no}</span>
+              Reg No: <span style="color:var(--teal);">${escapeHtmlJS(s.reg_no)}</span>
             </div>
             <div style="font-size:11px; color:var(--grey-400); margin-top:6px;">
               Joined at ${new Date(s.started_at || Date.now()).toLocaleTimeString()}
@@ -760,6 +834,9 @@ function renderInvigilatorLiveRoomUI(session) {
           </div>
         `;
       }).join('');
+      grid.querySelectorAll('.candidate-card-item').forEach(card => {
+        card.addEventListener('click', () => selectStudentCandidateFilter(card.dataset.regNo, card.dataset.studentName));
+      });
     }
   }
 
@@ -881,33 +958,33 @@ function renderInvigilatorFeeds(session) {
         const cleanSummary = formatCleanLogSummary(v);
         const occurrenceDetails = occurrences.map((occurrence, index) => `
               <div style="padding:8px 0; border-top:1px solid #e2e8f0;">
-                <strong>#${index + 1} · ${occurrence.timestamp ? new Date(occurrence.timestamp).toLocaleString() : 'Unknown time'}</strong>
-                <div style="margin-top:3px; color:#475569;">${occurrence.description || 'Detection recorded.'}</div>
+                <strong>#${index + 1} · ${escapeHtmlJS(occurrence.timestamp ? new Date(occurrence.timestamp).toLocaleString() : 'Unknown time')}</strong>
+                <div style="margin-top:3px; color:#475569;">${escapeHtmlJS(occurrence.description || 'Detection recorded.')}</div>
               </div>
             `).join('');
         const targetLabel = v.violation_code === 'H5' ? 'DNS/domain' : v.violation_code === 'H2' ? 'app/site' : 'violation';
 
         return `
-          <div class="alert-card" data-alert-id="${v.id}" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+          <div class="alert-card" data-alert-id="${escapeHtmlJS(v.id)}" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span style="font-size:13px; font-weight:800; color:#0f172a;">${v.name} <span class="mono" style="font-size:11px; color:#0284c7;">(${v.reg_no})</span></span>
-              <span style="font-size:10px; font-weight:800; background:${badgeBg}; color:${badgeColor}; padding:2px 8px; border-radius:10px;">${v.severity || 'HIGH'}</span>
+              <span style="font-size:13px; font-weight:800; color:#0f172a;">${escapeHtmlJS(v.name)} <span class="mono" style="font-size:11px; color:#0284c7;">(${escapeHtmlJS(v.reg_no)})</span></span>
+              <span style="font-size:10px; font-weight:800; background:${badgeBg}; color:${badgeColor}; padding:2px 8px; border-radius:10px;">${escapeHtmlJS(v.severity || 'HIGH')}</span>
             </div>
             <div style="font-size:13px; font-weight:700; color:#dc2626; margin-bottom:4px;">
-              ${v.surface_title || v.title}
+              ${escapeHtmlJS(v.surface_title || v.title)}
             </div>
             <div style="font-size:12.5px; color:#334155; font-weight:600; line-height:1.4; background:#f8fafc; padding:8px 12px; border-radius:6px; border-left:3px solid ${badgeColor}; margin-top:4px;">
-              📌 ${cleanSummary}
+              📌 ${escapeHtmlJS(cleanSummary)}
             </div>
             <div style="margin-top:8px; font-size:11px; color:#64748b;">
               Opened at <strong>${v.timestamp ? new Date(v.timestamp).toLocaleString() : 'Unknown time'}</strong>
             </div>
-            <details data-alert-id="${v.id}" ${openAlertDetails.has(String(v.id)) ? 'open' : ''} style="margin-top:8px; font-size:12px; color:#334155;">
+            <details data-alert-id="${escapeHtmlJS(v.id)}" ${openAlertDetails.has(String(v.id)) ? 'open' : ''} style="margin-top:8px; font-size:12px; color:#334155;">
               <summary style="cursor:pointer; font-weight:800; color:#0284c7;">View ${v.occurrenceCount || occurrences.length} ${targetLabel} detection${(v.occurrenceCount || occurrences.length) === 1 ? '' : 's'}</summary>
               <div style="margin-top:5px;">${occurrenceDetails}</div>
             </details>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:11px; color:#64748b;">
-              <span>Violation Code: <strong style="color:#0f172a; font-family:var(--font-mono);">${v.violation_code}</strong></span>
+              <span>Violation Code: <strong style="color:#0f172a; font-family:var(--font-mono);">${escapeHtmlJS(v.violation_code)}</strong></span>
               <span>${timeStr}</span>
             </div>
           </div>
@@ -1039,6 +1116,7 @@ if (roomBtnEnd) {
         if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
       }
       showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
+      await loadTeacherData(currentUser.userId);
     } catch (err) {
       console.error('Error ending session:', err);
     }
@@ -1131,14 +1209,20 @@ if (joinExamForm) {
       window.activeSessionCode = examCode;
       window.activeExamId = sessionObj.examId || null;
       autoSubmitTriggered = false; // fresh exam session — allow auto-submit to fire again
+      starterCodeInstalledForSession = null;
+      questionPaperLoadedForSession = null;
 
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         const result = await window.proctrAPI.startExamWorkspace({
-          examId: window.activeExamId,
+          examId: sessionObj.examId || window.activeExamId,
           studentId: currentUser.studentId,
           courseCode: examCode,
-          sessionCode: examCode
+          sessionCode: examCode,
+          securityPolicy: {
+            ...(sessionObj.securityPolicy || {}),
+            allowed_subnet: sessionObj.labNetworkRange || null
+          }
         });
 
         if (result.status === 'success') {
@@ -1186,6 +1270,30 @@ if (joinExamForm) {
 // ─── STUDENT SESSION POLLING FOR PAPER REVEAL & TIMER START ───────
 let studentPollInterval = null;
 let studentLocalCountdown = null;
+let starterCodeInstalledForSession = null;
+let questionPaperLoadedForSession = null;
+
+async function loadQuestionPaperPreview(iframe, paperUrl, sessionCode) {
+  const parsed = new URL(paperUrl, SOCKET_BASE);
+  const hostname = parsed.hostname.toLowerCase();
+  const isBackend = parsed.origin === new URL(SOCKET_BASE).origin;
+  const isCloudinary = parsed.protocol === 'https:' && (hostname === 'res.cloudinary.com' || hostname.endsWith('.cloudinary.com') || hostname.endsWith('.cloudinary.net'));
+  if (!isBackend && !isCloudinary) throw new Error('Question paper uses an untrusted file location.');
+
+  const response = await fetch(parsed.toString());
+  if (!response.ok) throw new Error('Question paper could not be downloaded.');
+  const blob = await response.blob();
+  const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'question-paper');
+  const isWordDoc = /\.(docx?|rtf)$/i.test(fileName) || /wordprocessingml|msword/.test(blob.type);
+  if (isWordDoc) {
+    await downloadAuthenticatedResource(parsed.toString(), fileName);
+    iframe.srcdoc = '<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#0f172a"><h3>Question paper downloaded</h3><p>Open the downloaded Word document using the approved exam application. The paper was fetched securely without sharing its URL with a third-party viewer.</p></body></html>';
+  } else {
+    const objectUrl = URL.createObjectURL(blob);
+    iframe.src = `${objectUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+  }
+  questionPaperLoadedForSession = sessionCode;
+}
 
 function startStudentSessionPoll(sessionCode) {
   if (studentPollInterval) clearInterval(studentPollInterval);
@@ -1212,7 +1320,10 @@ function startStudentSessionPoll(sessionCode) {
         // Auto-submit whatever's in the workspace the moment the session ends
         if (!autoSubmitTriggered) {
           autoSubmitTriggered = true;
-          performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Session ended:', r));
+          performExamSubmission('AUTO').then(r => {
+            console.log('[AutoSubmit] Session ended:', r);
+            if (r?.status === 'success') enableLeaveExamButton();
+          });
         }
 
         const statusEl = document.getElementById('exam-status-text');
@@ -1226,7 +1337,7 @@ function startStudentSessionPoll(sessionCode) {
         const placeholder = document.getElementById('student-paper-placeholder');
         const iframe = document.getElementById('student-paper-iframe');
 
-        if (placeholder && iframe && iframe.style.display === 'none') {
+        if (placeholder && iframe && questionPaperLoadedForSession !== sessionCode) {
           placeholder.style.display = 'none';
           iframe.style.display = 'block';
 
@@ -1241,11 +1352,11 @@ function startStudentSessionPoll(sessionCode) {
               paperUrl = `${SOCKET_BASE}${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
             }
 
-            const isWordDoc = paperUrl.toLowerCase().includes('.docx') || paperUrl.toLowerCase().includes('.doc');
-            if (isWordDoc) {
-              iframe.src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(paperUrl)}`;
-            } else {
-              iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+            try {
+              await loadQuestionPaperPreview(iframe, paperUrl, sessionCode);
+            } catch (error) {
+              questionPaperLoadedForSession = sessionCode;
+              iframe.srcdoc = `<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#991b1b"><h3>Unable to open question paper</h3><p>${escapeHtmlJS(error.message)}</p></body></html>`;
             }
           } else {
             // Render protected HTML document if no PDF URL uploaded
@@ -1272,6 +1383,22 @@ function startStudentSessionPoll(sessionCode) {
               </html>
             `);
             doc.close();
+            questionPaperLoadedForSession = sessionCode;
+          }
+        }
+
+        if (session.starterFileUrl && activeWorkspacePath && starterCodeInstalledForSession !== sessionCode) {
+          starterCodeInstalledForSession = sessionCode;
+          const installed = await window.proctrAPI?.installStarterCode?.({
+            workspacePath: activeWorkspacePath,
+            fileUrl: session.starterFileUrl,
+            originalName: session.starterFileName
+          });
+          if (!installed || installed.status !== 'success') {
+            starterCodeInstalledForSession = null;
+            console.error('Starter-code installation failed:', installed?.message);
+          } else {
+            console.log(`Starter code installed at ${installed.starterPath}`);
           }
         }
       }
@@ -1292,7 +1419,10 @@ function startStudentSessionPoll(sessionCode) {
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
                 autoSubmitTriggered = true;
-                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+                performExamSubmission('AUTO').then(r => {
+                  console.log('[AutoSubmit] Timer expired:', r);
+                  if (r?.status === 'success') enableLeaveExamButton();
+                });
               }
               return;
             }
@@ -1301,7 +1431,7 @@ function startStudentSessionPoll(sessionCode) {
 
             // 5-Minute Warning: show pulsing banner
             if (warningEl) {
-              if (secs <= 300) {
+              if (secs <= (session.warningSeconds || 300)) {
                 warningEl.style.display = 'flex';
               } else {
                 warningEl.style.display = 'none';
@@ -1328,13 +1458,16 @@ function startStudentSessionPoll(sessionCode) {
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
                 autoSubmitTriggered = true;
-                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+                performExamSubmission('AUTO').then(r => {
+                  console.log('[AutoSubmit] Timer expired:', r);
+                  if (r?.status === 'success') enableLeaveExamButton();
+                });
               }
               return;
             }
             if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
             if (warningEl) {
-              warningEl.style.display = secs <= 300 ? 'flex' : 'none';
+              warningEl.style.display = secs <= (session.warningSeconds || 300) ? 'flex' : 'none';
             }
             secs--;
           };
@@ -1395,6 +1528,38 @@ function startExamTimer() {
 // upserts on (exam_id, student_id), so a later call just replaces the files.
 let autoSubmitTriggered = false;
 let submissionInFlight = null;
+
+function enableLeaveExamButton() {
+  const button = document.getElementById('btn-leave-exam');
+  if (button) button.style.display = 'inline-flex';
+}
+
+async function leaveStudentExamEnvironment() {
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (window.activeSessionCode && studentId) {
+    const response = await fetch(`${API_BASE}/desktop/session/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-PROCTR-Client': 'desktop' },
+      body: JSON.stringify({ session_code: window.activeSessionCode, student_id: studentId })
+    });
+    if (!response.ok && response.status !== 404) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || 'Could not leave the exam environment.');
+    }
+  }
+  if (studentPollInterval) clearInterval(studentPollInterval);
+  if (studentLocalCountdown) clearInterval(studentLocalCountdown);
+  if (window.proctrAPI?.stopSensors) await window.proctrAPI.stopSensors();
+  if (window.proctrAPI?.setScreenProtection) await window.proctrAPI.setScreenProtection(false);
+  const leaveButton = document.getElementById('btn-leave-exam');
+  if (leaveButton) leaveButton.style.display = 'none';
+  window.activeSessionCode = null;
+  window.activeSessionId = null;
+  window.activeExamId = null;
+  activeWorkspacePath = null;
+  showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
+  await loadStudentData(currentUser.userId);
+}
 
 async function performExamSubmission(type) {
   if (submissionInFlight) return submissionInFlight;
@@ -1458,14 +1623,52 @@ async function uploadExamSubmission(type) {
     sessionCode: window.activeSessionCode,
     workspacePath: activeWorkspacePath,
     submissionType: type,
-    apiBase: API_BASE
+    apiBase: API_BASE,
+    sessionToken: currentUser?.sessionToken
   });
 }
 
 const submitExamBtn = document.getElementById('btn-submit-exam');
 if (submitExamBtn) {
   submitExamBtn.addEventListener('click', async () => {
-    await performExamSubmission('MANUAL');
+    const status = document.getElementById('submit-status');
+    submitExamBtn.disabled = true;
+    submitExamBtn.textContent = 'Submitting...';
+
+    const result = await performExamSubmission('MANUAL');
+
+    if (result.status === 'success') {
+      submitExamBtn.textContent = '✓ Submitted';
+      if (status) {
+        status.textContent = `✅ ${result.message || 'Your submission has been sent successfully.'}`;
+        status.style.display = 'block';
+        status.style.color = 'var(--teal)';
+      }
+      enableLeaveExamButton();
+    } else {
+      submitExamBtn.disabled = false;
+      submitExamBtn.textContent = '✓ Submit Solution';
+      if (status) {
+        status.textContent = `✖ ${result.message || 'Submission failed — you can try again.'}`;
+        status.style.display = 'block';
+        status.style.color = '#dc2626';
+      }
+    }
+  });
+}
+
+const leaveExamBtn = document.getElementById('btn-leave-exam');
+if (leaveExamBtn) {
+  leaveExamBtn.addEventListener('click', async () => {
+    if (!confirm('Leave the secure exam environment? Make sure your final work has been submitted.')) return;
+    leaveExamBtn.disabled = true;
+    try {
+      await leaveStudentExamEnvironment();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      leaveExamBtn.disabled = false;
+    }
   });
 }
 
@@ -1549,17 +1752,23 @@ async function loadStudentLabFiles(courseOfferingId, labLabel) {
       <table class="file-list-table">
         <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
         <tbody>
-          ${files.map(f => `
-            <tr>
-              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
-              <td>${formatFileSize(f.file_size)}</td>
-              <td><a class="file-download" href="${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}&download=true" target="_blank">Download</a></td>
-            </tr>
-          `).join('')}
+          ${files.map(f => {
+            const downloadUrl = `${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}&download=true`;
+            return `
+              <tr>
+                <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+                <td>${formatFileSize(f.file_size)}</td>
+                <td><button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(downloadUrl)}" data-name="${escapeHtmlJS(f.relative_path)}">Download</button></td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>`}
     `;
     document.getElementById('back-to-labs').addEventListener('click', loadStudentSubmittedWork);
+    root.querySelectorAll('.authenticated-download').forEach(button => {
+      button.addEventListener('click', () => downloadAuthenticatedResource(button.dataset.url, button.dataset.name));
+    });
   } catch (err) {
     root.innerHTML = `<div class="empty-state">Could not load files: ${escapeHtmlJS(err.message)}</div>`;
   }
@@ -1575,14 +1784,49 @@ function getPreviewKind(name) {
   return 'unsupported';
 }
 
+async function downloadAuthenticatedResource(resourceUrl, suggestedName) {
+  try {
+    const parsed = new URL(resourceUrl, window.location.href);
+    const hostname = parsed.hostname.toLowerCase();
+    const isBackend = parsed.origin === new URL(SOCKET_BASE).origin;
+    const isCloudinary = parsed.protocol === 'https:' && (hostname === 'res.cloudinary.com' || hostname.endsWith('.cloudinary.com') || hostname.endsWith('.cloudinary.net'));
+    if (!isBackend && !isCloudinary) throw new Error('Untrusted resource origin.');
+    const response = await fetch(parsed.toString());
+    if (!response.ok) throw new Error('The file could not be downloaded.');
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = String(suggestedName || 'download').split(/[\\/]/).pop() || 'download';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch (error) {
+    alert(error.message || 'The file could not be downloaded.');
+  }
+}
+
 function openResourceInViewer(resourceUrl, title) {
   const modal = document.getElementById('submission-viewer-modal');
   const iframe = document.getElementById('submission-viewer-iframe');
   const message = document.getElementById('submission-viewer-message');
   const titleEl = document.getElementById('submission-viewer-title');
 
+  let parsedResource;
+  try {
+    parsedResource = new URL(resourceUrl, window.location.href);
+    if (parsedResource.origin !== new URL(SOCKET_BASE).origin) throw new Error('Untrusted resource origin.');
+  } catch {
+    alert('This file location is not trusted and cannot be opened.');
+    return;
+  }
+  const safeResourceUrl = parsedResource.toString();
+  const downloadResource = new URL(safeResourceUrl);
+  downloadResource.searchParams.set('download', 'true');
+  const safeDownloadUrl = downloadResource.toString();
+
   if (!modal || !iframe || !message || !titleEl) {
-    void downloadSubmission(resourceUrl);
+    void downloadSubmission(safeResourceUrl);
     return;
   }
 
@@ -1594,18 +1838,19 @@ function openResourceInViewer(resourceUrl, title) {
   message.style.display = 'none';
   modal.style.display = 'flex';
 
-  submissionFetch(resourceUrl)
+  submissionFetch(safeResourceUrl, { credentials: 'include' })
     .then(async (res) => {
       if (!res.ok) throw new Error('The file could not be opened.');
 
       const mimeType = (res.headers.get('content-type') || '').toLowerCase();
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
-      const previewKind = getPreviewKind(title || resourceUrl);
+      const previewKind = getPreviewKind(title || safeResourceUrl);
 
       if (previewKind === 'html' || mimeType.includes('text/html') || mimeType.includes('application/xhtml+xml')) {
         const html = await blob.text();
-        iframe.srcdoc = html;
+        const safeText = escapeHtmlJS(html);
+        iframe.srcdoc = `<html><body style="font-family:ui-monospace,Consolas,monospace;padding:20px;line-height:1.5;white-space:pre-wrap;background:#fff;color:#0f172a;"><strong>HTML source preview (scripts are not executed)</strong><hr>${safeText}</body></html>`;
         iframe.style.display = 'block';
         return;
       }
@@ -1637,7 +1882,7 @@ function openResourceInViewer(resourceUrl, title) {
             <div style="padding:26px; line-height:1.7;">
               <strong>This file is empty.</strong>
               <p>There is no content to preview yet.</p>
-              <p><a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download file</a></p>
+              <p><a href="${escapeHtmlJS(safeDownloadUrl)}" target="_blank" rel="noopener noreferrer">Download file</a></p>
             </div>
           `;
           message.style.display = 'block';
@@ -1656,26 +1901,21 @@ function openResourceInViewer(resourceUrl, title) {
         return;
       }
 
-      const fallbackWindow = window.open(objectUrl, '_blank', 'noopener,noreferrer');
-      if (fallbackWindow) {
-        modal.style.display = 'none';
-      } else {
-        message.innerHTML = `
-          <div style="padding:26px; line-height:1.7;">
-            <strong>Preview is not available for this file type.</strong>
-            <p>Open it in a separate tab or download it to your computer.</p>
-            <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
-          </div>
-        `;
-        message.style.display = 'block';
-      }
+      message.innerHTML = `
+        <div style="padding:26px; line-height:1.7;">
+          <strong>Preview is not available for this file type.</strong>
+          <p>Download the file to inspect it with the appropriate application.</p>
+          <p><a href="${escapeHtmlJS(safeDownloadUrl)}" target="_blank" rel="noopener noreferrer">Download</a></p>
+        </div>
+      `;
+      message.style.display = 'block';
     })
     .catch((err) => {
       message.innerHTML = `
         <div style="padding:26px; line-height:1.7;">
           <strong>Unable to open this file.</strong>
           <p>${escapeHtmlJS(err.message || 'The preview could not be generated.')}</p>
-          <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
+          <p><a href="${escapeHtmlJS(safeDownloadUrl)}" target="_blank" rel="noopener noreferrer">Download</a></p>
         </div>
       `;
       message.style.display = 'block';
@@ -1794,29 +2034,38 @@ async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel
           <div style="font-size:11.5px; color:var(--grey-500); margin-top:2px;">Filterable by severity (Critical / High / Medium / Low) — open in browser or download at any time.</div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <a class="report-btn" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false', 'Security Log Report'); return false;">📖 Open Security Log Report</a>
-          <a class="file-download" href="${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true" target="_blank">⬇ Download</a>
+          <button type="button" class="report-btn open-secure-resource" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false`)}" data-title="Security Log Report">📖 Open Security Log Report</button>
+          <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true`)}" data-name="security_log_report.html">⬇ Download</button>
         </div>
       </div>` : ''}
       ${files.length === 0 ? '<div class="empty-state">No files in this submission.</div>' : `
       <table class="file-list-table">
         <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
         <tbody>
-          ${files.map(f => `
-            <tr>
-              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
-              <td>${formatFileSize(f.file_size)}</td>
-              <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
-                <a class="file-download" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=false', '${escapeHtmlJS(f.relative_path)}'); return false;">Open</a>
-                <a class="file-download" href="${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=true" target="_blank">Download</a>
-              </td>
-            </tr>
-          `).join('')}
+          ${files.map(f => {
+            const fileUrl = `${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}`;
+            return `
+              <tr>
+                <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+                <td>${formatFileSize(f.file_size)}</td>
+                <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                  <button type="button" class="file-download open-secure-resource" data-url="${escapeHtmlJS(`${fileUrl}&download=false`)}" data-title="${escapeHtmlJS(f.relative_path)}">Open</button>
+                  <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${fileUrl}&download=true`)}" data-name="${escapeHtmlJS(f.relative_path)}">Download</button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>`}
     `;
     document.getElementById('back-to-teacher-labs2').addEventListener('click', loadTeacherSubmissionLabs);
     document.getElementById('back-to-lab-students').addEventListener('click', () => loadLabStudents(courseOfferingId, labLabel));
+    root.querySelectorAll('.open-secure-resource').forEach(button => {
+      button.addEventListener('click', () => openResourceInViewer(button.dataset.url, button.dataset.title));
+    });
+    root.querySelectorAll('.authenticated-download').forEach(button => {
+      button.addEventListener('click', () => downloadAuthenticatedResource(button.dataset.url, button.dataset.name));
+    });
   } catch (err) {
     root.innerHTML = `<div class="empty-state">Could not load submission: ${escapeHtmlJS(err.message)}</div>`;
   }
@@ -1899,7 +2148,8 @@ function renderWhitelist() {
   whitelist.forEach((item, i) => {
     const div = document.createElement('div');
     div.className = 'whitelist-item';
-    div.innerHTML = `<span>🔓 ${item}</span><button class="btn-remove" onclick="removeWhitelistItem(${i})">Remove</button>`;
+    div.innerHTML = `<span>🔓 ${escapeHtmlJS(item)}</span><button class="btn-remove" data-index="${i}">Remove</button>`;
+    div.querySelector('.btn-remove').addEventListener('click', () => removeWhitelistItem(i));
     container.appendChild(div);
   });
 }
@@ -1941,17 +2191,17 @@ function addViolationCard(v, feedId, counterId) {
   const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
   const card = document.createElement('div');
   card.className = 'alert-card';
-  const detValue = v.detected_value ? `<div style="font-family:monospace;font-size:11px;background:rgba(239,68,68,0.1);padding:4px 8px;border-radius:4px;margin-top:6px;word-break:break-all;">${v.detected_value}</div>` : '';
+  const detValue = v.detected_value ? `<div style="font-family:monospace;font-size:11px;background:rgba(239,68,68,0.1);padding:4px 8px;border-radius:4px;margin-top:6px;word-break:break-all;">${escapeHtmlJS(v.detected_value)}</div>` : '';
   card.innerHTML = `
     <div style="flex:1">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <span class="alert-title-text">${v.title || 'Security Violation'}</span>
-        <span class="alert-code-badge">${v.code || 'H?'}</span>
+        <span class="alert-title-text">${escapeHtmlJS(v.title || 'Security Violation')}</span>
+        <span class="alert-code-badge">${escapeHtmlJS(v.code || 'H?')}</span>
       </div>
-      <div class="alert-desc-text">${v.description || ''}</div>
+      <div class="alert-desc-text">${escapeHtmlJS(v.description || '')}</div>
       ${detValue}
       <div style="display:flex;justify-content:space-between;margin-top:8px;">
-        <span class="alert-severity">${v.severity || 'HIGH'}</span>
+        <span class="alert-severity">${escapeHtmlJS(v.severity || 'HIGH')}</span>
         <span class="alert-time-text">${timeStr}</span>
       </div>
     </div>
@@ -2047,8 +2297,8 @@ function submissionFetch(url, options = {}) {
   const target = new URL(url, API_BASE);
   const base = new URL(API_BASE);
   const headers = new Headers(options.headers);
-  if (target.origin === base.origin && target.pathname.startsWith(`${base.pathname}/submission/`) && currentUser?.accessToken) {
-    headers.set('Authorization', `Bearer ${currentUser.accessToken}`);
+  if (target.origin === base.origin && target.pathname.startsWith(`${base.pathname}/submission/`) && currentUser?.sessionToken) {
+    headers.set('Authorization', `Bearer ${currentUser.sessionToken}`);
   }
   return fetch(url, { ...options, headers });
 }

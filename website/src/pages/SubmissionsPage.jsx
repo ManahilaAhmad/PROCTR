@@ -23,14 +23,14 @@ export default function SubmissionsPage({ user }) {
   useEffect(() => {
     const abort = new AbortController();
     fetch(`${API_BASE_URL}${endpoint}`, {
-      headers: { Authorization: `Bearer ${user?.accessToken || ''}` }, signal: abort.signal
+      credentials: 'include', signal: abort.signal
     }).then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Could not load submissions.');
       if (!abort.signal.aborted) { setData(result); setError(''); }
     }).catch(err => { if (!abort.signal.aborted) { setError(err.message); setData(null); } });
     return () => abort.abort();
-  }, [endpoint, user?.accessToken, version]);
+  }, [endpoint, version]);
 
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview]);
 
@@ -38,7 +38,7 @@ export default function SubmissionsPage({ user }) {
     setBusy(true);
     setError('');
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, { headers: { Authorization: `Bearer ${user.accessToken || ''}` } });
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, { credentials: 'include' });
       if (!response.ok) {
         const result = await response.json();
         throw new Error(result.message || 'Could not retrieve the file.');

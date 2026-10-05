@@ -7,6 +7,7 @@ import Card from '../components/common/Card';
 import Btn from '../components/common/Btn';
 import StatCard from '../components/common/StatCard';
 import { StudentRiskCard, ViolationTimeline, ExamTimer, RiskBadge } from '../components/common/ExamMonitorComponents';
+import { API_BASE_URL, SERVER_BASE_URL } from '../config/apiConfig';
 
 export default function LiveDashboardPage({ setPage, examId = 1 }) {
   const [summary, setSummary] = useState([]);
@@ -18,14 +19,14 @@ export default function LiveDashboardPage({ setPage, examId = 1 }) {
 
   // Fetch initial summary and events
   const fetchData = () => {
-    fetch(`http://localhost:5000/api/proctoring/summary/${examId}`)
+    fetch(`${API_BASE_URL}/proctoring/summary/${examId}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') setSummary(data.summary);
       })
       .catch(() => {});
 
-    fetch(`http://localhost:5000/api/proctoring/events/${examId}`)
+    fetch(`${API_BASE_URL}/proctoring/events/${examId}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') setEvents(data.events);
@@ -37,7 +38,7 @@ export default function LiveDashboardPage({ setPage, examId = 1 }) {
     fetchData();
 
     // Connect to Socket.IO backend
-    const socket = io('http://localhost:5000');
+    const socket = io(SERVER_BASE_URL);
 
     socket.on('connect', () => {
       setIsConnected(true);

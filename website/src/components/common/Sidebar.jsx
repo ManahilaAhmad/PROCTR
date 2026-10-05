@@ -2,8 +2,15 @@ import { C } from "../../theme/colors";
 import { Icon } from "../../theme/icons";
 
 const navItems = {
+  admin: [
+    { id: "admin", icon: Icon.chart, label: "Control Center" },
+    { id: "admin-labs", icon: Icon.server, label: "Labs & Networks" },
+    { id: "admin-settings", icon: Icon.shield, label: "System Settings" },
+    { id: "admin-users", icon: Icon.users, label: "User Management" },
+    { id: "admin-security", icon: Icon.shield, label: "Security Audit" },
+  ],
   teacher: [
-    { id: 'submissions', icon: Icon.fileText, label: 'Submitted Work' },
+    { id: "submissions", icon: Icon.fileText, label: "Submitted Work" },
     { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
     { id: "upload", icon: Icon.upload, label: "Upload Exam" },
     { id: "live-monitor", icon: Icon.bell, label: "Live Monitor" },
@@ -12,7 +19,7 @@ const navItems = {
     { id: "inv-schedule", icon: Icon.clipboard, label: "My Schedule" },
   ],
   student: [
-    { id: 'submissions', icon: Icon.fileText, label: 'Submitted Work' },
+    { id: "submissions", icon: Icon.fileText, label: "Submitted Work" },
     { id: "student", icon: Icon.home, label: "Dashboard" },
     { id: "results", icon: Icon.chart, label: "My Results" },
   ],

@@ -5,6 +5,7 @@ import {
   prepareSubmissionFiles, normalizeSubmissionPath, uploadSubmissionAssets,
   deleteSubmissionAssets, readSubmissionAsset
 } from '../service/submissionStorage.js';
+import { auditSecurityEvent, clientIp } from '../middleware/security.js';
 
 // Same H-code labels used by the live monitoring feed (desktop_violation_log)
 // — kept in sync so a violation reads the same way whether it's live or in
@@ -187,11 +188,14 @@ function escapeHtml(str) {
 export const uploadSubmission = async (req, res) => {
   const { exam_id, student_id, mac_address, files } = req.body;
 
-  if (!exam_id || !student_id) {
+  if (!/^\d+$/.test(String(exam_id || '')) || !/^\d+$/.test(String(student_id || ''))) {
     return res.status(400).json({ status: 'error', message: 'exam_id and student_id are required.' });
   }
   if (!Array.isArray(files)) {
     return res.status(400).json({ status: 'error', message: 'files must be an array.' });
+  }
+  if (files.length > 500) {
+    return res.status(413).json({ status: 'error', message: 'A submission may contain at most 500 files.' });
   }
 
   let manifest;
@@ -265,13 +269,16 @@ export const uploadSubmission = async (req, res) => {
     }
 
     // ── IP / MAC — both NOT NULL in schema.sql, capture them for real ──
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
-    const ipAddress = String(rawIp).split(',')[0].replace('::ffff:', '').trim() || '0.0.0.0';
-    const macAddress = (mac_address && String(mac_address).trim()) || '00:00:00:00:00:00';
+    const ipAddress = clientIp(req) || '0.0.0.0';
+    const suppliedMac = String(mac_address || '').trim().toLowerCase();
+    const macAddress = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(suppliedMac) ? suppliedMac : '00:00:00:00:00:00';
 
     if (attempt) {
       const result = await commitSubmissionAttempt(attempt, manifest, ipAddress, macAddress);
       committed = true;
+      if (!result.discardNew) {
+        auditSecurityEvent(req, { eventType: 'EXAM_SUBMISSION_UPLOADED', outcome: 'SUCCESS', objectType: 'student_submission', objectId: result.receipt.submission_id, metadata: { examId: Number(exam_id), fileCount: preparedFiles.length } }).catch(() => {});
+      }
       res.status(200).json(result.receipt);
       if (result.discardNew) await deleteSubmissionAssets(manifest).catch(() => {});
       return;
@@ -311,6 +318,8 @@ export const uploadSubmission = async (req, res) => {
     } finally {
       client.release();
     }
+    auditSecurityEvent(req, { eventType: 'EXAM_SUBMISSION_UPLOADED', outcome: 'SUCCESS', objectType: 'student_submission', objectId: subResult.rows[0].submission_id, metadata: { examId: Number(exam_id), fileCount: preparedFiles.length } }).catch(() => {});
+
     res.status(200).json({
       status: 'success',
       message: `Submission saved to Cloudinary: ${preparedFiles.length} file(s) uploaded.`,
@@ -537,15 +546,18 @@ export const getStudentOwnFiles = async (req, res) => {
 =========================================================== */
 export const downloadFile = async (req, res) => {
   const { submissionId } = req.params;
-  const { relativePath, teacherId, studentId, download } = req.query;
+  const { relativePath, download } = req.query;
   const shouldDownload = String(download || '').toLowerCase() === 'true';
 
   try {
     const subRes = await pool.query(
-      `SELECT ss.submission_manifest, ss.student_id, e.course_offering_id, co.teacher_id
+      `SELECT ss.submission_manifest, ss.student_id, e.course_offering_id, co.teacher_id,
+              s.user_id AS student_user_id, t.user_id AS teacher_user_id
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       JOIN student s ON s.student_id=ss.student_id
+       JOIN teacher t ON t.teacher_id=co.teacher_id
        WHERE ss.submission_id = $1`,
       [submissionId]
     );
@@ -555,9 +567,11 @@ export const downloadFile = async (req, res) => {
     const row = subRes.rows[0];
 
     // Ownership: either the owning student, or the owning teacher — nobody else.
-    const isOwningStudent = studentId && String(row.student_id) === String(studentId);
-    const isOwningTeacher = teacherId && String(row.teacher_id) === String(teacherId);
-    if (!isOwningStudent && !isOwningTeacher) {
+    const actorId = String(req.sessionUser?.sub || '');
+    const authorized = req.sessionUser?.role === 'admin'
+      || (req.sessionUser?.role === 'student' && actorId === String(row.student_user_id))
+      || (req.sessionUser?.role === 'teacher' && actorId === String(row.teacher_user_id));
+    if (!authorized) {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this file.' });
     }
 
@@ -586,10 +600,11 @@ export const downloadReport = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT ss.submission_manifest, co.teacher_id, s.registration_no
+      `SELECT ss.submission_manifest, co.teacher_id, s.registration_no, t.user_id AS teacher_user_id
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+       JOIN teacher t ON t.teacher_id=co.teacher_id
        JOIN student s ON ss.student_id = s.student_id
        WHERE ss.submission_id = $1`,
       [submissionId]
@@ -597,7 +612,8 @@ export const downloadReport = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Submission not found.' });
     }
-    if (String(result.rows[0].teacher_id) !== String(teacherId)) {
+    if (req.sessionUser?.role !== 'admin' && (String(result.rows[0].teacher_id) !== String(teacherId)
+        || String(result.rows[0].teacher_user_id) !== String(req.sessionUser?.sub))) {
       return res.status(403).json({ status: 'error', message: 'You do not have access to this report.' });
     }
     const report = requireManifest(result.rows[0]).report;

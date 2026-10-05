@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Tray, Menu, nat
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const http = require('http');
+const https = require('https');
+const AdmZip = require('adm-zip');
 const { SubmissionQueue } = require('./submissionQueue');
 const { requestJson } = require('./apiClient');
 const API_BASE = (process.env.PROCTR_API_BASE || 'http://localhost:5000/api').replace(/\/$/, '');
@@ -30,7 +33,7 @@ function backupActiveSubmission(webContentsId) {
   const activeSubmission = activeSubmissions.get(webContentsId);
   const signedInUser = signedInUsers.get(webContentsId);
   if (!activeSubmission) return null;
-  const job = submissionQueue.save({ ...activeSubmission, apiBase: API_BASE, accessToken: signedInUser?.accessToken, macAddress: getMacAddress() });
+  const job = submissionQueue.save({ ...activeSubmission, apiBase: API_BASE, accessToken: signedInUser?.sessionToken || signedInUser?.accessToken, macAddress: getMacAddress() });
   activeSubmission.requestId = job.requestId;
   return job;
 }
@@ -50,6 +53,30 @@ function showQueueStatus() {
     message: pending.length ? `${pending.length} submission(s) still need cloud confirmation. Keep this PC on.` : 'All saved submissions have cloud receipts.',
     detail: `Backup folder: ${submissionQueue.directory}` });
 }
+
+function sessionTokenPath() {
+  return path.join(app.getPath('userData'), 'secure-session.bin');
+}
+
+ipcMain.handle('store-session-token', (_event, token) => {
+  if (!safeStorage.isEncryptionAvailable() || typeof token !== 'string' || !token) return false;
+  fs.writeFileSync(sessionTokenPath(), safeStorage.encryptString(token), { mode: 0o600 });
+  return true;
+});
+
+ipcMain.handle('get-session-token', () => {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(sessionTokenPath())) return null;
+    return safeStorage.decryptString(fs.readFileSync(sessionTokenPath()));
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('clear-session-token', () => {
+  try { if (fs.existsSync(sessionTokenPath())) fs.rmSync(sessionTokenPath()); } catch {}
+  return true;
+});
 
 function createWindow() {
   const windowId = ++windowCounter;
@@ -75,6 +102,13 @@ function createWindow() {
 
   examWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+  // The desktop renderer is a local application, so it must never be
+  // navigated to content supplied by an exam file or database value.
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (!navigationUrl.startsWith('file:')) event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   // Intercept window close to warn student
   examWindow.on('close', (e) => {
     if (quitting || examWindow.__allowClose) return;
@@ -98,7 +132,7 @@ function createWindow() {
   // Sensors are spawned ONLY when a student actively joins an exam workspace via start-exam-workspace.
 }
 
-function startPythonSensors(examId, studentId, targetWebContents) {
+function startPythonSensors(examId, studentId, securityPolicy = {}, targetWebContents) {
   const pythonScriptPath = path.join(__dirname, 'python_sensors', 'main.py');
   
   // Use python executable from system path
@@ -109,6 +143,14 @@ function startPythonSensors(examId, studentId, targetWebContents) {
   ]);
 
   console.log('[Electron] Spawned Python Background Sensor Engine PID:', pythonProcess.pid);
+
+  const policyCommand = {
+    type: 'UPDATE_SECURITY_POLICY',
+    allowed_subnet: securityPolicy.allowed_subnet,
+    clipboard_threshold_chars: securityPolicy.clipboard_threshold_chars,
+    focus_loss_seconds: securityPolicy.focus_loss_seconds,
+  };
+  pythonProcess.stdin.write(`${JSON.stringify(policyCommand)}\n`);
 
   // Listen to JSON lines printed by Python sensors
   pythonProcess.stdout.on('data', (data) => {
@@ -140,7 +182,7 @@ function startPythonSensors(examId, studentId, targetWebContents) {
 
 // ─── ENSURE ROOT EXAMS DIRECTORY ON APP STARTUP ────────────────────
 function ensureRootExamsDirectory() {
-  const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+  const rootDir = getExamRoot();
   try {
     if (!fs.existsSync(rootDir)) {
       fs.mkdirSync(rootDir, { recursive: true });
@@ -196,14 +238,149 @@ app.whenReady().then(() => {
   });
 });
 
+function runRestoreDefaultsSync() {
+  const restoreScript = path.join(__dirname, 'python_sensors', 'restore_network_defaults.py');
+  try {
+    const { execSync } = require('child_process');
+    execSync(`python "${restoreScript}"`, { stdio: 'ignore', timeout: 5000 });
+    console.log('[Electron] Guaranteed OS System Settings Restored to Default.');
+  } catch (err) {
+    console.log('[Electron Cleanup Note]:', err.message);
+  }
+}
+
 app.on('window-all-closed', () => {
   if (pythonProcess) {
-    pythonProcess.kill();
+    try { pythonProcess.kill(); } catch (e) {}
   }
+  runRestoreDefaultsSync();
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Identify the machine in the submitted receipt.
+app.on('will-quit', () => {
+  if (pythonProcess) {
+    try { pythonProcess.kill(); } catch (e) {}
+  }
+  runRestoreDefaultsSync();
+});
+
+// ─── HELPER: POST JSON to the backend (main process, no browser fetch needed) ──
+function postJson(urlString, bodyObj, sessionToken = null) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlString);
+      const body = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
+      const req = http.request({
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': body.length,
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
+        },
+        timeout: 30000
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed = null;
+          try { parsed = JSON.parse(data); } catch { parsed = { status: 'error', message: 'Invalid response from server.' }; }
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => { req.destroy(new Error('Request timed out')); });
+      req.write(body);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function getExamRoot() {
+  return path.resolve(process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(os.homedir(), 'PROCTR_Exams'));
+}
+
+function requireExamWorkspace(candidatePath) {
+  const root = getExamRoot();
+  const resolved = path.resolve(String(candidatePath || ''));
+  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error('The requested path is outside the PROCTR exam workspace.');
+  }
+  return resolved;
+}
+
+function downloadBuffer(urlString, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(urlString);
+      const hostname = parsedUrl.hostname.toLowerCase();
+      const allowedCloudinaryHost = hostname === 'res.cloudinary.com' || hostname.endsWith('.cloudinary.com') || hostname.endsWith('.cloudinary.net');
+      if (parsedUrl.protocol !== 'https:' || !allowedCloudinaryHost) throw new Error('Starter code must use an approved HTTPS Cloudinary URL.');
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const request = https.get(parsedUrl, { timeout: 30000 }, response => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirectsLeft > 0) {
+        response.resume();
+        return resolve(downloadBuffer(new URL(response.headers.location, urlString).toString(), redirectsLeft - 1));
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        response.resume();
+        return reject(new Error(`Starter-code download failed (HTTP ${response.statusCode}).`));
+      }
+      const chunks = [];
+      let total = 0;
+      response.on('data', chunk => {
+        total += chunk.length;
+        if (total > 50 * 1024 * 1024) request.destroy(new Error('Starter-code package exceeds the 50 MB download limit.'));
+        else chunks.push(chunk);
+      });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    request.on('timeout', () => request.destroy(new Error('Starter-code download timed out.')));
+    request.on('error', reject);
+  });
+}
+
+// ─── HELPER: Recursively collect every file inside a folder.
+// Optionally skip specific top-level subfolder names (by exact name match
+// at the root level only, e.g. 'logs' — local sensor logs, not solution work).
+// Whatever is on disk gets read and submitted exactly as-is — including
+// empty files. No retries, no validation, no second-guessing content.
+function collectFilesRecursive(rootDir, currentDir, out, skipTopLevelNames = []) {
+  if (!fs.existsSync(currentDir)) return out;
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    const isTopLevel = currentDir === rootDir;
+    if (isTopLevel && entry.isDirectory() && skipTopLevelNames.includes(entry.name)) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      collectFilesRecursive(rootDir, fullPath, out, skipTopLevelNames);
+    } else if (entry.isFile()) {
+      if (out.length >= 2000) throw new Error('Submission contains too many files (maximum 2000).');
+      const relativePath = path.relative(rootDir, fullPath).split(path.sep).join('/');
+      const buffer = fs.readFileSync(fullPath);
+      if (buffer.length > 10 * 1024 * 1024) throw new Error(`Submission file is larger than 10 MB: ${relativePath}`);
+      const currentTotal = out.reduce((sum, file) => sum + file.size, 0);
+      if (currentTotal + buffer.length > 20 * 1024 * 1024) throw new Error('Submission is larger than the 20 MB total limit.');
+      out.push({
+        relativePath,
+        contentBase64: buffer.toString('base64'),
+        size: buffer.length
+      });
+    }
+  }
+  return out;
+}
+
 function getMacAddress() {
   try {
     const interfaces = os.networkInterfaces();
@@ -227,7 +404,7 @@ app.on('before-quit', () => {
 ipcMain.handle('set-submission-user', (event, user) => {
   if (user) signedInUsers.set(event.sender.id, user);
   else signedInUsers.delete(event.sender.id);
-  if (user?.studentId && user?.accessToken) submissionQueue.refreshToken(user.studentId, API_BASE, user.accessToken);
+  if (user?.studentId && (user?.sessionToken || user?.accessToken)) submissionQueue.refreshToken(user.studentId, API_BASE, user.sessionToken || user.accessToken);
   void flushSubmissions();
 });
 ipcMain.handle('submission-backups', event => {
@@ -248,14 +425,16 @@ ipcMain.handle('stop-sensors', () => {
     console.log('[Electron] Stopping Python Sensor Process PID:', pythonProcess.pid);
     pythonProcess.kill();
     pythonProcess = null;
+    runRestoreDefaultsSync();
     return { status: 'stopped' };
   }
+  runRestoreDefaultsSync();
   return { status: 'no_process' };
 });
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
-ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, sessionCode, isStudent }) => {
-  const rootDir = process.platform === 'win32' ? 'C:\\PROCTR_Exams' : path.join(require('os').homedir(), 'PROCTR_Exams');
+ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, sessionCode, isStudent, securityPolicy }) => {
+  const rootDir = getExamRoot();
   
   // Ensure Root directory exists
   if (!fs.existsSync(rootDir)) {
@@ -284,7 +463,7 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
       if (pythonProcess) {
         pythonProcess.kill();
       }
-      startPythonSensors(examId || 1, studentId || 101, event.sender);
+  startPythonSensors(examId || 1, studentId || 101, securityPolicy || {}, event.sender);
     }
 
     if (isStudent !== false) activeSubmissions.set(event.sender.id, { workspacePath, examId, studentId });
@@ -300,11 +479,50 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
   }
 });
 
+// Downloads the released Cloudinary starter package only after the backend
+// reports that the invigilator has revealed the exam materials.
+ipcMain.handle('install-starter-code', async (event, { workspacePath, fileUrl, originalName }) => {
+  try {
+    if (!workspacePath || !fileUrl) return { status: 'error', message: 'Starter-code location is missing.' };
+    const starterRoot = path.resolve(requireExamWorkspace(workspacePath), 'starter_code');
+    fs.mkdirSync(starterRoot, { recursive: true });
+    const buffer = await downloadBuffer(fileUrl);
+    const requestedName = path.basename(originalName || new URL(fileUrl).pathname || 'starter_code');
+
+    if (requestedName.toLowerCase().endsWith('.zip')) {
+      const archive = new AdmZip(buffer);
+      const entries = archive.getEntries();
+      if (entries.length > 2000) throw new Error('Starter-code archive contains too many files.');
+      const expandedBytes = entries.reduce((sum, entry) => sum + Number(entry.header?.size || 0), 0);
+      if (expandedBytes > 200 * 1024 * 1024) throw new Error('Starter-code archive expands beyond the 200 MB limit.');
+      for (const entry of entries) {
+        const destination = path.resolve(starterRoot, entry.entryName);
+        if (destination !== starterRoot && !destination.startsWith(`${starterRoot}${path.sep}`)) {
+          throw new Error('Unsafe path detected in starter-code archive.');
+        }
+        if (entry.isDirectory) fs.mkdirSync(destination, { recursive: true });
+        else {
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.writeFileSync(destination, entry.getData());
+        }
+      }
+    } else {
+      const safeName = requestedName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'starter_code.txt';
+      fs.writeFileSync(path.join(starterRoot, safeName), buffer);
+    }
+
+    return { status: 'success', starterPath: starterRoot };
+  } catch (error) {
+    console.error('[StarterCode] Installation failed:', error.message);
+    return { status: 'error', message: error.message };
+  }
+});
+
 // IPC Handler to Open Exam Workspace Folder in Windows Explorer
 ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
   if (!folderPath) return { status: 'error', message: 'No folder path provided' };
   try {
-    await shell.openPath(folderPath);
+    await shell.openPath(requireExamWorkspace(folderPath));
     return { status: 'success' };
   } catch (err) {
     return { status: 'error', message: err.message };

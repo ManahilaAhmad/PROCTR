@@ -2,7 +2,7 @@
 PROCTR — Fuzzy AI Microservice API
 ===================================
 Flask sidecar server wrapping fuzzy_engine.py.
-Receives telemetry evaluation requests from the desktop app / host service.
+Receives telemetry evaluation requests from the desktop app / host service...
 """
 
 from flask import Flask, request, jsonify
