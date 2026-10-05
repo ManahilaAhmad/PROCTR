@@ -62,11 +62,25 @@
           </button>
           <div class="login-options">
             <label class="login-remember"><input type="checkbox" />Remember me</label>
-            <span class="login-forgot">Forgot password?</span>
+            <button type="button" class="login-forgot" id="forgot-password-btn">Forgot password?</button>
           </div>
         </form>
       </div>
       </div>
+    </div>
+  </div>
+
+  <div id="forgot-password-modal" class="desktop-modal" hidden role="dialog" aria-modal="true" aria-labelledby="forgot-password-title">
+    <div class="desktop-modal-card">
+      <button type="button" id="forgot-password-close" class="desktop-modal-close" aria-label="Close">×</button>
+      <h2 id="forgot-password-title">Reset your password</h2>
+      <p>Enter your university email or student registration number. If an active account matches, we will email a reset link.</p>
+      <form id="forgot-password-form">
+        <label for="forgot-password-identifier">University email or registration number</label>
+        <input id="forgot-password-identifier" type="text" class="field-input" autocomplete="username" required />
+        <div id="forgot-password-message" class="error-banner" style="display:none;"></div>
+        <button type="submit" class="btn-primary" id="forgot-password-submit">Send reset link</button>
+      </form>
     </div>
   </div>
 
@@ -564,6 +578,15 @@
                 <button class="btn-primary" id="room-btn-end" style="padding:10px 16px; font-size:12px; width:auto; background:#ef4444;">🔴 End Session</button>
               </div>
             </div>
+          </div>
+
+          <!-- Out-of-range network approval requests -->
+          <div class="card" id="network-access-requests-card" style="display:none; margin-bottom:20px; border-left:5px solid #d97706;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <span>Network Access Requests (<span id="network-request-count">0</span>)</span>
+              <span style="font-size:11px; color:var(--grey-500); font-weight:600;">Students outside the assigned lab range require approval</span>
+            </div>
+            <div id="network-access-requests-list"></div>
           </div>
 
           <!-- Connected Candidates Grid -->
