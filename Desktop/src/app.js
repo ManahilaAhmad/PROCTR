@@ -3,7 +3,84 @@
  * Connected to Express.js Backend (http://localhost:5000/api) & Neon PostgreSQL
  */
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = window.proctrAPI?.apiBase || 'http://localhost:5000/api';
+const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
+
+// ─── LIVE SOCKET CONNECTION (instant violation push to teacher dashboard) ──
+// Uses the socket.io client bundle vendored at src/vendor/socket.io.min.js
+// (loaded as a plain <script> tag before this file — no bundler in this app).
+let proctrSocket = null;
+let joinedSessionRoom = null;
+
+function getProctrSocket() {
+  if (proctrSocket) return proctrSocket;
+  if (typeof io === 'undefined') {
+    console.warn('[Socket] socket.io client not loaded — live push disabled, falling back to polling only.');
+    return null;
+  }
+  proctrSocket = io(SOCKET_BASE, { transports: ['websocket', 'polling'] });
+
+  proctrSocket.on('connect', () => {
+    console.log('[Socket] Connected:', proctrSocket.id);
+    // Re-join the session room on reconnect (e.g. after backend restart)
+    if (joinedSessionRoom) {
+      proctrSocket.emit('join_room', { sessionCode: joinedSessionRoom });
+    }
+  });
+
+  proctrSocket.on('disconnect', () => {
+    console.warn('[Socket] Disconnected — live push paused, polling continues as fallback.');
+  });
+
+  // Fired by the backend the instant a student's desktop client reports a
+  // hard violation for a session this teacher client has joined.
+  proctrSocket.on('live_violation', (v) => {
+    handleLiveViolationPush(v);
+  });
+
+  proctrSocket.on('live_violation_update', (v) => {
+    handleLiveViolationPush(v);
+  });
+
+  return proctrSocket;
+}
+
+function joinSessionRoom(sessionCode) {
+  if (!sessionCode) return;
+  const codeUpper = String(sessionCode).trim().toUpperCase();
+  joinedSessionRoom = codeUpper;
+  const socket = getProctrSocket();
+  if (socket) {
+    // If already connected, emit right away; otherwise the 'connect' handler above will do it.
+    if (socket.connected) {
+      socket.emit('join_room', { sessionCode: codeUpper });
+    }
+  }
+}
+
+// Merges a pushed violation into the currently-cached session data and
+// re-renders immediately, so the teacher sees it with zero delay instead
+// of waiting for the next 3s poll tick. The next poll will simply confirm
+// the same data from the database (harmless, keeps things eventually consistent
+// if a push is ever missed e.g. brief disconnect).
+function handleLiveViolationPush(v) {
+  if (!v) return;
+  if (!window.lastPollSessionData) {
+    // Live room UI hasn't done its first poll yet — it will pick this up shortly.
+    return;
+  }
+  const violations = window.lastPollSessionData.recentViolations || [];
+  const existingIndex = violations.findIndex(x => String(x.id) === String(v.id));
+  if (existingIndex >= 0) {
+    violations[existingIndex] = v;
+  } else {
+    violations.unshift(v);
+  }
+  window.lastPollSessionData.recentViolations = violations;
+  if (typeof renderInvigilatorLiveRoomUI === 'function') {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
 
 // ─── STATE ────────────────────────────────────────────────────────
 let currentRole = 'student'; // 'student' | 'teacher'
@@ -20,6 +97,7 @@ const whitelist = [
 // ─── SESSION PERSISTENCE (survive normal + forced reloads) ─────────
 function saveSession() {
   if (!currentUser) return;
+  window.proctrAPI?.setSubmissionUser(currentUser).catch(console.error);
   localStorage.setItem('proctr_session', JSON.stringify({ role: currentRole, user: currentUser }));
 }
 
@@ -36,6 +114,7 @@ function restoreSession() {
 
     currentRole = role;
     currentUser = user;
+    window.proctrAPI?.setSubmissionUser(user).catch(console.error);
 
     if (role === 'student') {
       populateStudentProfile(user);
@@ -155,7 +234,11 @@ loginForm.addEventListener('submit', async (e) => {
 });
 
 // ─── LOGOUT ──────────────────────────────────────────────────────
-document.getElementById('student-logout').addEventListener('click', () => {
+document.getElementById('student-logout').addEventListener('click', async () => {
+  const saved = await window.proctrAPI?.finishExamWork();
+  if (saved?.status === 'error') { alert(saved.message); return; }
+  if (saved?.pending) alert('Your backup is saved, but cloud confirmation is pending. PROCTR will keep retrying while running. Please notify the invigilator.');
+  window.proctrAPI?.setSubmissionUser(null);
   currentUser = null;
   currentSessionId = null;
   currentRole = 'student';
@@ -179,6 +262,7 @@ document.querySelectorAll('#view-student .nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
     const section = 'section-' + btn.dataset.section;
     showSection(section, document.querySelectorAll('#view-student .nav-item'));
+    if (section === 'section-s-submission') loadStudentSubmittedWork();
   });
 });
 
@@ -186,6 +270,7 @@ document.querySelectorAll('#view-teacher .nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
     const section = 'section-' + btn.dataset.section;
     showSection(section, document.querySelectorAll('#view-teacher .nav-item'));
+    if (section === 'section-t-submissions') loadTeacherSubmissionLabs();
   });
 });
 
@@ -455,7 +540,7 @@ function renderTeacherScheduleTable(schedule) {
 
     // Check permissions: Is current user the assigned Invigilator for this exam?
     const isInvigilator = item.is_invigilator || (item.invigilator_id && String(item.invigilator_id) === String(currentUser?.teacherId));
-    const isCompleted = item.status === 'Completed' || item.status === 'ENDED' || item.exam_status === 'Completed' || item.live_session_status === 'COMPLETED';
+    const isCompleted = item.live_session_status === 'ENDED' || item.live_session_status === 'COMPLETED';
     const hasSubmissions = item.submission_count > 0;
 
     // Check if exam date+end_time has already passed
@@ -468,17 +553,15 @@ function renderTeacherScheduleTable(schedule) {
     }
 
     let actionBtn = '';
-    if (isCompleted || (examExpired && hasSubmissions)) {
-      // Exam was conducted & submissions exist
+    if (isCompleted) {
+      // Exam was explicitly completed by invigilator
       actionBtn = `<button class="btn-action-secondary" onclick="openTeacherSubmissions()">📁 View Submissions & Logs</button>`;
-    } else if (examExpired && !hasSubmissions) {
-      // Date passed but exam was never conducted
-      actionBtn = `<span style="display:inline-flex; align-items:center; gap:5px; background:#fee2e2; color:#b91c1c; padding:5px 10px; border-radius:8px; font-size:11px; font-weight:700;">❌ Exam Not Conducted</span>`;
     } else if (isInvigilator) {
+      // Assigned Invigilator can create & start live session
       actionBtn = `<button class="btn-action-primary" onclick="createInvigilationSession(${examId}, '${courseCodeStr}')">⚡ Create Live Session</button>`;
     } else {
-      // Course Instructor only (Not Invigilator) — exam not yet expired
-      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session. All student submissions, reports, and logs will be sent to your portal when the exam finishes.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
+      // Course Instructor only (Not Invigilator)
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" onclick="alert('Invigilation is assigned to ${item.invigilator_name || 'another teacher'}. Only the assigned invigilator can start the live exam session.')">🔒 Invigilation: ${item.invigilator_name || 'Assigned'}</button>`;
     }
 
     return `
@@ -522,12 +605,13 @@ async function createInvigilationSession(examId, courseCode) {
         await window.proctrAPI.startExamWorkspace({
           examId: String(examId || '1'),
           studentId: '101',
-          courseCode: courseCode
+          courseCode: courseCode,
+          isStudent: false // Teacher's own PC must NOT spawn the sensor engine
         });
       }
 
-      // Switch view to Dedicated Live Control Room
-      showSection('section-t-live-room', document.querySelectorAll('#view-teacher .nav-item'));
+      // Switch view to the unified Live Monitoring workspace
+      showSection('section-t-monitoring', document.querySelectorAll('#view-teacher .nav-item'));
 
       // Populate Live Room UI
       const codeEl = document.getElementById('room-session-code');
@@ -537,7 +621,10 @@ async function createInvigilationSession(examId, courseCode) {
       const titleEl = document.getElementById('live-room-course-title');
       if (titleEl) titleEl.textContent = `${courseCode} — Live Lab Exam Session`;
 
-      // Start Polling Live Connected Students & Security Feed
+      // Join the live socket room for this session so violations push instantly
+      joinSessionRoom(data.session.session_code);
+
+      // Start Polling Live Connected Students & Security Feed (fallback/backfill)
       pollInvigilatorLiveRoom(data.session.session_code);
     }
   } catch (err) {
@@ -557,7 +644,289 @@ function formatSecondsToHMS(secs) {
 
 let teacherLocalCountdown = null; // client-side ticking interval for teacher timer
 
+let selectedStudentFilter = null;
+window.lastPollSessionData = null;
+
+function selectStudentCandidateFilter(regNo, name) {
+  const targetReg = String(regNo);
+  if (selectedStudentFilter === targetReg) {
+    clearStudentCandidateFilter();
+    return;
+  }
+  selectedStudentFilter = targetReg;
+
+  const header = document.getElementById('filter-active-header');
+  const nameEl = document.getElementById('filter-student-name');
+  const btnClear = document.getElementById('btn-clear-student-filter');
+  if (header) header.style.display = 'flex';
+  if (nameEl) nameEl.textContent = `${name} (${regNo})`;
+  if (btnClear) btnClear.style.display = 'inline-block';
+
+  if (window.lastPollSessionData) {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
+window.selectStudentCandidateFilter = selectStudentCandidateFilter;
+
+function clearStudentCandidateFilter() {
+  selectedStudentFilter = null;
+  const header = document.getElementById('filter-active-header');
+  const btnClear = document.getElementById('btn-clear-student-filter');
+  if (header) header.style.display = 'none';
+  if (btnClear) btnClear.style.display = 'none';
+
+  if (window.lastPollSessionData) {
+    renderInvigilatorLiveRoomUI(window.lastPollSessionData);
+  }
+}
+window.clearStudentCandidateFilter = clearStudentCandidateFilter;
+
+function renderInvigilatorLiveRoomUI(session) {
+  if (!session) return;
+
+  // 1. Update connected count
+  const connEl = document.getElementById('room-connected-count');
+  if (connEl) connEl.textContent = `${session.connectedStudents || 0} Connected`;
+
+  const statConn = document.getElementById('stat-connected');
+  if (statConn) statConn.textContent = session.connectedStudents || 0;
+
+  const candCountVal = document.getElementById('candidate-count-val');
+  if (candCountVal) candCountVal.textContent = session.connectedStudents || 0;
+
+  // 2. Sync teacher countdown from server
+  if (session.secondsRemaining !== null && session.secondsRemaining !== undefined) {
+    if (teacherLocalCountdown) clearInterval(teacherLocalCountdown);
+    let secs = Math.max(0, session.secondsRemaining);
+    const timerEl = document.getElementById('teacher-timer');
+    if (timerEl) {
+      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+    }
+    teacherLocalCountdown = setInterval(() => {
+      secs = Math.max(0, secs - 1);
+      const el = document.getElementById('teacher-timer');
+      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      if (secs <= 0) clearInterval(teacherLocalCountdown);
+    }, 1000);
+  }
+
+  // 3. Render Connected Candidates Grid
+  const grid = document.getElementById('monitoring-candidates-grid');
+  const tbody = document.getElementById('room-students-tbody');
+
+  const connectedList = session.connectedList || [];
+  const recentViolations = session.recentViolations || [];
+
+  if (tbody) {
+    if (connectedList.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">Waiting for students to join with Passcode...</td></tr>';
+    } else {
+      tbody.innerHTML = connectedList.map(s => `
+        <tr>
+          <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
+          <td><span class="status-pill active-pill">Connected</span></td>
+          <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  if (grid) {
+    if (connectedList.length === 0) {
+      grid.innerHTML = '<div class="empty-state" style="padding:20px; grid-column:1/-1;">Waiting for candidate PCs to join live session...</div>';
+    } else {
+      grid.innerHTML = connectedList.map(s => {
+        const studentReg = String(s.reg_no);
+        const studentViolations = recentViolations.filter(v => String(v.reg_no) === studentReg || String(v.student_id) === String(s.student_id));
+        const isSelected = selectedStudentFilter === studentReg;
+        const violBadge = studentViolations.length > 0
+          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">🚨 ${studentViolations.length} Alert(s)</span>`
+          : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">🟢 Clean</span>`;
+
+        return `
+          <div class="candidate-card-item" data-reg-no="${studentReg}" onclick="selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <button type="button" title="View this student's notifications" onclick="event.stopPropagation(); selectStudentCandidateFilter('${studentReg}', '${s.name.replace(/'/g, "\\'")}')" style="padding:0; border:0; background:none; font-size:14px; font-weight:800; color:var(--navy); cursor:pointer; text-align:left;">
+                ${s.name}
+              </button>
+              ${violBadge}
+            </div>
+            <div style="font-size:12px; font-family:var(--font-mono); color:var(--grey-600); font-weight:600;">
+              Reg No: <span style="color:var(--teal);">${s.reg_no}</span>
+            </div>
+            <div style="font-size:11px; color:var(--grey-400); margin-top:6px;">
+              Joined at ${new Date(s.started_at || Date.now()).toLocaleTimeString()}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // Render Security Feeds (Filtered if selectedStudentFilter is active)
+  renderInvigilatorFeeds(session);
+}
+
+function formatCleanLogSummary(v) {
+  const code = v.violation_code || v.code || 'H2';
+  const name = v.name || 'Student';
+  const reg = v.reg_no || '231593';
+  const desc = v.description || v.detected_value || '';
+  const title = v.surface_title || v.title || 'Security Violation';
+
+  let actionText = '';
+
+  if (code === 'H1') {
+    actionText = `connected an unauthorized USB Storage Device.`;
+  } else if (code === 'H2') {
+    const descLower = desc.toLowerCase();
+    if (descLower.includes('claude')) {
+      actionText = `opened Claude AI website.`;
+    } else if (descLower.includes('chatgpt') || descLower.includes('openai')) {
+      actionText = `opened ChatGPT AI website.`;
+    } else if (descLower.includes('gemini') || descLower.includes('bard')) {
+      actionText = `opened Google Gemini AI website.`;
+    } else if (descLower.includes('copilot') || descLower.includes('perplexity')) {
+      actionText = `opened AI Assistant website.`;
+    } else if (desc.includes('Opened') || desc.includes('opened')) {
+      const siteMatch = desc.match(/'([^']+)'/);
+      const siteName = siteMatch ? siteMatch[1] : 'unauthorized application/website';
+      actionText = `opened '${siteName}'.`;
+    } else {
+      actionText = `accessed an unauthorized process/website.`;
+    }
+  } else if (code === 'H4a') {
+    const charMatch = desc.match(/(\d+)\s*characters/i);
+    const charCount = charMatch ? `${charMatch[1]} characters` : 'external text';
+    actionText = `attempted copy-paste breach (${charCount} into workspace).`;
+  } else if (code === 'H3') {
+    const secMatch = desc.match(/for\s*(\d+)\s*seconds/i);
+    const durationStr = secMatch ? `for ${secMatch[1]}s` : '';
+    actionText = `switched focus away from exam workspace ${durationStr}.`;
+  } else if (code === 'N1') {
+    actionText = `connected to an unauthorized non-lab network / mobile hotspot.`;
+  } else {
+    actionText = title || 'triggered a security violation.';
+  }
+
+  return `${name} (${reg}) ${actionText}`;
+}
+
+function renderInvigilatorFeeds(session) {
+  const roomFeed = document.getElementById('room-alerts-feed');
+  const teacherFeed = document.getElementById('teacher-feed');
+  const alertsCount = document.getElementById('room-alerts-count');
+  const teacherAlertCount = document.getElementById('teacher-alert-count');
+  const statTotalViolations = document.getElementById('stat-total-violations');
+
+  let violations = session.recentViolations || [];
+  if (selectedStudentFilter) {
+    violations = violations.filter(v => String(v.reg_no) === selectedStudentFilter || String(v.student_id) === selectedStudentFilter);
+  }
+
+  const groupedViolations = Array.from(violations.reduce((groups, violation) => {
+    const groupKey = `${violation.student_id || violation.reg_no}:${violation.violation_code || violation.code || 'H0'}`;
+    const group = groups.get(groupKey);
+    if (group) {
+      group.occurrences.push({
+        timestamp: violation.timestamp,
+        title: violation.surface_title || violation.title,
+        description: violation.description || violation.detected_value || '',
+        severity: violation.severity || 'HIGH'
+      });
+      group.lastTimestamp = violation.timestamp || group.lastTimestamp;
+    } else {
+      groups.set(groupKey, {
+        ...violation,
+        id: `group-${groupKey}`,
+        occurrences: [{
+          timestamp: violation.timestamp,
+          title: violation.surface_title || violation.title,
+          description: violation.description || violation.detected_value || '',
+          severity: violation.severity || 'HIGH'
+        }],
+        occurrenceCount: 1,
+        lastTimestamp: violation.timestamp
+      });
+    }
+    if (group) group.occurrenceCount += 1;
+    return groups;
+  }, new Map()).values());
+
+  if (alertsCount) alertsCount.textContent = `${groupedViolations.length} Alert(s)`;
+  if (teacherAlertCount) teacherAlertCount.textContent = `${groupedViolations.length} Alert(s)`;
+  if (statTotalViolations) statTotalViolations.textContent = session.recentViolations?.length || 0;
+
+  const openAlertDetails = new Set(
+    Array.from(document.querySelectorAll('#teacher-feed details[data-alert-id][open]'))
+      .map(details => details.dataset.alertId)
+  );
+  const alertFingerprint = JSON.stringify(groupedViolations.map(v => ({
+    id: v.id,
+    occurrenceCount: v.occurrenceCount,
+    lastDetectedAt: v.lastDetectedAt,
+    description: v.description,
+    occurrences: v.occurrences
+  })));
+
+  const feedHTML = groupedViolations.length === 0
+    ? `<div class="empty-state" style="padding:24px;">${selectedStudentFilter ? 'No security violations recorded for this candidate.' : 'Monitoring is active. Security alerts will stream here live.'}</div>`
+    : groupedViolations.map(v => {
+        const timeStr = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const occurrences = Array.isArray(v.occurrences) && v.occurrences.length > 0
+          ? v.occurrences
+          : [{ timestamp: v.timestamp, description: v.description || '' }];
+        const badgeColor = v.severity === 'CRITICAL' ? '#dc2626' : '#d97706';
+        const badgeBg = v.severity === 'CRITICAL' ? '#fee2e2' : '#fef3c7';
+        const cleanSummary = formatCleanLogSummary(v);
+        const occurrenceDetails = occurrences.map((occurrence, index) => `
+              <div style="padding:8px 0; border-top:1px solid #e2e8f0;">
+                <strong>#${index + 1} · ${occurrence.timestamp ? new Date(occurrence.timestamp).toLocaleString() : 'Unknown time'}</strong>
+                <div style="margin-top:3px; color:#475569;">${occurrence.description || 'Detection recorded.'}</div>
+              </div>
+            `).join('');
+        const targetLabel = v.violation_code === 'H5' ? 'DNS/domain' : v.violation_code === 'H2' ? 'app/site' : 'violation';
+
+        return `
+          <div class="alert-card" data-alert-id="${v.id}" style="padding:12px 14px; margin-bottom:10px; border-radius:8px; background:#fff; border:1.5px solid ${v.severity === 'CRITICAL' ? '#fca5a5' : '#e2e8f0'}; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span style="font-size:13px; font-weight:800; color:#0f172a;">${v.name} <span class="mono" style="font-size:11px; color:#0284c7;">(${v.reg_no})</span></span>
+              <span style="font-size:10px; font-weight:800; background:${badgeBg}; color:${badgeColor}; padding:2px 8px; border-radius:10px;">${v.severity || 'HIGH'}</span>
+            </div>
+            <div style="font-size:13px; font-weight:700; color:#dc2626; margin-bottom:4px;">
+              ${v.surface_title || v.title}
+            </div>
+            <div style="font-size:12.5px; color:#334155; font-weight:600; line-height:1.4; background:#f8fafc; padding:8px 12px; border-radius:6px; border-left:3px solid ${badgeColor}; margin-top:4px;">
+              📌 ${cleanSummary}
+            </div>
+            <div style="margin-top:8px; font-size:11px; color:#64748b;">
+              Opened at <strong>${v.timestamp ? new Date(v.timestamp).toLocaleString() : 'Unknown time'}</strong>
+            </div>
+            <details data-alert-id="${v.id}" ${openAlertDetails.has(String(v.id)) ? 'open' : ''} style="margin-top:8px; font-size:12px; color:#334155;">
+              <summary style="cursor:pointer; font-weight:800; color:#0284c7;">View ${v.occurrenceCount || occurrences.length} ${targetLabel} detection${(v.occurrenceCount || occurrences.length) === 1 ? '' : 's'}</summary>
+              <div style="margin-top:5px;">${occurrenceDetails}</div>
+            </details>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:11px; color:#64748b;">
+              <span>Violation Code: <strong style="color:#0f172a; font-family:var(--font-mono);">${v.violation_code}</strong></span>
+              <span>${timeStr}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  const renderFeed = (feed) => {
+    if (!feed) return;
+    if (feed.dataset.alertFingerprint === alertFingerprint) return;
+    feed.dataset.alertFingerprint = alertFingerprint;
+    feed.innerHTML = feedHTML;
+  };
+
+  renderFeed(roomFeed);
+  renderFeed(teacherFeed);
+}
+
 function pollInvigilatorLiveRoom(sessionCode) {
+  joinSessionRoom(sessionCode); // ensure the live-push socket room is joined even if called directly
   if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
   invigilatorPollInterval = setInterval(async () => {
     try {
@@ -565,55 +934,23 @@ function pollInvigilatorLiveRoom(sessionCode) {
       if (!res.ok) return;
       const data = await res.json();
       if (data.session) {
-        // Update connected count
-        const connEl = document.getElementById('room-connected-count');
-        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
-
-        // Sync teacher countdown from server every 5s, tick locally every second
-        if (data.session.secondsRemaining !== null && data.session.secondsRemaining !== undefined) {
-          if (teacherLocalCountdown) clearInterval(teacherLocalCountdown);
-          let secs = Math.max(0, data.session.secondsRemaining);
-          const timerEl = document.getElementById('teacher-timer');
-          if (timerEl) {
-            timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
-          }
-          teacherLocalCountdown = setInterval(() => {
-            secs = Math.max(0, secs - 1);
-            const el = document.getElementById('teacher-timer');
-            if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
-            if (secs <= 0) clearInterval(teacherLocalCountdown);
-          }, 1000);
-        }
-
-        // Update connected student table
-        const tbody = document.getElementById('room-students-tbody');
-        if (tbody && data.session.connectedList) {
-          if (data.session.connectedList.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--grey-500); padding:20px;">Waiting for students to join with Passcode...</td></tr>';
-          } else {
-            tbody.innerHTML = data.session.connectedList.map(s => `
-              <tr>
-                <td><strong>${s.name}</strong> <span class="mono" style="font-size:11px;">(${s.reg_no})</span></td>
-                <td><span class="status-pill active-pill">Connected</span></td>
-                <td style="font-size:11px; color:var(--grey-500);">${new Date(s.started_at || Date.now()).toLocaleTimeString()}</td>
-              </tr>
-            `).join('');
-          }
-        }
+        window.lastPollSessionData = data.session;
+        renderInvigilatorLiveRoomUI(data.session);
       }
     } catch (err) {
       console.warn('Error polling invigilator room status:', err.message);
     }
-  }, 5000); // Sync from server every 5s; local interval ticks every second
+  }, 3000);
+
   // Kick off first poll immediately
   (async () => {
     try {
       const res = await fetch(`${API_BASE}/desktop/session/${sessionCode}/status`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.session && data.session.connectedStudents !== undefined) {
-        const connEl = document.getElementById('room-connected-count');
-        if (connEl) connEl.textContent = `${data.session.connectedStudents || 0} Connected`;
+      if (data.session) {
+        window.lastPollSessionData = data.session;
+        renderInvigilatorLiveRoomUI(data.session);
       }
     } catch (_) {}
   })();
@@ -693,19 +1030,18 @@ if (roomBtnEnd) {
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
       if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
+      if (proctrSocket && joinedSessionRoom) {
+        proctrSocket.emit('leave_room', { sessionCode: joinedSessionRoom });
+        joinedSessionRoom = null;
+      }
+      if (window.proctrAPI) {
+        if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+        if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
+      }
       showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
     } catch (err) {
       console.error('Error ending session:', err);
     }
-  });
-}
-
-// ─── EXIT LIVE CONTROL ROOM ──────────────────────────────────────
-const btnExitRoom = document.getElementById('btn-exit-live-room');
-if (btnExitRoom) {
-  btnExitRoom.addEventListener('click', () => {
-    if (invigilatorPollInterval) clearInterval(invigilatorPollInterval);
-    showSection('section-t-overview', document.querySelectorAll('#view-teacher .nav-item'));
   });
 }
 
@@ -714,6 +1050,7 @@ function openLiveMonitoring() {
 }
 function openTeacherSubmissions() {
   showSection('section-t-submissions', document.querySelectorAll('#view-teacher .nav-item'));
+  loadTeacherSubmissionLabs();
 }
 window.createInvigilationSession = createInvigilationSession;
 window.openLiveMonitoring = openLiveMonitoring;
@@ -789,12 +1126,19 @@ if (joinExamForm) {
         throw new Error(joinData.message || 'Incorrect Session ID or Passcode.');
       }
 
+      const sessionObj = joinData.session || joinData.data || {};
+      window.activeSessionId = sessionObj.session_id || joinData.session_id || null;
+      window.activeSessionCode = examCode;
+      window.activeExamId = sessionObj.examId || null;
+      autoSubmitTriggered = false; // fresh exam session — allow auto-submit to fire again
+
       // 2. Create Local Exam Workspace Directory Tree
       if (window.proctrAPI && window.proctrAPI.startExamWorkspace) {
         const result = await window.proctrAPI.startExamWorkspace({
-          examId: examCode,
-          studentId: regNo,
-          courseCode: examCode
+          examId: window.activeExamId,
+          studentId: currentUser.studentId,
+          courseCode: examCode,
+          sessionCode: examCode
         });
 
         if (result.status === 'success') {
@@ -841,6 +1185,7 @@ if (joinExamForm) {
 
 // ─── STUDENT SESSION POLLING FOR PAPER REVEAL & TIMER START ───────
 let studentPollInterval = null;
+let studentLocalCountdown = null;
 
 function startStudentSessionPoll(sessionCode) {
   if (studentPollInterval) clearInterval(studentPollInterval);
@@ -854,6 +1199,28 @@ function startStudentSessionPoll(sessionCode) {
 
       if (!session) return;
 
+      // 0. Check if Invigilator Ended Session
+      if (session.isSessionEnded || session.status === 'ENDED' || session.status === 'COMPLETED') {
+        if (studentPollInterval) clearInterval(studentPollInterval);
+        if (studentLocalCountdown) clearInterval(studentLocalCountdown);
+
+        if (window.proctrAPI) {
+          if (window.proctrAPI.stopSensors) window.proctrAPI.stopSensors();
+          if (window.proctrAPI.setScreenProtection) window.proctrAPI.setScreenProtection(false);
+        }
+
+        // Auto-submit whatever's in the workspace the moment the session ends
+        if (!autoSubmitTriggered) {
+          autoSubmitTriggered = true;
+          performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Session ended:', r));
+        }
+
+        const statusEl = document.getElementById('exam-status-text');
+        if (statusEl) statusEl.textContent = '🔒 Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
+        alert('🔴 The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
+        return;
+      }
+
       // 1. Check if Invigilator Revealed Question Paper
       if (session.isPaperRevealed) {
         const placeholder = document.getElementById('student-paper-placeholder');
@@ -865,13 +1232,21 @@ function startStudentSessionPoll(sessionCode) {
 
           if (session.examPaperUrl) {
             let paperUrl = session.examPaperUrl;
-            if (paperUrl.includes('sample_paper.pdf') || paperUrl.startsWith('file:///') || paperUrl.includes(':/')) {
+            if (paperUrl.startsWith('http://') || paperUrl.startsWith('https://')) {
+              // Full Cloudinary or external HTTPS URL — use directly
+            } else if (paperUrl.startsWith('file:///') || paperUrl.includes(':\\')) {
               const filename = paperUrl.split('/').pop().split('\\').pop();
-              paperUrl = `http://localhost:5000/uploads/${filename}`;
-            } else if (!paperUrl.startsWith('http://') && !paperUrl.startsWith('https://')) {
-              paperUrl = `http://localhost:5000${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
+              paperUrl = `${SOCKET_BASE}/uploads/${filename}`;
+            } else {
+              paperUrl = `${SOCKET_BASE}${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
             }
-            iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+
+            const isWordDoc = paperUrl.toLowerCase().includes('.docx') || paperUrl.toLowerCase().includes('.doc');
+            if (isWordDoc) {
+              iframe.src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(paperUrl)}`;
+            } else {
+              iframe.src = `${paperUrl}#toolbar=0&navpanes=0&scrollbar=1`;
+            }
           } else {
             // Render protected HTML document if no PDF URL uploaded
             const doc = iframe.contentWindow.document;
@@ -915,6 +1290,10 @@ function startStudentSessionPoll(sessionCode) {
               if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
+              if (!autoSubmitTriggered) {
+                autoSubmitTriggered = true;
+                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+              }
               return;
             }
 
@@ -947,6 +1326,10 @@ function startStudentSessionPoll(sessionCode) {
               if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
+              if (!autoSubmitTriggered) {
+                autoSubmitTriggered = true;
+                performExamSubmission('AUTO').then(r => console.log('[AutoSubmit] Timer expired:', r));
+              }
               return;
             }
             if (timerEl) timerEl.textContent = formatSecondsToHMS(secs);
@@ -1005,18 +1388,439 @@ function startExamTimer() {
 }
 
 // ─── SUBMISSION ───────────────────────────────────────────────────
-document.getElementById('btn-submit-exam').addEventListener('click', () => {
-  const btn = document.getElementById('btn-submit-exam');
-  const status = document.getElementById('submit-status');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
+// The actual upload — reads the student's local Submissions folder (via the
+// Electron main process, which has real filesystem access) and posts it to
+// the backend. Called automatically at session end / timer expiry, and
+// manually via the Submit button. Safe to call more than once — the backend
+// upserts on (exam_id, student_id), so a later call just replaces the files.
+let autoSubmitTriggered = false;
+let submissionInFlight = null;
 
-  setTimeout(() => {
-    btn.textContent = '✓ Submitted';
-    status.textContent = '✅ Your submission has been sent to the local exam server successfully.';
+async function performExamSubmission(type) {
+  if (submissionInFlight) return submissionInFlight;
+  submissionInFlight = submitExamAndShowResult(type);
+  try {
+    return await submissionInFlight;
+  } finally {
+    submissionInFlight = null;
+  }
+}
+
+async function submitExamAndShowResult(type) {
+  const button = document.getElementById('btn-submit-exam');
+  const status = document.getElementById('submit-status');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Submitting...';
+  }
+  if (status) {
+    status.textContent = 'Uploading your submission...';
     status.style.display = 'block';
-  }, 1200);
-});
+    status.style.color = 'var(--grey-500)';
+  }
+
+  let result;
+  try {
+    result = await uploadExamSubmission(type);
+    if (!result || !['success', 'pending'].includes(result.status)) {
+      throw new Error(result?.message || 'Submission failed — you can try again.');
+    }
+  } catch (error) {
+    result = { status: 'error', message: error.message || 'Submission failed — you can try again.' };
+  }
+
+  const succeeded = result.status === 'success';
+  if (button) {
+    button.disabled = succeeded;
+    button.textContent = succeeded ? '✓ Submitted' : result.status === 'pending' ? 'Retry saved submission' : '✓ Submit Solution';
+  }
+  if (status) {
+    status.textContent = succeeded
+      ? `✅ ${result.message || 'Your submission has been saved successfully.'}`
+      : `${result.status === 'pending' ? 'Saved copy: ' : '✖ '}${result.message}`;
+    status.style.color = succeeded ? 'var(--teal)' : result.status === 'pending' ? '#b45309' : '#dc2626';
+  }
+  return result;
+}
+
+async function uploadExamSubmission(type) {
+  if (!window.proctrAPI || !window.proctrAPI.submitExamWork) {
+    return { status: 'error', message: 'Submission is not available in this environment.' };
+  }
+  const examId = window.activeExamId;
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (!examId || !studentId) {
+    return { status: 'error', message: 'No active exam to submit — join a session first.' };
+  }
+  return window.proctrAPI.submitExamWork({
+    examId,
+    studentId,
+    sessionCode: window.activeSessionCode,
+    workspacePath: activeWorkspacePath,
+    submissionType: type,
+    apiBase: API_BASE
+  });
+}
+
+const submitExamBtn = document.getElementById('btn-submit-exam');
+if (submitExamBtn) {
+  submitExamBtn.addEventListener('click', async () => {
+    await performExamSubmission('MANUAL');
+  });
+}
+
+// ─── SUBMITTED WORK VIEWER (Student) ──────────────────────────────
+function escapeHtmlJS(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
+}
+
+function formatFileSize(bytes) {
+  bytes = Number(bytes) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function loadStudentSubmittedWork() {
+  const root = document.getElementById('student-submitted-work-root');
+  if (!root) return;
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  if (!studentId) { root.innerHTML = '<div class="empty-state">Not logged in.</div>'; return; }
+
+  root.innerHTML = '<div class="empty-state">Loading your submitted work…</div>';
+  try {
+    const res = await submissionFetch(`${API_BASE}/submission/student/${studentId}/labs`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
+    renderStudentLabsList(data.labs || []);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submitted work: ${escapeHtmlJS(err.message)}</div>`;
+  }
+  const backups = await window.proctrAPI?.getSubmissionBackups().catch(() => []) || [];
+  const pending = backups.filter(job => job.state !== 'synced');
+  if (pending.length) root.insertAdjacentHTML('afterbegin', `<div class="empty-state" style="color:#b45309">
+    <strong>${pending.length} saved backup(s) still need cloud confirmation.</strong>
+    <p>Keep PROCTR running to retry. Ask the invigilator for help before leaving if this remains pending.</p>
+    ${pending.map(job => `<p>Exam ${escapeHtmlJS(job.examId)}: ${escapeHtmlJS(job.message || 'Waiting to upload')}</p>`).join('')}
+    <p>Use the PROCTR tray menu to open the backup folder.</p>
+  </div>`);
+}
+
+function renderStudentLabsList(labs) {
+  const root = document.getElementById('student-submitted-work-root');
+  if (!labs.length) {
+    root.innerHTML = '<div class="empty-state">You haven\'t submitted any work yet. It will appear here automatically once your exam session ends, or once you submit manually.</div>';
+    return;
+  }
+  root.innerHTML = `
+    <div class="folder-grid">
+      ${labs.map((lab, i) => `
+        <button class="folder-card" data-co-id="${lab.course_offering_id}" data-idx="${i}">
+          <div class="folder-icon">📁</div>
+          <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
+          <div class="folder-meta">Submitted ${new Date(lab.submitted_at).toLocaleString()}</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  root.querySelectorAll('.folder-card').forEach((card, i) => {
+    card.addEventListener('click', () => loadStudentLabFiles(labs[i].course_offering_id, labs[i].label));
+  });
+}
+
+async function loadStudentLabFiles(courseOfferingId, labLabel) {
+  const root = document.getElementById('student-submitted-work-root');
+  const studentId = currentUser?.studentId || currentUser?.userId;
+  root.innerHTML = '<div class="empty-state">Loading files…</div>';
+  try {
+    const res = await submissionFetch(`${API_BASE}/submission/student/${studentId}/lab/${courseOfferingId}/files`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load files.');
+    const files = data.files || [];
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-labs">Submitted Work</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(labLabel)}</span>
+      </div>
+      ${files.length === 0 ? '<div class="empty-state">No files found in this submission.</div>' : `
+      <table class="file-list-table">
+        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+        <tbody>
+          ${files.map(f => `
+            <tr>
+              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+              <td>${formatFileSize(f.file_size)}</td>
+              <td><a class="file-download" href="${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}&download=true" target="_blank">Download</a></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    `;
+    document.getElementById('back-to-labs').addEventListener('click', loadStudentSubmittedWork);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load files: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+function getPreviewKind(name) {
+  const fileName = String(name || '').toLowerCase();
+
+  if (/\.(html?|xhtml|svg)$/.test(fileName)) return 'html';
+  if (/\.(pdf)$/.test(fileName)) return 'pdf';
+  if (/\.(png|jpe?g|gif|bmp|webp|ico)$/.test(fileName)) return 'image';
+  if (/\.(txt|md|csv|log|json|xml|yaml|yml|ini|cfg|toml|sql|java|c|cc|cpp|h|hpp|cs|php|rb|go|rs|swift|kt|scala|js|jsx|ts|tsx|py|sh|bash|zsh|ps1|bat|cmd|css)$/.test(fileName)) return 'text';
+  return 'unsupported';
+}
+
+function openResourceInViewer(resourceUrl, title) {
+  const modal = document.getElementById('submission-viewer-modal');
+  const iframe = document.getElementById('submission-viewer-iframe');
+  const message = document.getElementById('submission-viewer-message');
+  const titleEl = document.getElementById('submission-viewer-title');
+
+  if (!modal || !iframe || !message || !titleEl) {
+    void downloadSubmission(resourceUrl);
+    return;
+  }
+
+  iframe.setAttribute('sandbox', 'allow-scripts allow-downloads');
+  titleEl.textContent = title || 'Submission Viewer';
+  iframe.src = 'about:blank';
+  iframe.srcdoc = '';
+  iframe.style.display = 'none';
+  message.style.display = 'none';
+  modal.style.display = 'flex';
+
+  submissionFetch(resourceUrl)
+    .then(async (res) => {
+      if (!res.ok) throw new Error('The file could not be opened.');
+
+      const mimeType = (res.headers.get('content-type') || '').toLowerCase();
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const previewKind = getPreviewKind(title || resourceUrl);
+
+      if (previewKind === 'html' || mimeType.includes('text/html') || mimeType.includes('application/xhtml+xml')) {
+        const html = await blob.text();
+        iframe.srcdoc = html;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (previewKind === 'image' || mimeType.includes('image/')) {
+        iframe.src = objectUrl;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (previewKind === 'pdf' || mimeType.includes('application/pdf')) {
+        iframe.src = objectUrl;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      if (
+        previewKind === 'text' ||
+        mimeType.startsWith('text/') ||
+        mimeType.includes('json') ||
+        mimeType.includes('xml') ||
+        mimeType.includes('javascript') ||
+        mimeType.includes('typescript') ||
+        mimeType.includes('x-python')
+      ) {
+        const text = await blob.text();
+        if (!text || text.trim().length === 0) {
+          message.innerHTML = `
+            <div style="padding:26px; line-height:1.7;">
+              <strong>This file is empty.</strong>
+              <p>There is no content to preview yet.</p>
+              <p><a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download file</a></p>
+            </div>
+          `;
+          message.style.display = 'block';
+          return;
+        }
+
+        const safeText = escapeHtmlJS(text).replace(/\n/g, '<br>');
+        iframe.srcdoc = `
+          <html>
+            <body style="font-family:Segoe UI, sans-serif; padding:20px; line-height:1.6; white-space:pre-wrap; background:#fff; color:#0f172a;">
+              ${safeText}
+            </body>
+          </html>
+        `;
+        iframe.style.display = 'block';
+        return;
+      }
+
+      const fallbackWindow = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      if (fallbackWindow) {
+        modal.style.display = 'none';
+      } else {
+        message.innerHTML = `
+          <div style="padding:26px; line-height:1.7;">
+            <strong>Preview is not available for this file type.</strong>
+            <p>Open it in a separate tab or download it to your computer.</p>
+            <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
+          </div>
+        `;
+        message.style.display = 'block';
+      }
+    })
+    .catch((err) => {
+      message.innerHTML = `
+        <div style="padding:26px; line-height:1.7;">
+          <strong>Unable to open this file.</strong>
+          <p>${escapeHtmlJS(err.message || 'The preview could not be generated.')}</p>
+          <p><a href="${resourceUrl}" target="_blank" rel="noopener">Open file</a> · <a href="${resourceUrl}&download=true" target="_blank" rel="noopener">Download</a></p>
+        </div>
+      `;
+      message.style.display = 'block';
+    });
+}
+
+const submissionViewerCloseBtn = document.getElementById('submission-viewer-close');
+if (submissionViewerCloseBtn) {
+  submissionViewerCloseBtn.addEventListener('click', () => {
+    const modal = document.getElementById('submission-viewer-modal');
+    const iframe = document.getElementById('submission-viewer-iframe');
+    const message = document.getElementById('submission-viewer-message');
+    if (modal) modal.style.display = 'none';
+    if (iframe) iframe.src = 'about:blank';
+    if (message) message.style.display = 'none';
+  });
+}
+
+// ─── STUDENT SUBMISSIONS BROWSER (Teacher) ────────────────────────
+async function loadTeacherSubmissionLabs() {
+  const root = document.getElementById('teacher-submissions-root');
+  if (!root) return;
+  const teacherId = currentUser?.teacherId;
+  if (!teacherId) { root.innerHTML = '<div class="empty-state">Not logged in as a teacher.</div>'; return; }
+
+  root.innerHTML = '<div class="empty-state">Loading your submission folders…</div>';
+  try {
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/labs`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
+    renderTeacherLabsList(data.labs || []);
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submissions: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+function renderTeacherLabsList(labs) {
+  const root = document.getElementById('teacher-submissions-root');
+  if (!labs.length) {
+    root.innerHTML = '<div class="empty-state">You have no course labs assigned yet.</div>';
+    return;
+  }
+  root.innerHTML = `
+    <div class="folder-grid">
+      ${labs.map(lab => `
+        <button class="folder-card" data-co-id="${lab.course_offering_id}">
+          <div class="folder-icon">📁</div>
+          <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
+          <div class="folder-meta">${lab.submission_count} submission${lab.submission_count === 1 ? '' : 's'}</div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  root.querySelectorAll('.folder-card').forEach((card, i) => {
+    card.addEventListener('click', () => loadLabStudents(labs[i].course_offering_id, labs[i].label));
+  });
+}
+
+async function loadLabStudents(courseOfferingId, labLabel) {
+  const root = document.getElementById('teacher-submissions-root');
+  const teacherId = currentUser?.teacherId;
+  root.innerHTML = '<div class="empty-state">Loading students…</div>';
+  try {
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/students`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load students.');
+    const students = data.students || [];
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-teacher-labs">Student Submissions</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(labLabel)}</span>
+      </div>
+      ${students.length === 0 ? '<div class="empty-state">No students have submitted for this lab yet.</div>' : `
+      <div class="folder-grid">
+        ${students.map(s => `
+          <button class="folder-card" data-student-id="${s.student_id}">
+            <div class="folder-icon">🧑‍🎓</div>
+            <div class="folder-name">${escapeHtmlJS(s.registration_no)}</div>
+            <div class="folder-meta">${escapeHtmlJS(s.name)} · ${s.file_count} file${s.file_count === 1 ? '' : 's'}</div>
+          </button>
+        `).join('')}
+      </div>`}
+    `;
+    document.getElementById('back-to-teacher-labs').addEventListener('click', loadTeacherSubmissionLabs);
+    root.querySelectorAll('.folder-card[data-student-id]').forEach((card, i) => {
+      card.addEventListener('click', () => loadStudentSubmissionDetail(courseOfferingId, students[i].student_id, labLabel, students[i].registration_no));
+    });
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load students: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
+
+async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel, regNo) {
+  const root = document.getElementById('teacher-submissions-root');
+  const teacherId = currentUser?.teacherId;
+  root.innerHTML = '<div class="empty-state">Loading submission…</div>';
+  try {
+    const res = await submissionFetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/student/${studentId}/files`);
+    const data = await res.json();
+    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load submission.');
+    const files = data.files || [];
+    const submission = data.submission || {};
+    root.innerHTML = `
+      <div class="breadcrumb-bar">
+        <button class="crumb-link" id="back-to-teacher-labs2">Student Submissions</button>
+        <span class="crumb-sep">/</span>
+        <button class="crumb-link" id="back-to-lab-students">${escapeHtmlJS(labLabel)}</button>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-current">${escapeHtmlJS(regNo)}</span>
+      </div>
+      ${submission.has_report ? `
+      <div class="report-download-bar">
+        <div>
+          <div style="font-weight:800; font-size:13px; color:var(--navy);">📋 Security Log Report</div>
+          <div style="font-size:11.5px; color:var(--grey-500); margin-top:2px;">Filterable by severity (Critical / High / Medium / Low) — open in browser or download at any time.</div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a class="report-btn" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false', 'Security Log Report'); return false;">📖 Open Security Log Report</a>
+          <a class="file-download" href="${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true" target="_blank">⬇ Download</a>
+        </div>
+      </div>` : ''}
+      ${files.length === 0 ? '<div class="empty-state">No files in this submission.</div>' : `
+      <table class="file-list-table">
+        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+        <tbody>
+          ${files.map(f => `
+            <tr>
+              <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
+              <td>${formatFileSize(f.file_size)}</td>
+              <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                <a class="file-download" href="#" onclick="event.preventDefault(); openResourceInViewer('${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=false', '${escapeHtmlJS(f.relative_path)}'); return false;">Open</a>
+                <a class="file-download" href="${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}&download=true" target="_blank">Download</a>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    `;
+    document.getElementById('back-to-teacher-labs2').addEventListener('click', loadTeacherSubmissionLabs);
+    document.getElementById('back-to-lab-students').addEventListener('click', () => loadLabStudents(courseOfferingId, labLabel));
+  } catch (err) {
+    root.innerHTML = `<div class="empty-state">Could not load submission: ${escapeHtmlJS(err.message)}</div>`;
+  }
+}
 
 // ─── CHANGE PASSWORD ──────────────────────────────────────────────
 const changePwdForm = document.getElementById('change-pwd-form');
@@ -1160,12 +1964,14 @@ function addViolationCard(v, feedId, counterId) {
 
 async function logViolationToDB(v) {
   const payload = {
-    session_id: currentSessionId,
-    student_id: currentUser?.studentId || null,
+    session_id: window.activeSessionId || null,
+    session_code: window.activeSessionCode || activeInvigilationCode || null,
+    student_id: currentUser?.studentId || currentUser?.id || 101,
     violation_code: v.code || 'H0',
     title: v.title || 'Security Violation',
     description: v.detected_value ? `${v.description || ''} | ${v.detected_value}` : (v.description || ''),
     severity: v.severity || 'HIGH',
+    event_key: v.event_key || '',
   };
 
   // Use offline-first safe post: logs locally first, queues for backend sync if offline
@@ -1193,7 +1999,6 @@ if (window.proctrAPI) {
       if (ws && payload.workspace_dir) ws.textContent = payload.workspace_dir;
     } else if (payload.type === 'VIOLATION_ALERT') {
       addViolationCard(payload, 'student-feed', 'violation-badge');
-      addViolationCard(payload, 'teacher-feed', 'teacher-alert-count');
     }
   });
 
@@ -1235,3 +2040,50 @@ document.addEventListener('keydown', (e) => {
 // ─── AUTO-RESTORE SESSION ON PAGE LOAD / RELOAD ──────────────────
 // This must run AFTER all functions are defined.
 restoreSession();
+
+
+// Submission credentials stay in headers, including downloads (never in URLs).
+function submissionFetch(url, options = {}) {
+  const target = new URL(url, API_BASE);
+  const base = new URL(API_BASE);
+  const headers = new Headers(options.headers);
+  if (target.origin === base.origin && target.pathname.startsWith(`${base.pathname}/submission/`) && currentUser?.accessToken) {
+    headers.set('Authorization', `Bearer ${currentUser.accessToken}`);
+  }
+  return fetch(url, { ...options, headers });
+}
+async function downloadSubmission(url) {
+  try {
+    const response = await submissionFetch(url);
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.message || 'Could not download the submitted file.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = new URL(url).searchParams.get('relativePath')?.split('/').pop() || 'security_log_report.html';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+  } catch (error) { alert(error.message); }
+}
+document.addEventListener('click', event => {
+  const anchor = event.target.closest('a');
+  if (anchor?.href?.startsWith(`${API_BASE}/submission/`)) {
+    event.preventDefault();
+    void downloadSubmission(anchor.href);
+  }
+}, true);
+window.proctrAPI?.onSubmissionState(job => {
+  if (String(job.studentId) !== String(currentUser?.studentId) || String(job.examId) !== String(window.activeExamId)) return;
+  const status = document.getElementById('submit-status');
+  const button = document.getElementById('btn-submit-exam');
+  if (status) {
+    status.style.display = 'block';
+    status.textContent = job.state === 'synced' ? 'Submitted: cloud receipt confirmed. Backup copy retained.' : job.message;
+    status.style.color = job.state === 'synced' ? 'var(--teal)' : '#b45309';
+  }
+  if (button) { button.disabled = job.state === 'synced'; button.textContent = job.state === 'synced' ? 'Submitted' : 'Retry saved submission'; }
+});
+window.proctrAPI?.onSubmissionStorageError(message => alert(message));

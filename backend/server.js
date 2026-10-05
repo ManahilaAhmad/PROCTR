@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 // Route files (namespaced)
 import authRoutes from './routes/authRoutes.js';
@@ -16,6 +18,10 @@ import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
 import desktopRoutes from './routes/desktopRoutes.js';
 import networkRoutes from './routes/networkRoutes.js';
+import proctoringRoutes from './routes/proctoringRoutes.js';
+import submissionRoutes from './routes/submissionRoutes.js';
+import { setIO } from './socketRegistry.js';
+import { ensureSubmissionSchema } from './service/submissionSchema.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -32,9 +38,27 @@ const PORT = process.env.PORT || 5000;
 
 // ── Core Middleware ─────────────────────────────────────────
 app.use(cors());
+// Desktop sends base64 files in JSON (40 MB decoded total plus encoding).
+app.use('/api/submission/upload', express.json({ limit: '64mb' }));
 app.use(express.json());
 
 // Serve uploaded exam papers statically
+app.use('/uploads', (req, res, next) => {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(req.path).replace(/\\/g, '/');
+  } catch {
+    return res.sendStatus(400);
+  }
+  // Match the path that static serving resolves, including encoded separators
+  // and Windows aliases such as "submissions." or "submissions ".
+  const normalizedPath = path.posix.normalize(decodedPath);
+  const firstSegment = normalizedPath.split('/').find(Boolean) || '';
+  if (firstSegment.replace(/[. ]+$/g, '').toLowerCase() === 'submissions') {
+    return res.sendStatus(404);
+  }
+  next();
+});
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Health & DB Check ───────────────────────────────────────
@@ -95,6 +119,8 @@ app.use('/api/coordinator', coordinatorRoutes);    // Full coordinator CRUD
 app.use('/api/notifications', notificationsRoutes);  // Notification bell endpoints
 app.use('/api/desktop', desktopRoutes);        // Desktop app sessions & violations
 app.use('/api/network', networkRoutes);        // Lab network validation
+app.use('/api/proctoring', proctoringRoutes);      // Fuzzy AI evaluation + generic proctoring events
+app.use('/api/submission', submissionRoutes);      // Student work submissions (teacher/student browsing)
 
 // ── Legacy Flat-Path Aliases (frontend uses these exact URLs) ─
 // These map old un-namespaced paths directly to controllers,
@@ -116,13 +142,53 @@ app.get('/api/director/papers', getSharedPapers);
 
 // ── Multer Error Handler ────────────────────────────────────
 app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ status: 'error', message: 'Submission is too large. Submit at most 40 MB of files in total.' });
+  }
   if (err instanceof multer.MulterError || err?.message?.includes('PDF and DOCX')) {
     return res.status(400).json({ status: 'error', message: err.message });
   }
   next(err);
 });
 
+// ── Socket.IO — Live Monitoring Push Layer ──────────────────
+// Wraps the Express app in a plain http server so Socket.IO can
+// share the same port. Teacher clients join a room named
+// `session:<SESSION_CODE>` (see socketRegistry.js) and receive
+// `live_violation` events the instant a student's desktop client
+// reports a hard violation — no polling delay.
+const httpServer = createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  cors: { origin: '*' }
+});
+
+io.on('connection', (socket) => {
+  console.log(`[Socket] Client connected: ${socket.id}`);
+
+  // Teacher (or anyone) joins the live room for a specific exam session
+  socket.on('join_room', ({ sessionCode }) => {
+    if (!sessionCode) return;
+    const room = `session:${String(sessionCode).trim().toUpperCase()}`;
+    socket.join(room);
+    console.log(`[Socket] ${socket.id} joined room ${room}`);
+  });
+
+  socket.on('leave_room', ({ sessionCode }) => {
+    if (!sessionCode) return;
+    const room = `session:${String(sessionCode).trim().toUpperCase()}`;
+    socket.leave(room);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket] Client disconnected: ${socket.id}`);
+  });
+});
+
+setIO(io);
+
 // ── Start Server ────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`PROCTR Backend Server is listening on port ${PORT}`);
+await ensureSubmissionSchema();
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`PROCTR Backend Server (HTTP + Socket.IO) is listening on port ${PORT}`);
 });

@@ -5,6 +5,14 @@ import argparse
 import atexit
 import signal
 
+# Force stdout & stderr to UTF-8 encoding on Windows to prevent CP1252 charmap crashes with emojis/symbols
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # Insert Desktop/ folder (parent of python_sensors) so 'from python_sensors.x import y' works
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -19,7 +27,9 @@ def is_admin():
         return False
 
 def ensure_admin_elevation():
-    """Prompts Windows UAC to automatically re-launch script as Administrator if needed."""
+    """Prompts Windows UAC to automatically re-launch script as Administrator if needed in production."""
+    if os.environ.get("PROCTR_DEV_MODE", "1") == "1":
+        return
     if sys.platform == "win32" and not is_admin():
         try:
             print("[PROCTR] Requesting Windows Administrator Elevation (UAC Prompt)...")

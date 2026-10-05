@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import { getFileUrl } from '../middleware/upload.js';
 
 /* ===========================================================
    GET HOD REVIEW QUEUE (PendingHOD exams)
@@ -20,7 +21,13 @@ export const getQueue = async (req, res) => {
       WHERE e.status = 'PendingHOD'
       ORDER BY e.submitted_at DESC NULLS LAST
     `);
-    res.status(200).json({ status: 'success', queue: result.rows });
+
+    const rows = result.rows.map(row => ({
+      ...row,
+      exam_paper_url: row.exam_paper_url ? getFileUrl(req, row.exam_paper_url) : null
+    }));
+
+    res.status(200).json({ status: 'success', queue: rows });
   } catch (error) {
     console.error('Error fetching HOD queue:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch HOD review queue.' });

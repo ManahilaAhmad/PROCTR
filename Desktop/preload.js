@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('proctrAPI', {
+  apiBase: process.argv.find(arg => arg.startsWith('--proctr-api-base='))?.slice('--proctr-api-base='.length) || 'http://localhost:5000/api',
+  setSubmissionUser: user => ipcRenderer.invoke('set-submission-user', user),
+  getSubmissionBackups: () => ipcRenderer.invoke('submission-backups'),
+  finishExamWork: () => ipcRenderer.invoke('finish-exam-work'),
+  onSubmissionState: callback => ipcRenderer.on('submission-state', (_event, value) => callback(value)),
+  onSubmissionStorageError: callback => ipcRenderer.on('submission-storage-error', (_event, value) => callback(value)),
   onSensorEvent: (callback) => ipcRenderer.on('sensor-event', (_event, value) => callback(value)),
   onCloseWarning: (callback) => ipcRenderer.on('app-close-warning', () => callback()),
   stopSensors: () => ipcRenderer.invoke('stop-sensors'),
@@ -8,5 +14,6 @@ contextBridge.exposeInMainWorld('proctrAPI', {
   openWorkspaceFolder: (path) => ipcRenderer.invoke('open-workspace-folder', path),
   setScreenProtection: (enable) => ipcRenderer.invoke('set-screen-protection', enable),
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
-  writeLocalLog: (data) => ipcRenderer.invoke('write-local-log', data)
+  writeLocalLog: (data) => ipcRenderer.invoke('write-local-log', data),
+  submitExamWork: (data) => ipcRenderer.invoke('submit-exam-work', data)
 });

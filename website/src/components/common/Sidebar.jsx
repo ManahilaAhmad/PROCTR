@@ -3,12 +3,16 @@ import { Icon } from "../../theme/icons";
 
 const navItems = {
   teacher: [
+    { id: 'submissions', icon: Icon.fileText, label: 'Submitted Work' },
     { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
     { id: "upload", icon: Icon.upload, label: "Upload Exam" },
+    { id: "live-monitor", icon: Icon.bell, label: "Live Monitor" },
+    { id: "exam-reports", icon: Icon.fileText, label: "Post-Exam Reports" },
     { id: "__divider__", icon: null, label: "Invigilation Duty", isDivider: true },
     { id: "inv-schedule", icon: Icon.clipboard, label: "My Schedule" },
   ],
   student: [
+    { id: 'submissions', icon: Icon.fileText, label: 'Submitted Work' },
     { id: "student", icon: Icon.home, label: "Dashboard" },
     { id: "results", icon: Icon.chart, label: "My Results" },
   ],

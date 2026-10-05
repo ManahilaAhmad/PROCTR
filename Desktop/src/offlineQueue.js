@@ -53,6 +53,11 @@ function getPendingCount() {
   return getQueue().length;
 }
 
+function clearQueue() {
+  localStorage.removeItem(QUEUE_KEY);
+  console.log('[OfflineQueue] Queue cleared.');
+}
+
 // ─── CONNECTIVITY DETECTION ──────────────────────────────────────
 
 let _isOnline = navigator.onLine;
@@ -137,10 +142,24 @@ async function safePost(apiBase, endpoint, payload) {
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000)
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    if (!res.ok) {
+      // A response FROM the server (4xx/5xx) is not a connectivity problem —
+      // it's a deliberate rejection (e.g. "student hasn't joined this session
+      // yet", "no active session"). Retrying it later will never succeed and
+      // was previously the cause of a "flood" of old rejected violations
+      // dumping into the feed all at once whenever the queue eventually
+      // flushed. Only genuine network failures (caught below, where `res`
+      // never came back at all) get queued for retry.
+      if (res.status >= 400 && res.status < 500) {
+        console.warn(`[OfflineQueue] Server rejected ${endpoint} (HTTP ${res.status}) — discarding, not queuing for retry.`);
+        return null;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     return await res.json();
   } catch (err) {
-    // Queue for later sync
+    // Queue for later sync — genuine network/connectivity failure only
     enqueue(endpoint, payload);
     console.warn(`[OfflineQueue] Queued (offline): ${endpoint} — pending: ${getPendingCount()}`);
     updateConnectionBadge(false);
@@ -196,5 +215,6 @@ window.offlineQueue = {
   isOnline,
   checkConnectivity,
   enqueue,
+  clearQueue,
   updateConnectionBadge
 };

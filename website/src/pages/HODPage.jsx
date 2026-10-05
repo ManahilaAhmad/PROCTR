@@ -89,7 +89,7 @@ export default function HODPage({ activePage, setPage }) {
                 ["Submitted Date", preview.submitted_at ? new Date(preview.submitted_at).toLocaleDateString() : "Pending"],
                 ["Total Marks", preview.total_marks || 100],
                 ["Duration", `${preview.duration || 120} mins`],
-                ["Exam Paper", preview.exam_paper_url ? <a href={preview.exam_paper_url} target="_blank" rel="noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Paper PDF</a> : "No File Uploaded"],
+                ["Exam Paper", preview.exam_paper_url ? <a href={preview.exam_paper_url} target="_blank" rel="noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Exam Paper ({preview.exam_paper_url.toLowerCase().includes('.docx') ? 'DOCX' : 'PDF'}) ↗</a> : "No File Uploaded"],
               ].map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: C.grey50, borderRadius: 8 }}>
                   <span style={{ fontSize: 13, color: C.grey500 }}>{l}</span>

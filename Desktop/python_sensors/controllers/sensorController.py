@@ -40,13 +40,13 @@ class SensorController:
 
         # 4. Initialize All Production OS Sensors
         self.usb_sensor = USBSensor(violation_callback=self.on_violation)
-        self.clipboard_sensor = ClipboardSensor(violation_callback=self.on_violation)
+        self.clipboard_sensor = ClipboardSensor(violation_callback=self.on_violation, auto_clear=True)
         self.window_sensor = WindowSensor(violation_callback=self.on_violation, custom_whitelist=custom_whitelist)
         self.fs_sensor = FileSystemSensor(workspace_path=self.workspace_ctrl.get_workspace_path(), violation_callback=self.on_violation)
         self.dns_sensor = DNSSensor(violation_callback=self.on_violation, active_blocking=True)
         self.lan_sensor = LANDetector(violation_callback=self.on_violation, allowed_subnet_prefix="172.30.")
 
-    def on_violation(self, code, detected_value="", title="", severity="", description="", *args, **kwargs):
+    def on_violation(self, code, detected_value="", title="", severity="", description="", event_key="", *args, **kwargs):
         val = detected_value or description or str(kwargs)
         record = self.violation_ctrl.handle_violation(code=code, detected_value=val)
         
@@ -61,6 +61,7 @@ class SensorController:
             "severity": v_severity,
             "description": v_desc,
             "detected_value": val,
+            "event_key": event_key or f"{code}:{v_desc}",
             "timestamp": record["timestamp"] if record else time.strftime("%Y-%m-%dT%H:%M:%S")
         }
         

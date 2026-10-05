@@ -8,6 +8,8 @@ BASE_EXAM_DIR = r"C:\PROCTR_Exams" if sys.platform == "win32" else os.path.expan
 DEFAULT_WHITELISTED_PROCESSES = {
     # IDEs & Code Editors
     "code.exe",             # VS Code
+    "antigravity.exe",       # Antigravity IDE
+    "antigravity-ide.exe",   # Antigravity IDE
     "pycharm64.exe",        # PyCharm
     "devenv.exe",           # Visual Studio
     "codeblocks.exe",       # Code::Blocks
@@ -28,13 +30,20 @@ DEFAULT_WHITELISTED_PROCESSES = {
     "cmd.exe",
     "powershell.exe",
 
-    # System & PROCTR Processes
+    # System, Web Viewers & PROCTR Processes
     "proctr-desktop.exe",
     "electron.exe",
     "python_sensor.exe",
     "explorer.exe",
     "conhost.exe",
     "svchost.exe",
+
+    # Web Browsers (permitted for exam paper viewer and whitelisted docs)
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "opera.exe"
 }
 
 # Default permitted network/DNS web domains
