@@ -99,6 +99,14 @@ class SensorController:
                     elif cmd_type == "UPDATE_LAB_SUBNET":
                         new_subnet = data.get("allowed_subnet", "172.30.")
                         self.lan_sensor.allowed_subnet_prefix = new_subnet
+                    elif cmd_type == "UPDATE_SECURITY_POLICY":
+                        if data.get("allowed_subnet"):
+                            self.lan_sensor.update_allowed_subnets([data.get("allowed_subnet")])
+                            self.lan_sensor.allowed_subnet_prefix = None
+                        if data.get("clipboard_threshold_chars") is not None:
+                            self.clipboard_sensor.max_paste_chars = int(data.get("clipboard_threshold_chars"))
+                        if data.get("focus_loss_seconds") is not None:
+                            self.window_sensor.away_threshold_sec = int(data.get("focus_loss_seconds"))
                     elif cmd_type == "FORCE_STOP":
                         self.stop()
                         sys.exit(0)

@@ -1,6 +1,10 @@
 import pool from '../db.js';
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
 import { emitToSession } from '../socketRegistry.js';
+import { isAllowedLabIp } from '../middleware/labNetwork.js';
+import { auditSecurityEvent, clientIp as requestClientIp } from '../middleware/security.js';
 
 /* ===========================================================
    Human-readable titles for hard violation codes (H1-H4b, H5, N1).
@@ -26,7 +30,16 @@ export const createLiveSession = async (req, res) => {
   const { exam_id, course_code, invigilator_id, duration } = req.body;
   try {
     const session_code = (course_code || 'EXAM').toUpperCase().trim();
-    const passcode = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit random passcode
+    const passcode = crypto.randomInt(100000, 1000000).toString();
+    const passcodeHash = await bcrypt.hash(passcode, 12);
+
+    const completedSession = await pool.query(
+      `SELECT 1 FROM live_exam_session WHERE exam_id=$1 AND status IN ('ENDED','COMPLETED') LIMIT 1`,
+      [exam_id]
+    ).catch(() => ({ rowCount: 0 }));
+    if (completedSession.rowCount) {
+      return res.status(409).json({ status: 'error', message: 'This exam has already been conducted and cannot be started again.' });
+    }
 
     // Ensure live_exam_session table exists
     await pool.query(`
@@ -50,18 +63,33 @@ export const createLiveSession = async (req, res) => {
     // it behaves like a genuinely fresh session, not a continuation of
     // whatever was left over from the last time this code was used.
     const result = await pool.query(
-      `INSERT INTO live_exam_session (exam_id, session_code, passcode, invigilator_id, duration_minutes, is_paper_revealed, is_timer_started, status)
-       VALUES ($1, $2, $3, $4, $5, FALSE, FALSE, 'ACTIVE')
+      `INSERT INTO live_exam_session (exam_id, session_code, passcode, passcode_hash, passcode_expires_at, invigilator_id, duration_minutes, is_paper_revealed, is_timer_started, status)
+       VALUES ($1, $2, '******', $3, NOW() + INTERVAL '8 hours', $4, $5, FALSE, FALSE, 'ACTIVE')
        ON CONFLICT (session_code) DO UPDATE
-       SET passcode = EXCLUDED.passcode,
+       SET exam_id = EXCLUDED.exam_id,
+           passcode = '******',
+           passcode_hash = EXCLUDED.passcode_hash,
+           passcode_expires_at = EXCLUDED.passcode_expires_at,
+           invigilator_id = EXCLUDED.invigilator_id,
            status = 'ACTIVE',
            is_paper_revealed = FALSE,
            is_timer_started = FALSE,
            timer_start_time = NULL,
            duration_minutes = EXCLUDED.duration_minutes
-       RETURNING live_session_id, session_code, passcode, duration_minutes, is_paper_revealed, is_timer_started, status`,
-      [exam_id || null, session_code, passcode, invigilator_id || null, duration || 90]
+       WHERE live_exam_session.status <> 'ACTIVE'
+       RETURNING live_session_id, session_code, duration_minutes, is_paper_revealed, is_timer_started, status`,
+      [exam_id || null, session_code, passcodeHash, invigilator_id || null, duration || 90]
     );
+
+    // A duplicate click/request must never rotate the passcode behind the
+    // invigilator's screen. With the conditional upsert above, PostgreSQL
+    // returns no row when this course code already has an active session.
+    if (!result.rowCount) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'A live session for this course is already active. Continue using the existing session or end it first.'
+      });
+    }
 
     const newLiveSessionId = result.rows[0].live_session_id;
 
@@ -73,10 +101,11 @@ export const createLiveSession = async (req, res) => {
     await pool.query(`DELETE FROM desktop_violation_log WHERE session_id = $1`, [newLiveSessionId]).catch(() => {});
     await pool.query(`DELETE FROM desktop_exam_session WHERE live_session_id = $1`, [newLiveSessionId]).catch(() => {});
 
+    await auditSecurityEvent(req, { eventType: 'LIVE_SESSION_CREATED', outcome: 'SUCCESS', objectType: 'exam', objectId: exam_id });
     res.status(200).json({
       status: 'success',
       message: 'Live exam session created successfully.',
-      session: result.rows[0],
+      session: { ...result.rows[0], passcode },
     });
   } catch (error) {
     console.error('Error creating live exam session:', error);
@@ -104,19 +133,58 @@ export const joinLiveSession = async (req, res) => {
     );
 
     if (sessResult.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'Exam Session ID not found or session has ended.' });
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_FAILED', outcome: 'DENIED', metadata: { reason: 'unknown_session' } });
+      return res.status(401).json({ status: 'error', message: 'Invalid exam session or passcode.' });
     }
 
     const session = sessResult.rows[0];
 
-    // Verify passcode
-    if (session.passcode !== passcode.trim()) {
-      return res.status(401).json({ status: 'error', message: 'Incorrect exam passcode.' });
+    const joinIp = requestClientIp(req) || 'unknown';
+    const recentFailures = await pool.query(`
+      SELECT COUNT(*)::int AS failures FROM exam_join_attempt
+      WHERE live_session_id=$1 AND student_id=$2 AND ip_address=$3 AND succeeded=FALSE
+        AND attempted_at > NOW() - INTERVAL '10 minutes'
+    `, [session.live_session_id, student_id || null, joinIp]);
+    if (recentFailures.rows[0].failures >= 5) {
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_LOCKED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id });
+      return res.status(429).json({ status: 'error', message: 'Too many incorrect exam passcodes. Wait 10 minutes or contact the invigilator.' });
+    }
+
+    const passcodeExpired = session.passcode_expires_at && new Date(session.passcode_expires_at).getTime() <= Date.now();
+    const passcodeMatches = session.passcode_hash
+      ? await bcrypt.compare(passcode.trim(), session.passcode_hash)
+      : session.passcode === passcode.trim();
+    if (passcodeExpired || !passcodeMatches) {
+      await pool.query(`INSERT INTO exam_join_attempt (live_session_id,student_id,ip_address,succeeded) VALUES ($1,$2,$3,FALSE)`, [session.live_session_id, student_id || null, joinIp]);
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_FAILED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id, metadata: { reason: passcodeExpired ? 'expired_passcode' : 'incorrect_passcode' } });
+      return res.status(401).json({ status: 'error', message: 'Invalid exam session or passcode.' });
+    }
+
+    if (!student_id) {
+      return res.status(400).json({ status: 'error', message: 'A valid student profile is required to join this exam.' });
+    }
+    const enrollment = await pool.query(`
+      SELECT 1 FROM live_exam_session les
+      JOIN exam e ON e.exam_id=les.exam_id
+      JOIN enrollment en ON en.course_offering_id=e.course_offering_id
+      WHERE les.live_session_id=$1 AND en.student_id=$2 AND en.status='Active'
+    `, [session.live_session_id, student_id]);
+    if (!enrollment.rowCount) {
+      await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_NOT_ENROLLED', outcome: 'DENIED', objectType: 'exam', objectId: session.exam_id });
+      return res.status(403).json({ status: 'error', message: 'You are not actively enrolled in the course for this exam.' });
+    }
+
+    const previousCompletion = await pool.query(
+      `SELECT 1 FROM desktop_exam_session WHERE live_session_id=$1 AND student_id=$2 AND status='COMPLETED' LIMIT 1`,
+      [session.live_session_id, student_id]
+    ).catch(() => ({ rowCount: 0 }));
+    if (previousCompletion.rowCount) {
+      return res.status(409).json({ status: 'error', message: 'You have already submitted and left this exam.' });
     }
 
     // ── LAB NETWORK & IP SUBNET VALIDATION ────────────────────────────
-    const reqSimulatedIp = req.body.simulate_external_ip;
-    const rawIp = reqSimulatedIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const reqSimulatedIp = process.env.NODE_ENV === 'test' ? req.body.simulate_external_ip : null;
+    const rawIp = reqSimulatedIp || req.ip || req.socket.remoteAddress || '127.0.0.1';
     const clientIp = String(rawIp).replace('::ffff:', '').trim();
 
     const labRes = await pool.query(
@@ -133,19 +201,66 @@ export const joinLiveSession = async (req, res) => {
       const allowedRange = (labRes.rows[0].network_range || '').trim();
       const labName = labRes.rows[0].lab_name || 'Assigned Lab';
 
-      // If allowedRange is not wildcard '*' or '127.0.0.1'
-      if (allowedRange && allowedRange !== '*' && allowedRange !== '127.0.0.1') {
-        const allowedSubnet = allowedRange.split('/')[0].split('.').slice(0, 3).join('.');
-        const clientSubnet = clientIp.split('.').slice(0, 3).join('.');
+      if (allowedRange && allowedRange !== '*') {
+        const settingsResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('allow_loopback_exam_access','clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
+        const securitySettings = Object.fromEntries(settingsResult.rows.map(row => [row.setting_key, row.setting_value]));
+        const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1';
+        const isMatch = isAllowedLabIp(clientIp, allowedRange) || (securitySettings.allow_loopback_exam_access === true && isLoopback);
+        if (!isMatch) {
+          const existingRequest = await pool.query(`
+            SELECT request_id,status,requested_ip,expires_at
+            FROM network_access_request
+            WHERE live_session_id=$1 AND student_id=$2
+          `, [session.live_session_id, student_id]);
+          const existing = existingRequest.rows[0];
+          const requestIsCurrent = existing && existing.requested_ip === clientIp
+            && new Date(existing.expires_at).getTime() > Date.now();
 
-        const isMatch = clientIp === allowedRange || clientIp.includes(allowedRange) || (allowedSubnet && clientSubnet === allowedSubnet);
+          if (!(requestIsCurrent && existing.status === 'APPROVED')) {
+            if (requestIsCurrent && existing.status === 'REJECTED') {
+              return res.status(403).json({
+                status: 'rejected',
+                message: 'The invigilator rejected your request to join from this network.'
+              });
+            }
 
-        // If simulated external IP or non-matching IP on restricted lab
-        if (!isMatch && (reqSimulatedIp || (clientIp !== '127.0.0.1' && clientIp !== '::1'))) {
-          return res.status(403).json({
-            status: 'error',
-            message: `Network Restriction Violation: Your device IP (${clientIp}) is outside the allowed lab subnet (${allowedRange}) for ${labName}. Joining from external network is blocked.`
-          });
+            const requestResult = await pool.query(`
+              INSERT INTO network_access_request
+                (live_session_id,student_id,requested_ip,allowed_network,lab_name,status,student_reason,requested_at,expires_at,decided_by,decided_at,decision_reason)
+              VALUES ($1,$2,$3,$4,$5,'PENDING',$6,NOW(),NOW() + INTERVAL '10 minutes',NULL,NULL,NULL)
+              ON CONFLICT (live_session_id,student_id) DO UPDATE
+              SET requested_ip=EXCLUDED.requested_ip,
+                  allowed_network=EXCLUDED.allowed_network,
+                  lab_name=EXCLUDED.lab_name,
+                  status=CASE
+                    WHEN network_access_request.status='PENDING'
+                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                     AND network_access_request.expires_at>NOW()
+                    THEN network_access_request.status ELSE 'PENDING' END,
+                  student_reason=EXCLUDED.student_reason,
+                  requested_at=CASE
+                    WHEN network_access_request.status='PENDING'
+                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                     AND network_access_request.expires_at>NOW()
+                    THEN network_access_request.requested_at ELSE NOW() END,
+                  expires_at=CASE
+                    WHEN network_access_request.status='PENDING'
+                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                     AND network_access_request.expires_at>NOW()
+                    THEN network_access_request.expires_at ELSE NOW() + INTERVAL '10 minutes' END,
+                  decided_by=NULL,decided_at=NULL,decision_reason=NULL
+              RETURNING request_id,status,expires_at
+            `, [session.live_session_id, student_id, clientIp, allowedRange, labName, String(req.body?.network_reason || '').trim().slice(0, 500) || null]);
+            const accessRequest = requestResult.rows[0];
+            emitToSession(codeUpper, 'network_access_request', { requestId: accessRequest.request_id });
+            await auditSecurityEvent(req, { eventType: 'NETWORK_ACCESS_REQUESTED', outcome: 'INFO', objectType: 'exam', objectId: session.exam_id, metadata: { requestedIp: clientIp, allowedRange } });
+            return res.status(202).json({
+              status: 'pending_network_approval',
+              message: `Your IP (${clientIp}) is outside ${allowedRange}. Waiting for the invigilator's approval.`,
+              requestId: accessRequest.request_id,
+              expiresAt: accessRequest.expires_at
+            });
+          }
         }
       }
     }
@@ -193,6 +308,11 @@ export const joinLiveSession = async (req, res) => {
     // enforced above). The session ending is what should lock things,
     // not the mere existence of an earlier submission attempt.
 
+    const policyResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
+    const securityPolicy = Object.fromEntries(policyResult.rows.map(row => [row.setting_key, row.setting_value]));
+
+    await pool.query(`INSERT INTO exam_join_attempt (live_session_id,student_id,ip_address,succeeded) VALUES ($1,$2,$3,TRUE)`, [session.live_session_id, student_id, joinIp]);
+    await auditSecurityEvent(req, { eventType: 'EXAM_JOIN_SUCCEEDED', outcome: 'SUCCESS', objectType: 'exam', objectId: session.exam_id });
     res.status(200).json({
       status: 'success',
       message: 'Successfully connected to exam session!',
@@ -202,12 +322,78 @@ export const joinLiveSession = async (req, res) => {
         examId: session.exam_id,
         isPaperRevealed: session.is_paper_revealed,
         isTimerStarted: session.is_timer_started,
-        durationMinutes: session.duration_minutes
+        durationMinutes: session.duration_minutes,
+        labNetworkRange: labRes.rows[0]?.network_range || null,
+        securityPolicy
       }
     });
   } catch (error) {
     console.error('Error joining live session:', error);
     res.status(500).json({ status: 'error', message: 'Failed to join live session.' });
+  }
+};
+
+export const getNetworkAccessRequestStatus = async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId);
+    if (!Number.isInteger(requestId) || requestId < 1) {
+      return res.status(400).json({ status: 'error', message: 'Invalid network access request.' });
+    }
+    const result = await pool.query(`
+      SELECT nar.request_id,nar.status,nar.expires_at,les.session_code,s.user_id
+      FROM network_access_request nar
+      JOIN live_exam_session les ON les.live_session_id=nar.live_session_id
+      JOIN student s ON s.student_id=nar.student_id
+      WHERE nar.request_id=$1
+    `, [requestId]);
+    const request = result.rows[0];
+    if (!request || (req.sessionUser.role !== 'admin' && Number(request.user_id) !== Number(req.sessionUser.sub))) {
+      return res.status(404).json({ status: 'error', message: 'Network access request was not found.' });
+    }
+    let status = request.status;
+    if (status === 'PENDING' && new Date(request.expires_at).getTime() <= Date.now()) {
+      status = 'EXPIRED';
+      await pool.query(`UPDATE network_access_request SET status='EXPIRED' WHERE request_id=$1 AND status='PENDING'`, [requestId]);
+    }
+    return res.json({ status: 'success', request: { requestId: request.request_id, decision: status, sessionCode: request.session_code, expiresAt: request.expires_at } });
+  } catch (error) {
+    console.error('Error checking network access request:', error);
+    return res.status(500).json({ status: 'error', message: 'Unable to check the network access request.' });
+  }
+};
+
+export const decideNetworkAccessRequest = async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId);
+    const decision = String(req.body?.decision || '').trim().toUpperCase();
+    const reason = String(req.body?.reason || '').trim().slice(0, 500) || null;
+    if (!Number.isInteger(requestId) || !['APPROVED', 'REJECTED'].includes(decision)) {
+      return res.status(400).json({ status: 'error', message: 'A valid request and decision are required.' });
+    }
+    const result = await pool.query(`
+      UPDATE network_access_request nar
+      SET status=$2,decision_reason=$3,decided_by=$4,decided_at=NOW(),
+          expires_at=CASE WHEN $2='APPROVED' THEN NOW() + INTERVAL '8 hours' ELSE expires_at END
+      FROM live_exam_session les
+      WHERE nar.request_id=$1 AND les.live_session_id=nar.live_session_id
+        AND les.status='ACTIVE' AND nar.status='PENDING' AND nar.expires_at>NOW()
+        AND UPPER(les.session_code)=UPPER($5)
+      RETURNING nar.request_id,nar.student_id,nar.requested_ip,nar.status,les.session_code,les.exam_id
+    `, [requestId, decision, reason, req.sessionUser.sub, req.body.session_code]);
+    if (!result.rowCount) {
+      return res.status(409).json({ status: 'error', message: 'This request is no longer pending or the session has ended.' });
+    }
+    const decided = result.rows[0];
+    emitToSession(decided.session_code, 'network_access_decision', { requestId, decision });
+    await auditSecurityEvent(req, {
+      eventType: decision === 'APPROVED' ? 'NETWORK_ACCESS_APPROVED' : 'NETWORK_ACCESS_REJECTED',
+      outcome: 'SUCCESS', objectType: 'exam', objectId: decided.exam_id,
+      metadata: { requestId, studentId: decided.student_id, requestedIp: decided.requested_ip, reason }
+    });
+    return res.json({ status: 'success', message: decision === 'APPROVED' ? 'Student network access approved.' : 'Student network access rejected.' });
+  } catch (error) {
+    console.error('Error deciding network access request:', error);
+    return res.status(500).json({ status: 'error', message: 'Unable to process the network access request.' });
   }
 };
 
@@ -218,7 +404,16 @@ export const extendTime = async (req, res) => {
   const { session_code, extra_minutes } = req.body;
   try {
     const codeUpper = (session_code || '').trim().toUpperCase();
-    const minutesToAdd = Math.min(parseInt(extra_minutes || 10, 10), 20); // Cap at 20 mins
+    const settingResult = await pool.query(`SELECT setting_value FROM system_setting WHERE setting_key='max_exam_extension_minutes'`).catch(() => ({ rows: [] }));
+    const maxExtension = Number(settingResult.rows[0]?.setting_value ?? 20);
+    if (maxExtension < 1) {
+      return res.status(403).json({ status: 'error', message: 'Exam time extensions are disabled by the system administrator.' });
+    }
+    const requestedMinutes = parseInt(extra_minutes || 10, 10);
+    if (!Number.isInteger(requestedMinutes) || requestedMinutes < 1) {
+      return res.status(400).json({ status: 'error', message: 'Extension must be a positive number of minutes.' });
+    }
+    const minutesToAdd = Math.min(requestedMinutes, maxExtension);
 
     const result = await pool.query(
       `UPDATE live_exam_session 
@@ -233,7 +428,7 @@ export const extendTime = async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      message: `Exam duration extended by ${minutesToAdd} minutes (Max 20 mins limit).`,
+      message: `Exam duration extended by ${minutesToAdd} minutes (maximum ${maxExtension} minutes).`,
       newDuration: result.rows[0].duration_minutes
     });
   } catch (error) {
@@ -253,6 +448,11 @@ export const endLiveSession = async (req, res) => {
       `UPDATE live_exam_session SET status = 'COMPLETED' WHERE session_code = $1`,
       [codeUpper]
     );
+    await pool.query(`
+      UPDATE network_access_request SET status='EXPIRED'
+      WHERE live_session_id=(SELECT live_session_id FROM live_exam_session WHERE session_code=$1)
+        AND status IN ('PENDING','APPROVED')
+    `, [codeUpper]).catch(() => {});
     res.status(200).json({ status: 'success', message: 'Live exam session ended. Submissions locked.' });
   } catch (error) {
     console.error('Error ending session:', error);
@@ -306,7 +506,11 @@ export const getSessionStatus = async (req, res) => {
   try {
     const codeUpper = (sessionCode || '').trim().toUpperCase();
     const result = await pool.query(
-      `SELECT les.*, qp.file_path AS exam_paper_url
+      `SELECT les.*, qp.file_path AS exam_paper_url,
+              e.starter_files_path AS starter_file_url,
+              (SELECT ef.original_name FROM exam_file ef
+               WHERE ef.exam_id=e.exam_id AND ef.file_type='starter_file'
+               ORDER BY ef.uploaded_at DESC LIMIT 1) AS starter_file_name
        FROM live_exam_session les
        LEFT JOIN exam e ON les.exam_id = e.exam_id
        LEFT JOIN question_paper qp ON qp.exam_id = e.exam_id
@@ -319,6 +523,8 @@ export const getSessionStatus = async (req, res) => {
     }
 
     const session = result.rows[0];
+    const warningResult = await pool.query(`SELECT setting_value FROM system_setting WHERE setting_key='exam_warning_minutes'`).catch(() => ({ rows: [] }));
+    const warningSeconds = Number(warningResult.rows[0]?.setting_value ?? 5) * 60;
 
     // Calculate real-time seconds remaining
     let secondsRemaining = null;
@@ -371,11 +577,22 @@ export const getSessionStatus = async (req, res) => {
         : [{ timestamp: v.detected_at, title: v.title, description: v.description || '', severity: v.severity || 'HIGH' }],
     }));
 
+    const canMonitor = ['teacher', 'admin'].includes(req.sessionUser?.role);
+    const networkRequests = canMonitor ? await pool.query(`
+      SELECT nar.request_id,nar.student_id,nar.requested_ip,nar.allowed_network,nar.lab_name,
+             nar.student_reason,nar.requested_at,nar.expires_at,
+             COALESCE(u.first_name || ' ' || u.last_name,'Candidate') AS student_name,
+             s.registration_no
+      FROM network_access_request nar
+      JOIN student s ON s.student_id=nar.student_id
+      JOIN users u ON u.user_id=s.user_id
+      WHERE nar.live_session_id=$1 AND nar.status='PENDING' AND nar.expires_at>NOW()
+      ORDER BY nar.requested_at
+    `, [session.live_session_id]) : { rows: [] };
     res.status(200).json({
       status: 'success',
       session: {
         sessionCode: session.session_code,
-        passcode: session.passcode,
         status: session.status,
         isSessionEnded: session.status === 'ENDED' || session.status === 'COMPLETED',
         isPaperRevealed: session.is_paper_revealed,
@@ -383,10 +600,14 @@ export const getSessionStatus = async (req, res) => {
         durationMinutes: session.duration_minutes,
         timerStartTime: session.timer_start_time,
         secondsRemaining: secondsRemaining,
-        examPaperUrl: session.exam_paper_url ? getFileUrl(req, session.exam_paper_url) : null,
-        connectedStudents: studentsRes.rows.length,
-        connectedList: studentsRes.rows,
-        recentViolations: formattedViolations
+        warningSeconds,
+        examPaperUrl: session.is_paper_revealed && session.exam_paper_url ? getFileUrl(req, session.exam_paper_url) : null,
+        starterFileUrl: session.is_paper_revealed && session.starter_file_url ? getFileUrl(req, session.starter_file_url) : null,
+        starterFileName: session.is_paper_revealed ? session.starter_file_name : null,
+        connectedStudents: canMonitor ? studentsRes.rows.length : undefined,
+        connectedList: canMonitor ? studentsRes.rows : undefined,
+        recentViolations: canMonitor ? formattedViolations : undefined,
+        pendingNetworkRequests: canMonitor ? networkRequests.rows : undefined
       }
     });
   } catch (error) {
@@ -558,5 +779,26 @@ export const getActiveSessionsCount = async (req, res) => {
     res.status(200).json({ status: 'success', count: parseInt(result.rows[0].count, 10) || 0 });
   } catch (error) {
     res.status(200).json({ status: 'success', count: 0 });
+  }
+};
+
+export const leaveLiveSession = async (req, res) => {
+  const { session_code, student_id } = req.body;
+  try {
+    const result = await pool.query(`
+      UPDATE desktop_exam_session des
+      SET status='COMPLETED'
+      FROM live_exam_session les
+      WHERE des.live_session_id=les.live_session_id
+        AND les.session_code=$1 AND des.student_id=$2 AND des.status='ACTIVE'
+      RETURNING des.session_id
+    `, [(session_code || '').trim().toUpperCase(), student_id]);
+    if (!result.rowCount) {
+      return res.status(404).json({ status: 'error', message: 'No active student exam session was found.' });
+    }
+    return res.status(200).json({ status: 'success', message: 'You have safely left the exam environment.' });
+  } catch (error) {
+    console.error('Error leaving live session:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to leave the exam environment.' });
   }
 };

@@ -65,6 +65,11 @@ if __name__ == "__main__":
             controller.stop()
         except Exception:
             pass
+        try:
+            from python_sensors.restore_network_defaults import restore_all
+            restore_all()
+        except Exception:
+            pass
 
     atexit.register(cleanup_on_exit)
     try:

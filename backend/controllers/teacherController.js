@@ -1,6 +1,24 @@
 import pool from '../db.js';
 import { upload, getFileUrl } from '../middleware/upload.js';
 
+async function notifyDepartmentHods(examId) {
+  const recipients = await pool.query(`
+    SELECT h.user_id, c.course_code, e.exam_type
+    FROM exam e
+    JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+    JOIN course c ON c.course_id=co.course_id
+    JOIN program p ON p.program_id=c.program_id
+    JOIN hod h ON h.department_id=p.department_id
+    WHERE e.exam_id=$1 AND (h.tenure_end IS NULL OR h.tenure_end >= CURRENT_DATE)
+  `, [examId]);
+  for (const row of recipients.rows) {
+    await pool.query(`
+      INSERT INTO user_notification (user_id,title,message,notification_type)
+      VALUES ($1,'Exam Awaiting HOD Review',$2,'Exam')
+    `, [row.user_id, `${row.course_code} ${row.exam_type} has been submitted for your department review.`]);
+  }
+}
+
 /* ===========================================================
    LIST ALL TEACHERS (for swap / assignment dropdowns)
 =========================================================== */
@@ -140,6 +158,14 @@ export const createExam = async (req, res) => {
       targetCourseOfferingId = coQuery.rows[0].course_offering_id;
     }
 
+    const ownedOffering = await pool.query(
+      'SELECT 1 FROM course_offering WHERE course_offering_id=$1 AND teacher_id=$2',
+      [targetCourseOfferingId, teacher_id]
+    );
+    if (!ownedOffering.rowCount) {
+      return res.status(403).json({ status: 'error', message: 'You can only create an exam for a course offering assigned to you.' });
+    }
+
     const result_check = await pool.query(
       'SELECT exam_id, status FROM exam WHERE course_offering_id = $1 LIMIT 1',
       [targetCourseOfferingId]
@@ -190,12 +216,15 @@ export const uploadPaper = async (req, res) => {
     const fileUrl = getFileUrl(req, req.file);
 
     const teacherRes = await pool.query(`
-      SELECT co.teacher_id
+      SELECT e.teacher_id
       FROM exam e
-      JOIN course_offering co ON e.course_offering_id = co.course_offering_id
-      WHERE e.exam_id = $1
-    `, [exam_id]);
+      JOIN teacher t ON t.teacher_id = e.teacher_id
+      WHERE e.exam_id = $1 AND ($2 = 'admin' OR t.user_id = $3)
+    `, [exam_id, req.sessionUser?.role, req.sessionUser?.sub]);
     const teacherId = teacherRes.rows[0]?.teacher_id || null;
+    if (!teacherId) {
+      return res.status(403).json({ status: 'error', message: 'You can only upload files for your own exam.' });
+    }
 
     const checkPaper = await pool.query('SELECT question_paper_id FROM question_paper WHERE exam_id = $1', [exam_id]);
     if (checkPaper.rows.length === 0) {
@@ -215,6 +244,7 @@ export const uploadPaper = async (req, res) => {
       "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1",
       [exam_id]
     );
+    await notifyDepartmentHods(exam_id);
 
     res.status(200).json({ status: 'success', message: 'Exam paper uploaded successfully.', fileUrl });
   } catch (error) {
@@ -229,13 +259,16 @@ export const uploadPaper = async (req, res) => {
 export const submitToHOD = async (req, res) => {
   const { exam_id } = req.body;
   try {
-    const result = await pool.query(
-      "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1 AND status IN ('Draft', 'Rejected') RETURNING exam_id",
-      [exam_id]
-    );
+    const result = await pool.query(`
+      UPDATE exam SET status='PendingHOD', submitted_at=NOW()
+      WHERE exam_id=$1 AND status IN ('Draft','Rejected')
+        AND EXISTS (SELECT 1 FROM teacher t WHERE t.teacher_id=exam.teacher_id AND ($2='admin' OR t.user_id=$3))
+      RETURNING exam_id
+    `, [exam_id, req.sessionUser?.role, req.sessionUser?.sub]);
     if (result.rows.length === 0) {
       return res.status(400).json({ status: 'error', message: 'Exam not found or cannot be submitted in its current status.' });
     }
+    await notifyDepartmentHods(exam_id);
     res.status(200).json({ status: 'success', message: 'Exam submitted to HOD for review.' });
   } catch (error) {
     console.error('Error submitting exam to HOD:', error);

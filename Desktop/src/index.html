@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' http://localhost:5000 ws://localhost:5000; frame-src 'self' about: blob: data: http://localhost:5000 https:; form-action 'none'" />
   <title>PROCTR — Secure Exam Desktop Client</title>
   <link rel="stylesheet" href="styles/main.css" />
 </head>
@@ -61,11 +62,25 @@
           </button>
           <div class="login-options">
             <label class="login-remember"><input type="checkbox" />Remember me</label>
-            <span class="login-forgot">Forgot password?</span>
+            <button type="button" class="login-forgot" id="forgot-password-btn">Forgot password?</button>
           </div>
         </form>
       </div>
       </div>
+    </div>
+  </div>
+
+  <div id="forgot-password-modal" class="desktop-modal" hidden role="dialog" aria-modal="true" aria-labelledby="forgot-password-title">
+    <div class="desktop-modal-card">
+      <button type="button" id="forgot-password-close" class="desktop-modal-close" aria-label="Close">×</button>
+      <h2 id="forgot-password-title">Reset your password</h2>
+      <p>Enter your university email or student registration number. If an active account matches, we will email a reset link.</p>
+      <form id="forgot-password-form">
+        <label for="forgot-password-identifier">University email or registration number</label>
+        <input id="forgot-password-identifier" type="text" class="field-input" autocomplete="username" required />
+        <div id="forgot-password-message" class="error-banner" style="display:none;"></div>
+        <button type="submit" class="btn-primary" id="forgot-password-submit">Send reset link</button>
+      </form>
     </div>
   </div>
 
@@ -268,6 +283,9 @@
                 <button class="btn-primary" id="btn-submit-exam" style="padding:8px 16px; font-size:12px; width:auto; background:var(--teal);">
                   ✓ Submit Solution
                 </button>
+                <button class="btn-secondary" id="btn-leave-exam" style="padding:8px 16px; font-size:12px; display:none; border-color:#dc2626; color:#dc2626;">
+                  Leave Exam
+                </button>
               </div>
             </div>
             <div id="submit-status" style="margin-top:10px; font-size:12px; color:var(--teal); display:none; font-weight:700;"></div>
@@ -293,7 +311,7 @@
                 <div style="font-weight:700; font-size:14px; color:var(--navy);">Waiting for Invigilator to Reveal Paper...</div>
                 <div style="font-size:12px; margin-top:4px;">The question paper will appear here automatically once revealed by your invigilator.</div>
               </div>
-              <iframe id="student-paper-iframe" style="width:100%; height:450px; border:none; display:none;" src="about:blank"></iframe>
+              <iframe id="student-paper-iframe" sandbox="allow-same-origin" referrerpolicy="no-referrer" style="width:100%; height:450px; border:none; display:none;" src="about:blank"></iframe>
             </div>
           </div>
         </section>
@@ -536,7 +554,7 @@
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
               <div style="font-size:11px; font-weight:800; color:var(--grey-500);">TIME LEFT <strong id="teacher-timer" style="font-size:16px; color:var(--navy);">—</strong></div>
-              <button class="btn-secondary" id="btn-clear-student-filter" style="display:none; padding:5px 12px; font-size:11px;" onclick="clearStudentCandidateFilter()">
+              <button class="btn-secondary" id="btn-clear-student-filter" style="display:none; padding:5px 12px; font-size:11px;">
                 🔄 Show All Candidates
               </button>
               <span class="badge-count" id="teacher-alert-count">0 Alerts</span>
@@ -562,6 +580,15 @@
             </div>
           </div>
 
+          <!-- Out-of-range network approval requests -->
+          <div class="card" id="network-access-requests-card" style="display:none; margin-bottom:20px; border-left:5px solid #d97706;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <span>Network Access Requests (<span id="network-request-count">0</span>)</span>
+              <span style="font-size:11px; color:var(--grey-500); font-weight:600;">Students outside the assigned lab range require approval</span>
+            </div>
+            <div id="network-access-requests-list"></div>
+          </div>
+
           <!-- Connected Candidates Grid -->
           <div class="card" style="margin-bottom:20px;">
             <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -578,7 +605,7 @@
             <div style="font-size:13px; font-weight:800; color:var(--navy);">
               🔍 Filtered Inspection: <span id="filter-student-name" style="color:var(--teal);">--</span>
             </div>
-            <span style="font-size:11px; color:var(--grey-600); cursor:pointer; font-weight:700;" onclick="clearStudentCandidateFilter()">✕ Clear Filter</span>
+            <button type="button" id="clear-student-filter-inline" style="font-size:11px; color:var(--grey-600); cursor:pointer; font-weight:700; border:0; background:none;">✕ Clear Filter</button>
           </div>
 
           <div class="feed-list" id="teacher-feed">
@@ -627,7 +654,7 @@
         <button class="btn-secondary" id="submission-viewer-close" style="padding:7px 12px; font-size:11px;">Close</button>
       </div>
       <div style="padding:16px; background:#eef2ff;">
-        <iframe id="submission-viewer-iframe" style="width:100%; height:75vh; border:1px solid #dbe3f0; border-radius:12px; background:#fff; display:none;"></iframe>
+        <iframe id="submission-viewer-iframe" sandbox referrerpolicy="no-referrer" style="width:100%; height:75vh; border:1px solid #dbe3f0; border-radius:12px; background:#fff; display:none;"></iframe>
         <div id="submission-viewer-message" class="empty-state" style="display:none; min-height:200px; border:1px solid #dbe3f0; background:#fff; border-radius:12px;">Loading preview…</div>
       </div>
     </div>
