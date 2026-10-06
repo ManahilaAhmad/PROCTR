@@ -437,7 +437,7 @@ ipcMain.handle('stop-sensors', () => {
 });
 
 // IPC Handler to Start Exam & Create Course Folder in C:\PROCTR_Exams\
-ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, courseCode, sessionCode, isStudent, securityPolicy }) => {
+ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, submissionStudentId, courseCode, sessionCode, isStudent, securityPolicy }) => {
   const rootDir = getExamRoot();
   
   // Ensure Root directory exists
@@ -467,10 +467,10 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
       if (pythonProcess) {
         pythonProcess.kill();
       }
-      startPythonSensors(examId || 1, studentId || 101, event.sender, securityPolicy || {});
+      startPythonSensors(examId || 1, submissionStudentId || studentId || 101, event.sender, securityPolicy || {});
     }
 
-    if (isStudent !== false) activeSubmissions.set(event.sender.id, { workspacePath, examId, studentId });
+    if (isStudent !== false) activeSubmissions.set(event.sender.id, { workspacePath, examId, studentId: submissionStudentId || studentId });
     return {
       status: 'success',
       workspacePath: workspacePath,
@@ -616,24 +616,34 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
     if (!['localhost', '127.0.0.1'].includes(parsedBase.hostname) || parsedBase.protocol !== 'http:' || parsedBase.pathname.replace(/\/$/, '') !== '/api') {
       throw new Error('The submission API address is not trusted.');
     }
-    const result = await postJson(`${base}/submission/upload`, {
-      exam_id: examId,
-      student_id: studentId,
-      mac_address: getMacAddress(),
-      files
-    }, sessionToken);
+    // Use the durable queue for manual submissions too. This creates the
+    // encrypted local backup before contacting the backend and keeps retrying
+    // until Cloudinary returns a database-backed receipt.
+    const job = submissionQueue.save({
+      workspacePath,
+      examId,
+      studentId,
+      apiBase: base,
+      accessToken: sessionToken,
+      macAddress: getMacAddress()
+    });
+    await submissionQueue.flush();
+    const completedJob = submissionQueue.jobs.get(job.requestId);
 
-    if (!result.ok) {
-      console.error(`[Electron] Upload failed (HTTP ${result.status}):`, result.body?.message);
-      return { status: 'error', message: result.body?.message || `Upload failed (HTTP ${result.status}).` };
+    if (completedJob?.state !== 'synced') {
+      const message = completedJob?.message || 'Your submission was backed up on this PC and is waiting for Cloudinary confirmation.';
+      console.warn(`[Electron] Submission ${job.requestId} is pending cloud confirmation:`, message);
+      return { status: 'error', message };
     }
 
-    console.log(`[Electron] Submission uploaded: ${files.length} file(s) for student ${studentId}, exam ${examId}`);
+    const receipt = completedJob.receipt || {};
+    console.log(`[Electron] Submission confirmed in Cloudinary: ${files.length} file(s) for student ${studentId}, exam ${examId}`);
     return {
       status: 'success',
-      message: result.body.message,
-      file_count: result.body.file_count,
-      submission_id: result.body.submission_id
+      message: receipt.message || 'Submission saved to Cloudinary successfully.',
+      file_count: receipt.file_count ?? files.length,
+      submission_id: receipt.submission_id,
+      request_id: job.requestId
     };
   } catch (err) {
     console.error('[Electron] Error submitting exam work:', err.message);

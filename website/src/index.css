@@ -52,6 +52,8 @@
 
 body {
   margin: 0;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
 }
 
 #root {
@@ -63,7 +65,39 @@ body {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
+
+button,
+input,
+select,
+textarea {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.sidebar-logout-btn { transition: transform .18s ease, background .18s ease, box-shadow .18s ease; }
+.sidebar-logout-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,.48) !important; box-shadow: 0 0 24px rgba(58,177,215,.22), 0 8px 20px rgba(47,110,139,.14) !important; }
+
+/* Shared PROCTR application type scale. */
+.admin-glass-page,
+.admin-glass-page h1,
+.admin-glass-page h2,
+.admin-glass-page h3,
+.admin-glass-page p,
+.admin-glass-page label,
+.admin-glass-page table,
+.admin-glass-page button,
+.admin-glass-page input,
+.admin-glass-page select,
+.admin-glass-page textarea {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+}
+.admin-glass-page h1 { font-size: 30px !important; line-height: 1.15 !important; font-weight: 800 !important; letter-spacing: -0.5px !important; }
+.admin-glass-page h2, .admin-glass-page h3 { line-height: 1.25 !important; font-weight: 800 !important; letter-spacing: -0.3px !important; }
+.admin-glass-page p { font-size: 14px; line-height: 1.55; }
+.admin-glass-page input, .admin-glass-page select, .admin-glass-page textarea { font-size: 14px !important; line-height: 1.35 !important; }
+.admin-glass-page table { font-size: 13px; line-height: 1.4; }
 
 h1,
 h2 {
@@ -195,10 +229,34 @@ code {
   align-items: stretch;
 }
 
+@media (min-width: 769px) {
+  .resp-layout-container > .resp-sidebar {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 236px !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    z-index: 1000 !important;
+  }
+
+  .resp-layout-container > .resp-sidebar + * {
+    width: calc(100% - 236px);
+    margin-left: 236px;
+    min-height: 100vh;
+  }
+}
+
 .resp-sidebar {
   width: 236px;
   flex-shrink: 0;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: fixed;
+  top: 0;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .resp-mobile-header {
@@ -233,6 +291,7 @@ code {
     z-index: 1000;
     transform: translateX(-100%);
     box-shadow: 24px 0 48px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
   }
 
   .resp-sidebar.open {

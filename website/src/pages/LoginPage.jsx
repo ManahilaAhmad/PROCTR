@@ -213,7 +213,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
           setRole(data.user.userType);
           setUser(data.user);
           const dest = {
-            admin: "admin",
+            admin: "admin-students",
             student: "student",
             teacher: "teacher",
             hod: "hod",

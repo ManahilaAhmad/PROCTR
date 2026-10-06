@@ -1328,6 +1328,7 @@ if (joinExamForm) {
         const result = await window.proctrAPI.startExamWorkspace({
           examId: sessionObj.examId || examCode,
           studentId: regNo,
+          submissionStudentId: currentUser?.studentId || currentUser?.userId,
           courseCode: examCode,
           securityPolicy: {
             ...(sessionObj.securityPolicy || {}),

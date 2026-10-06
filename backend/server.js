@@ -126,6 +126,11 @@ pool.query(`
       ALTER TABLE user_notification ADD CONSTRAINT user_notification_notification_type_check
       CHECK (notification_type IN ('Exam','Schedule','Approved','AI','MOSS','Invigilation','System'));
     END IF;
+
+    ALTER TABLE student ADD COLUMN IF NOT EXISTS section_id INT;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'student_section_fk') THEN
+      ALTER TABLE student ADD CONSTRAINT student_section_fk FOREIGN KEY (section_id) REFERENCES section(section_id);
+    END IF;
   END $$;
 `).catch(err => console.log("Database constraint check:", err.message));
 ensureSubmissionSchema().catch(err => console.log('Submission schema check:', err.message));

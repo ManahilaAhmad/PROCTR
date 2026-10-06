@@ -3,7 +3,6 @@ import { C } from "./theme/colors";
 import { Icon } from "./theme/icons";
 import Sidebar from "./components/common/Sidebar";
 import LoginPage from "./pages/LoginPage";
-import Homepage from "./pages/Homepage";
 import AboutPage from "./pages/AboutPage";
 import TeacherPage from "./pages/TeacherPage";
 import StudentPage from "./pages/StudentPage";
@@ -22,7 +21,7 @@ import SubmissionsPage from "./pages/SubmissionsPage";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { API_BASE_URL } from "./config/apiConfig";
 
-const dashboardPages = ["admin", "teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
+const dashboardPages = ["teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
 
 export default function App() {
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
@@ -44,7 +43,7 @@ export default function App() {
     const savedUser = localStorage.getItem("proctr_user");
     const savedPage = localStorage.getItem("proctr_page");
     if (savedUser && savedPage) {
-      return savedPage;
+      return ["admin", "admin-security", "admin-users"].includes(savedPage) ? "admin-students" : savedPage;
     }
     return "login";
   });
@@ -74,12 +73,13 @@ export default function App() {
   }, [user]);
 
   const navigateTo = (p) => {
-    setPage(p);
+    const targetPage = p === "home" ? "login" : p;
+    setPage(targetPage);
     setSidebarOpen(false);
-    if (p === "login" || p === "forgot-password" || p === "reset-password") {
+    if (targetPage === "login" || targetPage === "forgot-password" || targetPage === "reset-password") {
       localStorage.removeItem("proctr_page");
     } else {
-      localStorage.setItem("proctr_page", p);
+      localStorage.setItem("proctr_page", targetPage);
     }
   };
 
@@ -97,11 +97,14 @@ export default function App() {
     switch (page) {
       case "submissions":
         return ["student", "teacher"].includes(user?.userType) ? <SubmissionsPage user={user} /> : <p>Access denied.</p>;
-      case "admin":
       case "admin-labs":
-      case "admin-settings":
-      case "admin-users":
-      case "admin-security":
+      case "admin-students":
+      case "admin-teachers":
+      case "admin-hod":
+      case "admin-coordinator":
+      case "admin-director":
+      case "admin-dec":
+      case "admin-admins":
         return <AdminPage activePage={page} setPage={navigateTo} user={user} />;
       case "teacher":
         return <TeacherPage activePage="teacher" setPage={navigateTo} user={user} />;
@@ -155,14 +158,14 @@ export default function App() {
   }
 
   function renderPage() {
-    if (page === "home") return <Homepage setPage={navigateTo} />;
+    if (page === "home") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
     if (page === "about") return <AboutPage setPage={navigateTo} />;
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
     if (page === "forgot-password") return <ForgotPasswordPage setPage={navigateTo} />;
     if (page === "reset-password") return <ResetPasswordPage token={resetToken} setPage={navigateTo} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["submissions", "admin-labs", "admin-settings", "admin-users", "admin-security", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["submissions", "admin-labs", "admin-students", "admin-teachers", "admin-hod", "admin-coordinator", "admin-director", "admin-dec", "admin-admins", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (
@@ -203,7 +206,7 @@ export default function App() {
           />
 
           <Sidebar
-            role={role}
+            role={role || (page.startsWith("admin") ? "admin" : role)}
             activePage={page}
             setPage={navigateTo}
             onLogout={handleLogout}
@@ -216,7 +219,7 @@ export default function App() {
         </div>
       );
     }
-    return <Homepage setPage={navigateTo} />;
+    return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
   }
 
   return (
@@ -278,7 +281,7 @@ export default function App() {
         .tab-btn:hover { color: ${C.teal} !important; }
         tr.animated-row { animation: rowIn .25s ease both; }
       `}</style>
-      <div key={page} className="page-enter">
+      <div>
         {renderPage()}
       </div>
     </div>

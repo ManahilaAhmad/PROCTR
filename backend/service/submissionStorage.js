@@ -127,7 +127,8 @@ export async function uploadSubmissionAssets({ examId, studentId, teacherId, fil
     }
     manifest.report = await uploadAsset(REPORT_FILENAME, Buffer.from(reportHtml, 'utf8'));
     return manifest;
-  } catch {
+  } catch (error) {
+    console.error('[Submissions] Cloudinary upload failed:', error?.http_code || error?.code || error?.message || 'unknown error');
     await deleteSubmissionAssets(manifest);
     throw storageError('Cloud submission upload failed. Please retry.', 502);
   }
