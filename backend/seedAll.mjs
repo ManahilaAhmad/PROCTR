@@ -293,11 +293,10 @@ try {
   // ══════════════════════════════════════════════════════════════════
   console.log('\n📋 Registering Coordinator profiles...');
 
-  const coordRow = await insert(
-    'INSERT INTO coordinator (user_id, department_id) VALUES ($1,$2) RETURNING coordinator_id',
+  await client.query(
+    'INSERT INTO coordinator (user_id, department_id) VALUES ($1,$2)',
     [u.namra, deptIds['CS']]
   );
-  const csCoordId = coordRow.coordinator_id;
   console.log('   ✅ Mam Namra Khan — CS Coordinator');
 
   for (const p of placeholders) {
@@ -337,9 +336,9 @@ try {
   const bscs2023Id = batchIds['CS'][2023];
 
   const studentData = [
-    { key: 'shanawar',  uid: u.shanawar,  reg: '231593' },
-    { key: 'manahil',   uid: u.manahil,   reg: '231594' },
-    { key: 'sumaiyyah', uid: u.sumaiyyah, reg: '231595' },
+    { key: 'shanawar',  uid: u.shanawar,  reg: '2023-CS-001' },
+    { key: 'manahil',   uid: u.manahil,   reg: '2023-CS-002' },
+    { key: 'sumaiyyah', uid: u.sumaiyyah, reg: '2023-CS-003' },
   ];
   for (const s of studentData) {
     const r = await insert(
@@ -403,8 +402,6 @@ try {
   await addCourse('BSCS', 'CS604', 'Database Systems',                4, true,  6);
   await addCourse('BSCS', 'CS605', 'Software Engineering',            3, false, 6);
   await addCourse('BSCS', 'CS606', 'Compiler Construction',           3, true,  6);
-  await addCourse('BSCS', 'CS610', 'Mobile Application Development',  4, true,  6);
-  await addCourse('BSCS', 'CS612', 'Cloud & Distributed Systems',     4, true,  6);
 
   // CS Other Semesters (for completeness)
   await addCourse('BSCS', 'CS101', 'Programming Fundamentals',        3, true,  1);
@@ -466,10 +463,8 @@ try {
   offeringIds['CS603'] = await addOffering(section6A, 'CS603', teacherIds.amnah);
   offeringIds['CS604'] = await addOffering(section6A, 'CS604', teacherIds.sumaira);
   offeringIds['CS606'] = await addOffering(section6A, 'CS606', teacherIds.amnah);
-  offeringIds['CS610'] = await addOffering(section6A, 'CS610', teacherIds.amnah);
-  offeringIds['CS612'] = await addOffering(section6A, 'CS612', teacherIds.amnah);
 
-  console.log('   ✅ 7 course offerings created (CS601-CS604, CS606, CS610, CS612 → Section 6A)');
+  console.log('   ✅ 5 course offerings created (CS601-CS604, CS606 → Section 6A)');
 
   // ── Also create offerings for 6B and 6C (other sections, same teachers) ──
   const section6B = sectionIds['CS']['6B'];
@@ -486,7 +481,7 @@ try {
   // STEP 16 — STUDENT ENROLLMENTS (3 students → all CS 6A offerings)
   // ══════════════════════════════════════════════════════════════════
   console.log('\n📝 Enrolling students...');
-  const allEnrollOfferings = Object.values(offeringIds); // 6A offerings
+  const allEnrollOfferings = Object.values(offeringIds).slice(0, 5); // only 6A offerings
   for (const [name, sid] of Object.entries(studentIds)) {
     for (const coid of allEnrollOfferings) {
       await client.query(
@@ -507,8 +502,6 @@ try {
     'CS603': { tid: teacherIds.amnah,   dur: 90  },
     'CS604': { tid: teacherIds.sumaira, dur: 120 },
     'CS606': { tid: teacherIds.amnah,   dur: 90  },
-    'CS610': { tid: teacherIds.amnah,   dur: 90  },
-    'CS612': { tid: teacherIds.amnah,   dur: 90  },
   };
   const examIds = {};
   for (const [code, cfg] of Object.entries(examMap)) {
@@ -519,37 +512,6 @@ try {
     );
     examIds[code] = r.exam_id;
     console.log(`   ✅ Draft exam: ${code} (exam_id=${r.exam_id})`);
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // STEP 17b — EXAM SCHEDULE & INVIGILATION ASSIGNMENTS
-  // ══════════════════════════════════════════════════════════════════
-  console.log('\n📅 Creating scheduled exam sessions...');
-  await client.query('ALTER TABLE invigilator_assignment DROP CONSTRAINT IF EXISTS invigilator_assignment_assignment_status_check');
-  const lab8Id = labIds['Lab-8'];
-  const lab5Id = labIds['Lab-5'];
-
-  const scheduleAssignments = [
-    { code: 'CS603', tid: teacherIds.amnah,   lab: lab8Id, date: '2026-08-25', start: '09:00', end: '11:00' },
-    { code: 'CS606', tid: teacherIds.amnah,   lab: lab8Id, date: '2026-08-26', start: '11:30', end: '13:30' },
-    { code: 'CS601', tid: teacherIds.sumaira, lab: lab5Id, date: '2026-08-27', start: '09:00', end: '11:00' },
-    { code: 'CS602', tid: teacherIds.ayaz,    lab: lab5Id, date: '2026-08-28', start: '14:00', end: '16:00' },
-    { code: 'CS604', tid: teacherIds.sumaira, lab: lab8Id, date: '2026-08-29', start: '10:00', end: '12:00' },
-  ];
-
-  for (const s of scheduleAssignments) {
-    const eid = examIds[s.code];
-    const schedRow = await insert(
-      `INSERT INTO exam_schedule (exam_id, lab_id, coordinator_id, exam_date, start_time, end_time, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'Scheduled') RETURNING schedule_id`,
-      [eid, s.lab, csCoordId, s.date, s.start, s.end]
-    );
-    await client.query(
-      `INSERT INTO invigilator_assignment (schedule_id, teacher_id, assignment_status)
-       VALUES ($1, $2, 'Assigned')`,
-      [schedRow.schedule_id, s.tid]
-    );
-    console.log(`   ✅ Scheduled: ${s.code} (Lab assigned, status='Scheduled')`);
   }
 
   // ══════════════════════════════════════════════════════════════════

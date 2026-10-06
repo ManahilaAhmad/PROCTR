@@ -1,6 +1,6 @@
 import { C } from "../../theme/colors";
 
-export default function Btn({ children, variant = "primary", onClick, style = {}, size = "md", disabled = false }) {
+export default function Btn({ children, variant = "primary", onClick, style = {}, size = "md" }) {
   const pad = size === "sm" ? "7px 16px" : size === "lg" ? "13px 28px" : "9px 20px";
   const base = { border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: size === "sm" ? 13 : 14, padding: pad, transition: "opacity .15s", display: "inline-flex", alignItems: "center", gap: 6, ...style };
   const variants = {
@@ -11,5 +11,5 @@ export default function Btn({ children, variant = "primary", onClick, style = {}
     danger: { background: C.red, color: C.white },
     success: { background: C.green, color: C.white },
   };
-  return <button className={`dashboard-btn dashboard-btn-${variant}`} disabled={disabled} style={{ ...base, ...variants[variant], ...(disabled ? { opacity: 0.5, cursor: "wait" } : {}) }} onClick={onClick}>{children}</button>;
+  return <button style={{ ...base, ...variants[variant] }} onClick={onClick}>{children}</button>;
 }

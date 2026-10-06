@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { C } from "./theme/colors";
 import { Icon } from "./theme/icons";
 import Sidebar from "./components/common/Sidebar";
@@ -12,20 +12,12 @@ import DirectorPage from "./pages/DirectorPage";
 import CoordinatorPage from "./pages/CoordinatorPage";
 import InvigilatorPage from "./pages/InvigilatorPage";
 import DECPage from "./pages/DECPage";
-import LiveDashboardPage from "./pages/LiveDashboardPage";
-import PostExamReportPage from "./pages/PostExamReportPage";
-import AdminPage from "./pages/AdminPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import SubmissionsPage from "./pages/SubmissionsPage";
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
-import { API_BASE_URL } from "./config/apiConfig";
 
-const dashboardPages = ["admin", "teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
+const dashboardPages = ["teacher", "student", "hod", "director", "coordinator", "invigilator", "dec"];
 
 export default function App() {
-  const resetToken = new URLSearchParams(window.location.search).get("reset_token");
   const [user, setUser] = useState(() => {
     try {
       const saved = localStorage.getItem("proctr_user");
@@ -40,7 +32,6 @@ export default function App() {
   });
 
   const [page, setPage] = useState(() => {
-    if (resetToken) return "reset-password";
     const savedUser = localStorage.getItem("proctr_user");
     const savedPage = localStorage.getItem("proctr_page");
     if (savedUser && savedPage) {
@@ -51,40 +42,15 @@ export default function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    fetch(`${API_BASE_URL}/auth/session`, { credentials: "include" })
-      .then(async response => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || Number(data.session?.userId) !== Number(user.userId) || data.session?.userType !== user.userType) {
-          throw new Error("Session is no longer valid.");
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        localStorage.removeItem("proctr_user");
-        localStorage.removeItem("proctr_role");
-        localStorage.removeItem("proctr_page");
-        setUser(null);
-        setRole(null);
-        setPage("login");
-      });
-    return () => { cancelled = true; };
-  }, [user]);
-
   const navigateTo = (p) => {
     setPage(p);
     setSidebarOpen(false);
-    if (p === "login" || p === "forgot-password" || p === "reset-password") {
-      localStorage.removeItem("proctr_page");
-    } else {
+    if (p !== "login") {
       localStorage.setItem("proctr_page", p);
     }
   };
 
   const handleLogout = () => {
-    fetch(`${API_BASE_URL}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
     localStorage.removeItem("proctr_user");
     localStorage.removeItem("proctr_role");
     localStorage.removeItem("proctr_page");
@@ -95,14 +61,6 @@ export default function App() {
 
   function renderDashboardContent() {
     switch (page) {
-      case "submissions":
-        return ["student", "teacher"].includes(user?.userType) ? <SubmissionsPage user={user} /> : <p>Access denied.</p>;
-      case "admin":
-      case "admin-labs":
-      case "admin-settings":
-      case "admin-users":
-      case "admin-security":
-        return <AdminPage activePage={page} setPage={navigateTo} user={user} />;
       case "teacher":
         return <TeacherPage activePage="teacher" setPage={navigateTo} user={user} />;
       case "upload":
@@ -145,10 +103,6 @@ export default function App() {
         return <InvigilatorPage activePage="start" setPage={navigateTo} user={user} />;
       case "inv-monitor":
         return <InvigilatorPage activePage="monitor" setPage={navigateTo} user={user} />;
-      case "live-monitor":
-        return <LiveDashboardPage setPage={navigateTo} user={user} />;
-      case "exam-reports":
-        return <PostExamReportPage setPage={navigateTo} user={user} />;
       default:
         return <DECPage activePage="dec" setPage={navigateTo} user={user} />;
     }
@@ -158,15 +112,13 @@ export default function App() {
     if (page === "home") return <Homepage setPage={navigateTo} />;
     if (page === "about") return <AboutPage setPage={navigateTo} />;
     if (page === "login") return <LoginPage setPage={navigateTo} setRole={setRole} setUser={setUser} />;
-    if (page === "forgot-password") return <ForgotPasswordPage setPage={navigateTo} />;
-    if (page === "reset-password") return <ResetPasswordPage token={resetToken} setPage={navigateTo} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["submissions", "admin-labs", "admin-settings", "admin-users", "admin-security", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["upload", "inv-schedule", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (
-        <div className="resp-layout-container dashboard-shell">
+        <div className="resp-layout-container">
           {/* Mobile top navigation header */}
           <header className="resp-mobile-header">
             <button

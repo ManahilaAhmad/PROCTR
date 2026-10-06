@@ -8,8 +8,6 @@ import Btn from "../components/common/Btn";
 import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
-import { API_BASE_URL } from "../config/apiConfig";
-import { trustedFileUrl } from "../utils/safeUrl";
 
 export default function HODPage({ activePage, setPage }) {
   const [activeTab, setActiveTab] = useState(activePage === "reports" ? "reports" : "queue");
@@ -24,7 +22,7 @@ export default function HODPage({ activePage, setPage }) {
   const [hodComment, setHodComment] = useState("");
 
   const fetchData = () => {
-    fetch(`${API_BASE_URL}/hod/queue`)
+    fetch("http://localhost:5000/api/hod/queue")
       .then(res => res.json())
       .then(data => {
         if (data.status === "success" && Array.isArray(data.queue)) {
@@ -33,7 +31,7 @@ export default function HODPage({ activePage, setPage }) {
       })
       .catch(() => {});
 
-    fetch(`${API_BASE_URL}/hod/decisions`)
+    fetch("http://localhost:5000/api/hod/decisions")
       .then(res => res.json())
       .then(data => {
         if (data.status === "success" && Array.isArray(data.decisions)) {
@@ -48,7 +46,7 @@ export default function HODPage({ activePage, setPage }) {
   }, []);
 
   function handleDecision(examId, decision, commentText) {
-    fetch(`${API_BASE_URL}/hod/review`, {
+    fetch("http://localhost:5000/api/hod/review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -72,12 +70,6 @@ export default function HODPage({ activePage, setPage }) {
 
   const safeQueue = (Array.isArray(queue) ? queue : []).filter(Boolean);
   const safeDecisions = (Array.isArray(decisions) ? decisions : []).filter(Boolean);
-  const decisionBreakdown = [
-    { label: "Approved", count: safeDecisions.filter(d => d.decision === "Approved").length, color: C.teal },
-    { label: "Rejected", count: safeDecisions.filter(d => d.decision === "Rejected").length, color: C.red },
-    { label: "Pending", count: safeQueue.length, color: C.amber },
-  ];
-  const maxDecisionCount = Math.max(1, ...decisionBreakdown.map(item => item.count));
 
   return (
     <PageWrap title={activeTab === "reports" ? "HOD Reports" : "Review Queue"} subtitle={activeTab === "reports" ? "Summary of exam approvals and faculty submissions" : "Exam papers awaiting your approval"}>
@@ -96,8 +88,7 @@ export default function HODPage({ activePage, setPage }) {
                 ["Submitted Date", preview.submitted_at ? new Date(preview.submitted_at).toLocaleDateString() : "Pending"],
                 ["Total Marks", preview.total_marks || 100],
                 ["Duration", `${preview.duration || 120} mins`],
-                ["Exam Paper", trustedFileUrl(preview.exam_paper_url) ? <a href={trustedFileUrl(preview.exam_paper_url)} target="_blank" rel="noopener noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Exam Paper ({preview.exam_paper_url.toLowerCase().includes('.docx') ? 'DOCX' : 'PDF'}) ↗</a> : "No trusted file uploaded"],
-                ["Rubric", trustedFileUrl(preview.rubric_url) ? <a href={trustedFileUrl(preview.rubric_url)} target="_blank" rel="noopener noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Marking Rubric ↗</a> : "No trusted rubric uploaded"],
+                ["Exam Paper", preview.exam_paper_url ? <a href={preview.exam_paper_url} target="_blank" rel="noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Paper PDF</a> : "No File Uploaded"],
               ].map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: C.grey50, borderRadius: 8 }}>
                   <span style={{ fontSize: 13, color: C.grey500 }}>{l}</span>
@@ -185,11 +176,11 @@ export default function HODPage({ activePage, setPage }) {
         </div>
         <Card style={{ marginBottom: 22 }}>
           <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Decision Breakdown</h3>
-          <div role="img" aria-label={`Decision breakdown: ${decisionBreakdown.map(item => `${item.label} ${item.count}`).join(", ")}`} style={{ display: "flex", gap: 16, alignItems: "stretch", height: 146, marginBottom: 10 }}>
-            {decisionBreakdown.map(({ label, count, color }) => (
-              <div key={label} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 80, marginBottom: 10 }}>
+            {[["Approved", safeDecisions.filter(d => d.decision === "Approved").length, C.teal], ["Rejected", safeDecisions.filter(d => d.decision === "Rejected").length, C.red], ["Pending", safeQueue.length, C.amber]].map(([label, count, color]) => (
+              <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 13, fontWeight: 800, color: C.navy }}>{count}</span>
-                <div style={{ width: "min(100%, 96px)", height: `${Math.max((count / maxDecisionCount) * 100, 4)}px`, flex: "0 0 auto", background: color, borderRadius: "5px 5px 0 0", opacity: 0.85 }} />
+                <div style={{ width: "100%", height: Math.max(count * 20, 8), background: color, borderRadius: "5px 5px 0 0", opacity: 0.85 }} />
                 <span style={{ fontSize: 11, color: C.grey400, fontWeight: 600 }}>{label}</span>
               </div>
             ))}

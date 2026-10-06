@@ -9,8 +9,6 @@ import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
-import { API_BASE_URL } from "../config/apiConfig";
-import { openTrustedFile } from "../utils/safeUrl";
 
 export default function DirectorPage({ activePage, setPage }) {
   const [tab, setTab] = useState(
@@ -37,15 +35,15 @@ export default function DirectorPage({ activePage, setPage }) {
   const [sharedPapers, setSharedPapers] = useState([]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/schedule`)
+    fetch("http://localhost:5000/api/schedule")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSchedule(data.schedule); });
 
-    fetch(`${API_BASE_URL}/labs`)
+    fetch("http://localhost:5000/api/labs")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setLabs(data.labs); });
 
-    fetch(`${API_BASE_URL}/director/papers`)
+    fetch("http://localhost:5000/api/director/papers")
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSharedPapers(data.papers); });
   }, []);
@@ -171,7 +169,7 @@ export default function DirectorPage({ activePage, setPage }) {
                   p.approved_at ? new Date(p.approved_at).toLocaleDateString() : "—",
                   p.shared_with_dec_at ? new Date(p.shared_with_dec_at).toLocaleDateString() : "—",
                   p.exam_paper_url ? (
-                    <Btn key={p.exam_id + "btn"} variant="primary" size="sm" onClick={() => openTrustedFile(p.exam_paper_url)}>
+                    <Btn key={p.exam_id + "btn"} variant="primary" size="sm" onClick={() => window.open(p.exam_paper_url, "_blank")}>
                       View Paper
                     </Btn>
                   ) : (
