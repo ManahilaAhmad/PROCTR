@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
@@ -11,6 +12,7 @@ const MAX_FILES = 500;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SUBMISSION_BYTES = 40 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
+const UPLOAD_RETRY_LIMIT = 3;
 
 function storageError(message, status) {
   return Object.assign(new Error(message), { status });
@@ -79,22 +81,52 @@ function identifier(value) {
   return result;
 }
 
-function uploadBuffer(buffer, publicId) {
+function isTransientUploadError(error) {
+  return ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'].includes(error?.code);
+}
+
+function wait(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function uploadBufferOnce(buffer, publicId) {
   return new Promise((resolve, reject) => {
+    // Node 24 can keep TLS connections alive by default. A fresh connection
+    // avoids reusing a Cloudinary socket that a campus proxy has reset.
+    const agent = new https.Agent({ keepAlive: false, maxSockets: 1 });
     const stream = cloudinary.uploader.upload_stream({
       public_id: publicId,
       resource_type: 'raw',
       type: 'authenticated',
-      overwrite: false,
+      // A retry after a lost response may find that Cloudinary accepted the
+      // first request. Reusing this UUID with overwrite makes that retry
+      // idempotent instead of creating duplicate submission assets.
+      overwrite: true,
       timeout: REQUEST_TIMEOUT_MS,
+      agent,
       disable_promise: true
     }, (error, result) => {
+      agent.destroy();
       if (error || !result?.public_id) reject(error || new Error('Missing upload result.'));
       else resolve(result);
     });
-    stream.once('error', reject);
+    stream.once('error', error => { agent.destroy(); reject(error); });
     stream.end(buffer);
   });
+}
+
+async function uploadBuffer(buffer, publicId) {
+  let lastError;
+  for (let attempt = 1; attempt <= UPLOAD_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await uploadBufferOnce(buffer, publicId);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientUploadError(error) || attempt === UPLOAD_RETRY_LIMIT) throw error;
+      await wait(500 * attempt);
+    }
+  }
+  throw lastError;
 }
 
 export async function uploadSubmissionAssets({ examId, studentId, teacherId, files, reportHtml }) {
