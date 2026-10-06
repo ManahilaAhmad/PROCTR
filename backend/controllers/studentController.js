@@ -52,7 +52,11 @@ export const getSchedule = async (req, res) => {
 
         -- Invigilator info
         u_inv.first_name || ' ' || u_inv.last_name AS invigilator_name,
-        ia.assignment_status
+        ia.assignment_status,
+
+        -- Live Session Info
+        les.status AS live_session_status,
+        les.session_code AS live_session_code
 
       FROM enrollment en
       JOIN course_offering co ON en.course_offering_id = co.course_offering_id
@@ -66,6 +70,9 @@ export const getSchedule = async (req, res) => {
 
       -- LEFT JOIN exam schedule
       LEFT JOIN exam_schedule es ON es.exam_id = e.exam_id
+
+      -- LEFT JOIN live_exam_session
+      LEFT JOIN live_exam_session les ON les.exam_id = e.exam_id AND les.status = 'ACTIVE'
 
       -- LEFT JOIN lab
       LEFT JOIN lab l ON es.lab_id = l.lab_id

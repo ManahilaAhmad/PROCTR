@@ -2,7 +2,7 @@ import { C } from "../../theme/colors";
 
 export default function PageWrap({ title, subtitle, children, actions }) {
   return (
-    <div style={{ flex: 1, background: C.grey50, minHeight: "100vh", overflow: "auto" }}>
+    <div className="dashboard-page" style={{ flex: 1, background: C.grey50, minHeight: "100vh", overflow: "auto" }}>
       <div className="resp-page-padding">
         <div className="resp-flex-space-between" style={{ alignItems: "flex-start", marginBottom: 30 }}>
           <div style={{ animation: "slideInLeft .4s cubic-bezier(.22,.68,0,1.1) both" }}>

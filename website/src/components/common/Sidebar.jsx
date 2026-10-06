@@ -1,14 +1,26 @@
 import { C } from "../../theme/colors";
 import { Icon } from "../../theme/icons";
+import proctrWhiteLogo from "../../assets/PROCTR - white bg.png";
 
 const navItems = {
+  admin: [
+    { id: "admin", icon: Icon.chart, label: "Control Center" },
+    { id: "admin-labs", icon: Icon.server, label: "Labs & Networks" },
+    { id: "admin-settings", icon: Icon.shield, label: "System Settings" },
+    { id: "admin-users", icon: Icon.users, label: "User Management" },
+    { id: "admin-security", icon: Icon.shield, label: "Security Audit" },
+  ],
   teacher: [
+    { id: "submissions", icon: Icon.fileText, label: "Submitted Work" },
     { id: "teacher", icon: Icon.clipboardList, label: "My Exams" },
     { id: "upload", icon: Icon.upload, label: "Upload Exam" },
+    { id: "live-monitor", icon: Icon.bell, label: "Live Monitor" },
+    { id: "exam-reports", icon: Icon.fileText, label: "Post-Exam Reports" },
     { id: "__divider__", icon: null, label: "Invigilation Duty", isDivider: true },
     { id: "inv-schedule", icon: Icon.clipboard, label: "My Schedule" },
   ],
   student: [
+    { id: "submissions", icon: Icon.fileText, label: "Submitted Work" },
     { id: "student", icon: Icon.home, label: "Dashboard" },
     { id: "results", icon: Icon.chart, label: "My Results" },
   ],
@@ -34,19 +46,27 @@ const navItems = {
   ],
 };
 
+const roleLabels = {
+  admin: "System Administrator",
+  student: "Student",
+  teacher: "Teacher",
+  hod: "Head of Department",
+  coordinator: "Coordinator",
+  director: "Director Examination",
+  dec: "Department Exam Committee",
+  invigilator: "Invigilator",
+};
+
 export default function Sidebar({ role, activePage, setPage, onLogout, sidebarOpen, setSidebarOpen }) {
   const items = navItems[role] || [];
   return (
-    <aside className={`resp-sidebar ${sidebarOpen ? "open" : ""}`} style={{ background: C.navy, minHeight: "100%", display: "flex", flexDirection: "column" }}>
+    <aside className={`resp-sidebar dashboard-sidebar ${sidebarOpen ? "open" : ""}`} style={{ background: C.navy, minHeight: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "20px 22px 18px", borderBottom: "1px solid rgba(255,255,255,.08)", animation: "fadeIn .4s ease both" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: C.teal, display: "flex", alignItems: "center", justifyContent: "center", color: C.white }}>
-              {Icon.shield}
-            </div>
-            <div>
-              <div style={{ color: C.white, fontWeight: 800, fontSize: 16, letterSpacing: -0.3 }}>PROCTR</div>
-              <div style={{ color: C.teal, fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{role}</div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1 }}>
+              <img src={proctrWhiteLogo} alt="PROCTR" style={{ width: 164, height: 33, objectFit: "cover", objectPosition: "center 37%" }} />
+              <div style={{ marginLeft: 28, color: C.white, fontSize: 10, fontWeight: 800, letterSpacing: 0.7, textTransform: "uppercase" }}>{roleLabels[String(role).toLowerCase()] || role}</div>
             </div>
           </div>
           <button

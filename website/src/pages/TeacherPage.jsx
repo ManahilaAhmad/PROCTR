@@ -11,6 +11,8 @@ import StatCard from "../components/common/StatCard";
 import Table from "../components/common/Table";
 import Badge from "../components/common/Badge";
 import NotificationBell from "../components/common/NotificationBell";
+import { API_BASE_URL } from "../config/apiConfig";
+import { openTrustedFile } from "../utils/safeUrl";
 
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -40,10 +42,25 @@ export default function TeacherPage({ activePage, setPage, user }) {
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState(null);
+  const [rubricFile, setRubricFile] = useState(null);
+  const [starterFile, setStarterFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadNotes, setUploadNotes] = useState("");
   const fileInputRef = useRef(null);
+
+  async function uploadExamAsset(examId, fileType, file) {
+    if (!file) return;
+    const assetData = new FormData();
+    assetData.append("exam_id", examId);
+    assetData.append("file_type", fileType);
+    assetData.append("file", file);
+    const response = await fetch(`${API_BASE_URL}/exam-files/upload`, { method: "POST", body: assetData });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || `Failed to upload ${fileType.replace("_", " ")}.`);
+    }
+  }
 
   // Swap state
   const [swapModal,  setSwapModal]  = useState(null); // duty to swap
@@ -83,83 +100,71 @@ export default function TeacherPage({ activePage, setPage, user }) {
     if (!selectedFile) { alert("Please choose a file to upload."); return; }
 
     const formData = new FormData();
-    formData.append("file", selectedFile);
     formData.append("exam_id", selectedExamForUpload);
     if (uploadNotes.trim()) formData.append("notes", uploadNotes.trim());
+    formData.append("file", selectedFile);
 
     setUploading(true);
-    fetch("http://localhost:5000/api/exams/upload", {
+    fetch(`${API_BASE_URL}/exams/upload`, {
       method: "POST",
       body: formData, // no Content-Type header — browser sets multipart boundary automatically
     })
-      .then(res => res.json())
-      .then(data => {
-        setUploading(false);
-        if (data.status === "success") {
-          showToast("Exam paper uploaded successfully!");
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.status !== "success") throw new Error(data.message || "Failed to upload exam paper.");
+        await uploadExamAsset(selectedExamForUpload, "rubric", rubricFile);
+        await uploadExamAsset(selectedExamForUpload, "starter_file", starterFile);
+      })
+      .then(() => {
+          const attachments = [rubricFile && "rubric", starterFile && "starter code"].filter(Boolean);
+          showToast(`Exam paper uploaded${attachments.length ? ` with ${attachments.join(" and ")}` : ""}!`);
           setSelectedExamForUpload("");
           setSelectedFile(null);
+          setRubricFile(null);
+          setStarterFile(null);
           setUploadNotes("");
           fetchData();
-        } else {
-          alert(data.message || "Failed to upload exam paper.");
-        }
       })
-      .catch(() => {
-        setUploading(false);
-        alert("Network error. Upload failed.");
-      });
+      .catch(error => alert(error.message || "Network error. Upload failed."))
+      .finally(() => setUploading(false));
   }
 
   function shareWithDEC(examId) {
-    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
+    fetch(`${API_BASE_URL}/exams/${examId}/share-dec`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user?.userId }),
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
-          showToast("Exam paper shared with Director Exam!");
+          showToast("Exam paper shared with Director Examination!");
           fetchData();
         } else {
-          alert(data.message || "Failed to share with Director Exam.");
+          alert(data.message || "Failed to share exam paper.");
         }
       })
-      .catch(() => alert("Network error. Failed to share with Director Exam."));
+      .catch(() => alert("Connection error."));
   }
 
   const fetchData = () => {
     if (!user) return;
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/schedule`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          setExams(data.schedule.filter(s => s.is_instructor));
-          setInvigilatorAssignments(data.schedule.filter(s => s.is_invigilator));
-        }
-      });
-
-    fetch("http://localhost:5000/api/teachers")
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setTeachersPool(data.teachers); });
-
-    // Fetch swap requests created by this teacher
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/outgoing`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          setMySwaps(data.requests);
-        }
-      });
-
-    // Fetch courses this teacher is teaching (for exam creation dropdown)
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/courses`)
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setMyCourses(data.courses); });
-
-    // Fetch incoming swap requests for this teacher
-    fetch(`http://localhost:5000/api/teacher/${user.userId}/swap-requests/incoming`)
-      .then(res => res.json())
-      .then(data => { if (data.status === "success") setIncomingSwaps(data.incoming); });
+    Promise.all([
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/schedule`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teachers`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/outgoing`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/courses`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/incoming`).then(r => r.json()).catch(() => ({ status: 'error' }))
+    ]).then(([schedData, teachData, outSwap, courseData, inSwap]) => {
+      if (schedData.status === "success") {
+        setExams(schedData.schedule.filter(s => s.is_instructor));
+        setInvigilatorAssignments(schedData.schedule.filter(s => s.is_invigilator));
+      }
+      if (teachData.status === "success") setTeachersPool(teachData.teachers);
+      if (outSwap.status === "success") setMySwaps(outSwap.requests);
+      if (courseData.status === "success") setMyCourses(courseData.courses);
+      if (inSwap.status === "success") setIncomingSwaps(inSwap.incoming);
+    });
   };
 
   useEffect(() => {
@@ -171,7 +176,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
   function showToast(msg, type = "ok") { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); }
 
   function submitToHOD(examId) {
-    fetch("http://localhost:5000/api/exams/submit-hod", {
+    fetch(`${API_BASE_URL}/exams/submit-hod`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ exam_id: examId }),
@@ -188,23 +193,6 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .catch(() => alert("Connection error."));
   }
 
-  function shareWithDEC(examId) {
-    fetch(`http://localhost:5000/api/exams/${examId}/share-dec`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user?.userId }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          showToast("Exam paper shared with Director Examination!");
-          fetchData();
-        } else {
-          alert(data.message || "Failed to share exam paper.");
-        }
-      })
-      .catch(() => alert("Connection error."));
-  }
   function handleCourseSelect(e) {
     const coId = e.target.value;
     setSelectedCourseOffering(coId);
@@ -222,7 +210,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       return;
     }
     setIsSubmitting(true);
-    fetch("http://localhost:5000/api/exams", {
+    fetch(`${API_BASE_URL}/exams`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -252,7 +240,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
   }
   function submitSwap() {
     if (!swapFor || !swapReason.trim()) return;
-    fetch("http://localhost:5000/api/swap-request", {
+    fetch(`${API_BASE_URL}/swap-request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -275,7 +263,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       .catch(err => alert("Connection error to swap api."));
   }
   function respondIncoming(requestId, decision) {
-    fetch(`http://localhost:5000/api/teacher/swap-requests/${requestId}/respond`, {
+    fetch(`${API_BASE_URL}/teacher/swap-requests/${requestId}/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: user?.userId, decision }),
@@ -543,8 +531,18 @@ export default function TeacherPage({ activePage, setPage, user }) {
           <Card>
             <h3 style={{ margin: "0 0 20px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Upload Exam Paper</h3>
             <Select label="Select Exam" value={selectedExamForUpload} onChange={e => setSelectedExamForUpload(e.target.value)}>
-              <option value="">Choose exam…</option>
-              {exams.map(e => <option key={e.exam_id} value={e.exam_id}>{e.course_code} {e.exam_type} – {e.section_name}</option>)}
+              {exams.filter(e => !e.exam_paper_url).length === 0 ? (
+                <option value="">✓ All exam papers uploaded</option>
+              ) : (
+                <>
+                  <option value="">Choose exam…</option>
+                  {exams.filter(e => !e.exam_paper_url).map(e => (
+                    <option key={e.exam_id} value={e.exam_id}>
+                      {e.course_code} {e.exam_type} – {e.section_name}
+                    </option>
+                  ))}
+                </>
+              )}
             </Select>
 
             <input
@@ -596,6 +594,19 @@ export default function TeacherPage({ activePage, setPage, user }) {
               </Btn>
             </div>
 
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
+              <label style={{ padding: 14, border: `1.5px solid ${rubricFile ? C.teal : C.grey200}`, borderRadius: 10, background: rubricFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Rubric (optional)</div>
+                <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rubricFile?.name || "PDF, DOC or DOCX"}</div>
+                <input type="file" accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={e => setRubricFile(e.target.files?.[0] || null)} />
+              </label>
+              <label style={{ padding: 14, border: `1.5px solid ${starterFile ? C.teal : C.grey200}`, borderRadius: 10, background: starterFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Starter Code (optional)</div>
+                <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{starterFile?.name || "ZIP or source-code file"}</div>
+                <input type="file" accept=".zip,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.h,.cs,.php,.rb,.go,.rs,.html,.css,.json,.xml,.sql,.txt,.md,.ipynb,.xlsx,.csv" style={{ display: "none" }} onChange={e => setStarterFile(e.target.files?.[0] || null)} />
+              </label>
+            </div>
+
             <Input
               label="Notes for HOD (optional)"
               placeholder="e.g. Review question 4 rubric"
@@ -626,7 +637,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                     <div style={{ fontWeight: 700, color: C.navy, fontSize: 13 }}>{e.course_code} {e.exam_type}</div>
                     <div style={{ fontSize: 12, color: C.grey400 }}>{e.section_name} · {new Date(e.exam_date).toLocaleDateString()}</div>
                   </div>
-                  <Btn variant="ghost" size="sm" onClick={() => window.open(e.exam_paper_url, "_blank")}>View</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => openTrustedFile(e.exam_paper_url)}>View</Btn>
                 </div>
               ))}
             </div>
@@ -716,7 +727,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                     </div>
                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                       {a.exam_paper_url && (
-                        <Btn variant="ghost" size="sm" onClick={() => window.open(a.exam_paper_url, "_blank")}>View Paper</Btn>
+                        <Btn variant="ghost" size="sm" onClick={() => openTrustedFile(a.exam_paper_url)}>View Paper</Btn>
                       )}
                       <Btn variant="ghost" size="sm" style={alreadyRequested ? { borderColor: C.amber, color: C.amber } : {}} onClick={() => !alreadyRequested && setSwapModal(a)}>
                         {alreadyRequested ? "Swap Pending" : "Request Swap"}

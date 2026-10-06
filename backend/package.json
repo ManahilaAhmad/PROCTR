@@ -6,15 +6,28 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "migrate-admin": "node migrateAdmin.mjs",
+    "migrate-password-recovery": "node migratePasswordRecovery.mjs",
+    "migrate-security": "node migrateSecurity.mjs",
+    "create-admin": "node createAdmin.mjs",
+    "create-recovery-test-user": "node createRecoveryTestUser.mjs",
+    "create-test-course": "node createTestCourse.mjs",
+    "verify-email": "node verifyEmail.mjs",
+    "migrate:submissions": "node migrateSubmissionsToCloudinary.mjs",
+    "test": "node --experimental-test-module-mocks --test --test-isolation=none"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "multer": "^2.2.0",
-    "pg": "^8.13.1"
+    "multer-storage-cloudinary": "^4.0.0",
+    "nodemailer": "^10.0.14",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

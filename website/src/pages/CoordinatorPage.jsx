@@ -11,6 +11,7 @@ import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
 import statusBadge from "../components/common/statusBadge";
+import { API_BASE_URL } from "../config/apiConfig";
 
 // Small inline icon buttons for row actions (edit / delete)
 function EditIcon({ size = 16 }) {
@@ -67,15 +68,15 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
   // Fetch labs, schedule, and approved exams from database
   const fetchData = () => {
-    fetch("http://localhost:5000/api/coordinator/labs")
+    fetch(`${API_BASE_URL}/coordinator/labs`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setLabs(data.labs); });
 
-    fetch("http://localhost:5000/api/coordinator/schedule")
+    fetch(`${API_BASE_URL}/coordinator/schedule`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setSchedule(data.schedule); });
 
-   fetch("http://localhost:5000/api/coordinator/exams/approved")
+   fetch(`${API_BASE_URL}/coordinator/exams/approved`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setApprovedExams(data.exams); });
   };
@@ -116,7 +117,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     }
     setSpecificSearching(true);
     const t = setTimeout(() => {
-      fetch(`http://localhost:5000/api/coordinator/notifications/recipients?search=${encodeURIComponent(specificSearch.trim())}`)
+      fetch(`${API_BASE_URL}/coordinator/notifications/recipients?search=${encodeURIComponent(specificSearch.trim())}`)
         .then(res => res.json())
         .then(data => { if (data.status === "success") setSpecificResults(data.users); })
         .catch(() => setSpecificResults([]))
@@ -143,7 +144,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     }
     setIsSending(true);
     const recipientLabel = broadcastType === "all" ? notifAudience : targetLabel(selectedTarget);
-    fetch("http://localhost:5000/api/coordinator/notifications/broadcast", {
+    fetch(`${API_BASE_URL}/coordinator/notifications/broadcast`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -214,8 +215,8 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
     const isEdit = editingScheduleId != null;
     const url = isEdit
-      ? `http://localhost:5000/api/coordinator/schedule/${editingScheduleId}`
-      : "http://localhost:5000/api/coordinator/schedule";
+      ? `${API_BASE_URL}/coordinator/schedule/${editingScheduleId}`
+      : `${API_BASE_URL}/coordinator/schedule`;
 
     fetch(url, {
       method: isEdit ? "PUT" : "POST",
@@ -244,7 +245,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     if (!window.confirm(`Remove the scheduled slot for ${label}?`)) return;
 
     const id = s?.schedule_id ?? s?.id;
-    fetch(`http://localhost:5000/api/coordinator/schedule/${id}`, { method: "DELETE" })
+    fetch(`${API_BASE_URL}/coordinator/schedule/${id}`, { method: "DELETE" })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {

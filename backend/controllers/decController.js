@@ -1,3 +1,11 @@
+import pool from '../db.js';
+
+async function getDecActor(req) {
+  if (req.sessionUser?.role === 'admin') return { dec_member_id: null, department_id: null };
+  const result = await pool.query('SELECT dec_member_id,department_id FROM dec_member WHERE user_id=$1', [req.sessionUser.sub]);
+  return result.rows[0] || null;
+}
+
 /* ===========================================================
    HELPER: Check Teacher Invigilation Overlap Conflict
 =========================================================== */
@@ -37,13 +45,33 @@ const checkTeacherInvigilationConflict = async (teacherId, scheduleId) => {
    ASSIGN INVIGILATOR (DEC panel)
 =========================================================== */
 export const assignInvigilator = async (req, res) => {
-  const { schedule_id, teacher_id, user_id } = req.body;
+  const { schedule_id, teacher_id } = req.body;
   try {
-    const decQuery = await pool.query('SELECT dec_member_id FROM dec_member WHERE user_id = $1', [user_id]);
-    if (decQuery.rows.length === 0) {
+    const actor = await getDecActor(req);
+    if (!actor) {
       return res.status(403).json({ status: 'error', message: 'Only DEC members can assign invigilators.' });
     }
-    const dec_member_id = decQuery.rows[0].dec_member_id;
+    const scopedResources = await pool.query(`
+      SELECT p.department_id AS exam_department_id,t.department_id AS teacher_department_id
+      FROM exam_schedule es
+      JOIN exam e ON e.exam_id=es.exam_id
+      JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+      JOIN course c ON c.course_id=co.course_id
+      JOIN program p ON p.program_id=c.program_id
+      JOIN teacher t ON t.teacher_id=$2
+      WHERE es.schedule_id=$1
+    `, [schedule_id, teacher_id]);
+    const scoped = scopedResources.rows[0];
+    if (!scoped || scoped.exam_department_id !== scoped.teacher_department_id
+        || (actor.department_id != null && scoped.exam_department_id !== actor.department_id)) {
+      return res.status(403).json({ status: 'error', message: 'The schedule and invigilator must belong to your department.' });
+    }
+    let dec_member_id = actor.dec_member_id;
+    if (!dec_member_id) {
+      const departmentDec = await pool.query('SELECT dec_member_id FROM dec_member WHERE department_id=$1 ORDER BY dec_member_id LIMIT 1', [scoped.exam_department_id]);
+      dec_member_id = departmentDec.rows[0]?.dec_member_id;
+      if (!dec_member_id) return res.status(409).json({ status: 'error', message: 'No DEC member is configured for this department.' });
+    }
 
     // Check if teacher has another invigilation duty during this time slot
     const conflict = await checkTeacherInvigilationConflict(teacher_id, schedule_id);
@@ -155,6 +183,8 @@ export const createSwapRequest = async (req, res) => {
 =========================================================== */
 export const listSwapRequests = async (req, res) => {
   try {
+    const actor = await getDecActor(req);
+    if (!actor) return res.status(403).json({ status: 'error', message: 'DEC profile not found.' });
     const result = await pool.query(`
       SELECT dsr.request_id, dsr.reason, dsr.replacement_status, dsr.dec_status, dsr.requested_at,
              e.exam_type, c.course_code, c.course_title, s.section_name, es.exam_date, es.start_time, l.lab_name,
@@ -166,6 +196,7 @@ export const listSwapRequests = async (req, res) => {
       JOIN exam e ON es.exam_id = e.exam_id
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
+      JOIN program p ON p.program_id=c.program_id
       JOIN section s ON co.section_id = s.section_id
       JOIN lab l ON es.lab_id = l.lab_id
       JOIN teacher t_req ON dsr.requester_teacher_id = t_req.teacher_id
@@ -173,8 +204,9 @@ export const listSwapRequests = async (req, res) => {
       JOIN teacher t_rep ON dsr.replacement_teacher_id = t_rep.teacher_id
       JOIN users u_rep ON t_rep.user_id = u_rep.user_id
       WHERE dsr.replacement_status = 'Accepted'
+        AND ($1::int IS NULL OR p.department_id=$1)
       ORDER BY dsr.requested_at DESC
-    `);
+    `, [actor.department_id]);
     res.status(200).json({ status: 'success', requests: result.rows });
   } catch (error) {
     console.error('Error fetching DEC swap requests:', error);
@@ -186,14 +218,27 @@ export const listSwapRequests = async (req, res) => {
    REVIEW SWAP REQUEST (Approve / Reject — DEC panel)
 =========================================================== */
 export const reviewSwapRequest = async (req, res) => {
-  const { request_id, user_id, status } = req.body;
+  const { request_id, status } = req.body;
   try {
+    if (!['Approved', 'Rejected'].includes(status)) return res.status(400).json({ status: 'error', message: 'Status must be Approved or Rejected.' });
+    const actor = await getDecActor(req);
+    if (!actor) return res.status(403).json({ status: 'error', message: 'DEC profile not found.' });
     const requestResult = await pool.query(`
       UPDATE duty_swap_request
       SET dec_status = $1, approved_by_user_id = $2, processed_at = NOW()
       WHERE request_id = $3
+        AND EXISTS (
+          SELECT 1 FROM invigilator_assignment ia
+          JOIN exam_schedule es ON es.schedule_id=ia.schedule_id
+          JOIN exam e ON e.exam_id=es.exam_id
+          JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+          JOIN course c ON c.course_id=co.course_id
+          JOIN program p ON p.program_id=c.program_id
+          WHERE ia.invigilator_assignment_id=duty_swap_request.invigilator_assignment_id
+            AND ($4::int IS NULL OR p.department_id=$4)
+        )
       RETURNING invigilator_assignment_id, replacement_teacher_id
-    `, [status, user_id, request_id]);
+    `, [status, req.sessionUser.sub, request_id, actor.department_id]);
 
     if (requestResult.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Swap request not found.' });

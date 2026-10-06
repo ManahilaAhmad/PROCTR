@@ -47,9 +47,9 @@ SELECT
     6,
     'Active'
 FROM (VALUES
-    ('shanawar.khan@university.edu',     '2023-CS-201'),
-    ('manahil.akhtar@university.edu',    '2023-CS-202'),
-    ('sumaiyyah.siddiqui@university.edu','2023-CS-203')
+    ('shanawar.khan@university.edu',     '231593'),
+    ('manahil.akhtar@university.edu',    '231594'),
+    ('sumaiyyah.siddiqui@university.edu','231595')
 ) AS reg(email, reg_no)
 JOIN users u ON u.email = reg.email;
 

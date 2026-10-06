@@ -65,12 +65,12 @@ INSERT INTO batch (program_id, batch_name, admission_year, expected_graduation_y
 
 -- 5. INSERT STUDENTS
 INSERT INTO student (user_id, registration_no, batch_id, current_semester, status) VALUES
-((SELECT user_id FROM users WHERE email = 'ali.hassan@university.edu'), '2021-CS-101', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
-((SELECT user_id FROM users WHERE email = 'sara.malik@university.edu'), '2021-CS-102', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
-((SELECT user_id FROM users WHERE email = 'hamza.raza@university.edu'), '2021-CS-103', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
-((SELECT user_id FROM users WHERE email = 'nida.fatima@university.edu'), '2021-CS-104', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
-((SELECT user_id FROM users WHERE email = 'bilal.cheema@university.edu'), '2021-CS-105', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Frozen'),
-((SELECT user_id FROM users WHERE email = 'zara.khan@university.edu'), '2021-CS-106', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active');
+((SELECT user_id FROM users WHERE email = 'ali.hassan@university.edu'), '211591', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
+((SELECT user_id FROM users WHERE email = 'sara.malik@university.edu'), '211592', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
+((SELECT user_id FROM users WHERE email = 'hamza.raza@university.edu'), '211593', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
+((SELECT user_id FROM users WHERE email = 'nida.fatima@university.edu'), '211594', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active'),
+((SELECT user_id FROM users WHERE email = 'bilal.cheema@university.edu'), '211595', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Frozen'),
+((SELECT user_id FROM users WHERE email = 'zara.khan@university.edu'), '211596', (SELECT batch_id FROM batch WHERE batch_name = 'BSCS-2023'), 6, 'Active');
 
 -- 6. INSERT TEACHERS
 INSERT INTO teacher (user_id, department_id, designation) VALUES

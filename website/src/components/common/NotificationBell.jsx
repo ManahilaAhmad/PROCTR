@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { C } from "../../theme/colors";
 import { Icon } from "../../theme/icons";
+import { API_BASE_URL } from "../../config/apiConfig";
 
 export default function NotificationBell({ userId }) {
   const [open, setOpen] = useState(false);
@@ -16,7 +17,7 @@ export default function NotificationBell({ userId }) {
 
   const fetchNotifications = () => {
     if (!userId) return;
-    fetch(`http://localhost:5000/api/notifications/${userId}`)
+    fetch(`${API_BASE_URL}/notifications/${userId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "success") {
@@ -76,7 +77,7 @@ export default function NotificationBell({ userId }) {
 
   function markRead(n) {
     if (n.is_read) return;
-    fetch(`http://localhost:5000/api/notifications/${n.id}/read`, {
+    fetch(`${API_BASE_URL}/notifications/${n.id}/read`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId }),
@@ -87,7 +88,7 @@ export default function NotificationBell({ userId }) {
   }
 
   function markAllRead() {
-    fetch(`http://localhost:5000/api/notifications/${userId}/read-all`, { method: "POST" }).then(() => {
+    fetch(`${API_BASE_URL}/notifications/${userId}/read-all`, { method: "POST" }).then(() => {
       setNotifications((prev) => prev.map((x) => ({ ...x, is_read: true })));
       setUnreadCount(0);
     });
