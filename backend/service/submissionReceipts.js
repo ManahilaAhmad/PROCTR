@@ -39,7 +39,13 @@ export async function beginSubmissionAttempt(requestId, studentId, examId, files
 export async function getSubmissionReceipt(req, res) {
   if (!/^[0-9a-f-]{36}$/i.test(req.params.requestId)) return res.status(400).json({ status: 'error', message: 'Invalid request ID.' });
   try {
-    const { rows } = await pool.query('SELECT * FROM submission_attempt WHERE request_id = $1 AND student_id = $2', [req.params.requestId, req.auth.student_id]);
+    const isAdmin = req.sessionUser?.role === 'admin';
+    const { rows } = await pool.query(`
+      SELECT sa.*
+      FROM submission_attempt sa
+      JOIN student s ON s.student_id=sa.student_id
+      WHERE sa.request_id=$1 AND ($2::boolean OR s.user_id=$3)
+    `, [req.params.requestId, isAdmin, req.sessionUser?.sub || null]);
     if (!rows.length) return res.status(404).json({ status: 'error', message: 'Receipt not found.' });
     if (rows[0].state === 'pending') return res.status(202).json({ status: 'pending', request_id: req.params.requestId });
     res.json(receiptResponse(rows[0]));
