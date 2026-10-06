@@ -8,6 +8,8 @@ import {
   endLiveSession,
   leaveLiveSession,
   getSessionStatus,
+  getNetworkAccessRequestStatus,
+  decideNetworkAccessRequest,
   startSession,
   logViolation,
   getActiveSessionsCount
@@ -39,6 +41,8 @@ router.post('/session/extend-time', requireRole('teacher', 'admin'), requireBody
 router.post('/session/end', requireRole('teacher', 'admin'), requireBodySessionManage, endLiveSession);
 router.post('/session/leave', requireRole('student', 'admin'), requireOwnStudentBodyProfile(), leaveLiveSession);
 router.get('/session/:sessionCode/status', requireRole('student', 'teacher', 'admin'), requireParamSessionRead, getSessionStatus);
+router.get('/network-access-request/:requestId', requireRole('student', 'admin'), getNetworkAccessRequestStatus);
+router.post('/network-access-request/:requestId/decision', requireRole('teacher', 'admin'), requireBodySessionManage, decideNetworkAccessRequest);
 
 // Legacy/Direct endpoints
 router.post('/session/start', requireRole('student', 'admin'), requireOwnStudentBodyProfile(), startSession);

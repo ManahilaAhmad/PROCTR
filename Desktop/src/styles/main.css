@@ -1280,7 +1280,17 @@ body {
 
 .login-remember { display: flex; align-items: center; gap: 7px; }
 .login-remember input { width: 14px; height: 14px; accent-color: var(--teal); }
-.login-forgot { color: var(--teal); font-weight: 700; }
+.login-forgot { color: var(--teal); font-weight: 700; border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit; }
+.login-forgot:hover { text-decoration: underline; }
+.desktop-modal[hidden] { display: none; }
+.desktop-modal { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 20px; background: rgba(10, 27, 52, .58); }
+.desktop-modal-card { position: relative; width: min(440px, 100%); padding: 30px; border-radius: 14px; background: #fff; box-shadow: 0 20px 55px rgba(0,0,0,.28); }
+.desktop-modal-card h2 { margin: 0 0 8px; color: var(--navy); font-size: 22px; }
+.desktop-modal-card p { margin: 0 0 20px; color: var(--grey-600); font-size: 13px; line-height: 1.55; }
+.desktop-modal-card label { display: block; margin-bottom: 7px; color: var(--navy); font-size: 12px; font-weight: 700; }
+.desktop-modal-card input { width: 100%; margin-bottom: 12px; }
+.desktop-modal-card .btn-primary { width: 100%; }
+.desktop-modal-close { position: absolute; top: 10px; right: 13px; border: 0; background: transparent; color: var(--grey-500); cursor: pointer; font-size: 26px; line-height: 1; }
 
 /* Keep the desktop sign-in structure and role choices aligned with the web login. */
 .login-bg {

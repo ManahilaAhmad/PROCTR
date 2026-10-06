@@ -10,6 +10,7 @@
     "migrate-admin": "node migrateAdmin.mjs",
     "migrate-password-recovery": "node migratePasswordRecovery.mjs",
     "migrate-security": "node migrateSecurity.mjs",
+    "migrate-network-access": "node migrateNetworkAccess.mjs",
     "create-admin": "node createAdmin.mjs",
     "create-recovery-test-user": "node createRecoveryTestUser.mjs",
     "create-test-course": "node createTestCourse.mjs",

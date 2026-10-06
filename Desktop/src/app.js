@@ -207,6 +207,62 @@ const loginBtnTxt = document.getElementById('login-btn-text');
 
 const loginLabel    = document.getElementById('login-label');
 const loginUsername = document.getElementById('login-username');
+const forgotPasswordButton = document.getElementById('forgot-password-btn');
+const forgotPasswordModal = document.getElementById('forgot-password-modal');
+const forgotPasswordForm = document.getElementById('forgot-password-form');
+const forgotPasswordMessage = document.getElementById('forgot-password-message');
+const forgotPasswordSubmit = document.getElementById('forgot-password-submit');
+
+function closeForgotPasswordModal() {
+  if (!forgotPasswordModal) return;
+  forgotPasswordModal.hidden = true;
+  forgotPasswordForm?.reset();
+  if (forgotPasswordMessage) forgotPasswordMessage.style.display = 'none';
+}
+
+forgotPasswordButton?.addEventListener('click', () => {
+  if (!forgotPasswordModal) return;
+  const identifier = document.getElementById('forgot-password-identifier');
+  forgotPasswordModal.hidden = false;
+  if (identifier) identifier.value = loginUsername?.value.trim() || '';
+  identifier?.focus();
+});
+document.getElementById('forgot-password-close')?.addEventListener('click', closeForgotPasswordModal);
+forgotPasswordModal?.addEventListener('click', (event) => {
+  if (event.target === forgotPasswordModal) closeForgotPasswordModal();
+});
+forgotPasswordForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const identifier = document.getElementById('forgot-password-identifier')?.value.trim();
+  if (!identifier) return;
+  forgotPasswordSubmit.disabled = true;
+  forgotPasswordSubmit.textContent = 'Sending...';
+  if (forgotPasswordMessage) forgotPasswordMessage.style.display = 'none';
+  try {
+    const response = await fetch(`${API_BASE}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-PROCTR-Client': 'desktop' },
+      body: JSON.stringify({ identifier })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Unable to request a password reset right now.');
+    if (forgotPasswordMessage) {
+      forgotPasswordMessage.textContent = data.message || 'If an active account matches, a reset link has been sent.';
+      forgotPasswordMessage.style.display = 'block';
+      forgotPasswordMessage.style.color = '#166534';
+      forgotPasswordMessage.style.background = '#f0fdf4';
+      forgotPasswordMessage.style.borderColor = '#bbf7d0';
+    }
+  } catch (error) {
+    if (forgotPasswordMessage) {
+      forgotPasswordMessage.textContent = error.message;
+      forgotPasswordMessage.style.display = 'block';
+    }
+  } finally {
+    forgotPasswordSubmit.disabled = false;
+    forgotPasswordSubmit.textContent = 'Send reset link';
+  }
+});
 
 roleTabs.forEach(tab => {
   tab.addEventListener('click', () => {
@@ -656,8 +712,13 @@ function renderTeacherScheduleTable(schedule) {
 
 let activeInvigilationCode = null;
 let invigilatorPollInterval = null;
+let sessionCreationInProgress = false;
 
 async function createInvigilationSession(examId, courseCode) {
+  if (sessionCreationInProgress) return;
+  sessionCreationInProgress = true;
+  const createButton = document.querySelector(`.create-live-session[data-exam-id="${examId}"]`);
+  if (createButton) createButton.disabled = true;
   try {
     const res = await fetch(`${API_BASE}/desktop/session/create`, {
       method: 'POST',
@@ -670,7 +731,10 @@ async function createInvigilationSession(examId, courseCode) {
       }),
     });
     const data = await res.json();
-    if (data.status === 'success' && data.session) {
+    if (!res.ok || data.status !== 'success') {
+      throw new Error(data.message || 'Failed to create the live session.');
+    }
+    if (data.session) {
       activeInvigilationCode = data.session.session_code;
       
       // Create course folder on Teacher side (C:\PROCTR_Exams\<CourseCode>_LAB\Submissions\)
@@ -702,6 +766,10 @@ async function createInvigilationSession(examId, courseCode) {
     }
   } catch (err) {
     console.error('Error creating live session:', err);
+    alert(err.message || 'Failed to create the live session.');
+  } finally {
+    sessionCreationInProgress = false;
+    if (createButton) createButton.disabled = false;
   }
 }
 
@@ -791,6 +859,47 @@ function renderInvigilatorLiveRoomUI(session) {
 
   const connectedList = session.connectedList || [];
   const recentViolations = session.recentViolations || [];
+  const pendingNetworkRequests = session.pendingNetworkRequests || [];
+
+  const networkCard = document.getElementById('network-access-requests-card');
+  const networkList = document.getElementById('network-access-requests-list');
+  const networkCount = document.getElementById('network-request-count');
+  if (networkCount) networkCount.textContent = pendingNetworkRequests.length;
+  if (networkCard) networkCard.style.display = pendingNetworkRequests.length ? 'block' : 'none';
+  if (networkList) {
+    networkList.innerHTML = pendingNetworkRequests.map(request => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px;border:1px solid #fed7aa;border-radius:9px;margin-top:8px;background:#fff7ed;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:800;color:var(--navy);">${escapeHtmlJS(request.student_name)} <span class="mono">(${escapeHtmlJS(request.registration_no)})</span></div>
+          <div style="font-size:12px;color:var(--grey-600);margin-top:4px;">Detected IP: <strong>${escapeHtmlJS(request.requested_ip)}</strong> &nbsp; Required: <strong>${escapeHtmlJS(request.allowed_network || 'Configured lab network')}</strong> &nbsp; Lab: ${escapeHtmlJS(request.lab_name || 'Assigned Lab')}</div>
+          ${request.student_reason ? `<div style="font-size:12px;margin-top:4px;">Reason: ${escapeHtmlJS(request.student_reason)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="network-decision btn-primary" data-request-id="${request.request_id}" data-decision="APPROVED" style="width:auto;padding:8px 13px;background:#059669;">Approve Once</button>
+          <button type="button" class="network-decision btn-primary" data-request-id="${request.request_id}" data-decision="REJECTED" style="width:auto;padding:8px 13px;background:#dc2626;">Reject</button>
+        </div>
+      </div>
+    `).join('');
+    networkList.querySelectorAll('.network-decision').forEach(button => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const response = await fetch(`${API_BASE}/desktop/network-access-request/${button.dataset.requestId}/decision`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_code: activeInvigilationCode, decision: button.dataset.decision })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || 'Unable to process the request.');
+          const remaining = pendingNetworkRequests.filter(item => String(item.request_id) !== String(button.dataset.requestId));
+          renderInvigilatorLiveRoomUI({ ...session, pendingNetworkRequests: remaining });
+        } catch (error) {
+          alert(error.message);
+          button.disabled = false;
+        }
+      });
+    });
+  }
 
   if (tbody) {
     if (connectedList.length === 0) {
@@ -1198,6 +1307,14 @@ if (joinExamForm) {
       });
 
       const joinData = await joinRes.json();
+      if (joinRes.status === 202 && joinData.status === 'pending_network_approval') {
+        if (joinExamError) {
+          joinExamError.textContent = joinData.message || 'Waiting for the invigilator to approve this network.';
+          joinExamError.style.display = 'block';
+        }
+        waitForNetworkApproval(joinData.requestId);
+        return;
+      }
       if (!joinRes.ok || joinData.status !== 'success') {
         if (joinRes.status === 404) {
           throw new Error('Session is not created yet. Please wait for your invigilator to start the live session.');
@@ -1273,6 +1390,41 @@ let studentPollInterval = null;
 let studentLocalCountdown = null;
 let starterCodeInstalledForSession = null;
 let questionPaperLoadedForSession = null;
+let networkApprovalPollInterval = null;
+
+function waitForNetworkApproval(requestId) {
+  if (networkApprovalPollInterval) clearInterval(networkApprovalPollInterval);
+  const check = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/desktop/network-access-request/${requestId}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to check network approval.');
+      const decision = data.request?.decision;
+      if (decision === 'APPROVED') {
+        clearInterval(networkApprovalPollInterval);
+        networkApprovalPollInterval = null;
+        if (joinExamError) {
+          joinExamError.textContent = 'Network access approved. Joining exam...';
+          joinExamError.style.display = 'block';
+        }
+        joinExamForm?.requestSubmit();
+      } else if (['REJECTED', 'EXPIRED', 'REVOKED'].includes(decision)) {
+        clearInterval(networkApprovalPollInterval);
+        networkApprovalPollInterval = null;
+        if (joinExamError) {
+          joinExamError.textContent = decision === 'REJECTED'
+            ? 'The invigilator rejected your network access request.'
+            : 'Your network access request expired. Submit the join form to request access again.';
+          joinExamError.style.display = 'block';
+        }
+      }
+    } catch (error) {
+      console.warn('Network approval status check failed:', error.message);
+    }
+  };
+  check();
+  networkApprovalPollInterval = setInterval(check, 2000);
+}
 
 async function loadQuestionPaperPreview(iframe, paperUrl, sessionCode) {
   const parsed = new URL(paperUrl, SOCKET_BASE);
