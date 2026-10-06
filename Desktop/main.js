@@ -522,6 +522,19 @@ ipcMain.handle('install-starter-code', async (event, { workspacePath, fileUrl, o
   }
 });
 
+// Renderer PDF fetches can be blocked by a restrictive CSP or institutional
+// browser policy. Keep the same trusted Cloudinary-only rule as starter code
+// and return the bytes to the renderer for its read-only document viewer.
+ipcMain.handle('download-exam-paper', async (_event, fileUrl) => {
+  try {
+    const buffer = await downloadBuffer(fileUrl);
+    return { status: 'success', contentBase64: buffer.toString('base64') };
+  } catch (error) {
+    console.error('[ExamPaper] Download failed:', error.message);
+    return { status: 'error', message: error.message };
+  }
+});
+
 // IPC Handler to Open Exam Workspace Folder in Windows Explorer
 ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
   if (!folderPath) return { status: 'error', message: 'No folder path provided' };
@@ -598,10 +611,19 @@ ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }
 ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCode, workspacePath, submissionType, apiBase, sessionToken }) => {
   try {
     const activeSubmission = activeSubmissions.get(event.sender.id);
-    if (!activeSubmission || activeSubmission.workspacePath !== workspacePath ||
+    if (!activeSubmission) throw new Error('No active exam workspace is registered. Join the exam session again before submitting.');
+
+    // Renderer values are UI state and can become stale after an Electron
+    // reload. The main process created the workspace and holds the canonical
+    // exam/student/path tuple, so use it rather than rejecting a legitimate
+    // local backup because two copies of the same state disagree.
+    if (activeSubmission.workspacePath !== workspacePath ||
         String(activeSubmission.examId) !== String(examId) || String(activeSubmission.studentId) !== String(studentId)) {
-      throw new Error('The active exam workspace does not match this submission.');
+      console.warn('[Electron] Submission UI state differed from active workspace; using canonical main-process values.');
     }
+    workspacePath = activeSubmission.workspacePath;
+    examId = activeSubmission.examId;
+    studentId = activeSubmission.studentId;
     // Only the contents of the Submissions folder are collected — that's
     // the folder students are expected to place their final work in.
     // Everything else in the workspace (starter_code, logs) is ignored.

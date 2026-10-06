@@ -1426,9 +1426,23 @@ async function loadQuestionPaperPreview(iframe, paperUrl, sessionCode) {
   const isCloudinary = parsed.protocol === 'https:' && (hostname === 'res.cloudinary.com' || hostname.endsWith('.cloudinary.com') || hostname.endsWith('.cloudinary.net'));
   if (!isBackend && !isCloudinary) throw new Error('Question paper uses an untrusted file location.');
 
-  const response = await fetch(parsed.toString());
-  if (!response.ok) throw new Error('Question paper could not be downloaded.');
-  const blob = await response.blob();
+  let blob;
+  try {
+    const response = await fetch(parsed.toString());
+    if (!response.ok) throw new Error(`Question paper download returned HTTP ${response.status}.`);
+    blob = await response.blob();
+  } catch (fetchError) {
+    // Cloudinary is already trusted above. Electron's main process uses the
+    // same controlled downloader as starter-code delivery, which is useful
+    // when the renderer's network policy blocks an otherwise valid PDF.
+    if (!isCloudinary || !window.proctrAPI?.downloadExamPaper) throw fetchError;
+    const downloaded = await window.proctrAPI.downloadExamPaper(parsed.toString());
+    if (!downloaded || downloaded.status !== 'success' || !downloaded.contentBase64) {
+      throw new Error(downloaded?.message || 'Question paper could not be downloaded.');
+    }
+    const bytes = Uint8Array.from(atob(downloaded.contentBase64), char => char.charCodeAt(0));
+    blob = new Blob([bytes], { type: 'application/pdf' });
+  }
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'question-paper');
   const isWordDoc = /\.(docx?|rtf)$/i.test(fileName) || /wordprocessingml|msword/.test(blob.type);
   if (isWordDoc) {
