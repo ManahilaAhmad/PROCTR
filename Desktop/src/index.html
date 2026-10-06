@@ -3,69 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' http://localhost:5000 ws://localhost:5000 https://res.cloudinary.com https://*.cloudinary.com https://*.cloudinary.net; frame-src 'self' about: blob: data: http://localhost:5000 https:; form-action 'none'" />
+  <!-- Local demos use localhost; lab clients use a private LAN backend address. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' http: https: ws: wss:; frame-src 'self' about: blob: data: http: https:; form-action 'none'" />
   <title>PROCTR — Secure Exam Desktop Client</title>
   <link rel="stylesheet" href="styles/main.css" />
+  <link rel="stylesheet" href="styles/dashboard-theme.css" />
 </head>
 <body>
 
   <!-- ─── LOGIN VIEW ─────────────────────────────────── -->
   <div id="view-login" class="view active">
     <div class="login-bg">
+      <span class="login-float-ball login-float-ball-one" aria-hidden="true"></span>
+      <span class="login-float-ball login-float-ball-two" aria-hidden="true"></span>
+      <span class="login-float-ball login-float-ball-three" aria-hidden="true"></span>
       <div class="login-frame">
         <aside class="login-brand-panel">
-          <div class="login-logo brand-logo">
-            <div class="logo-badge">
-              <div class="logo-badge-ring"></div>
-              <div class="logo-badge-inner">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              </div>
+          <div class="desktop-login-brand">
+            <div class="desktop-login-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>
             </div>
-            <div>
-              <div class="login-logo-name">PROCTR</div>
-              <div class="login-logo-sub">Secure Lab Exams</div>
-            </div>
+            <div><div class="desktop-login-brand-name">PROCTR</div><div class="desktop-login-brand-sub">Secure Lab Exams</div></div>
           </div>
           <div class="login-brand-content">
-            <h1>Secure.<br />Smarter.<br />Exams.</h1>
-            <div class="login-feature-list" aria-hidden="true">
-              <div class="login-feature"><span>✓</span><div><strong>Trusted &amp; secure</strong><small>Protected exam access</small></div></div>
-              <div class="login-feature"><span>◎</span><div><strong>Role-based access</strong><small>For every university role</small></div></div>
-              <div class="login-feature"><span>↗</span><div><strong>Streamlined process</strong><small>Efficient exam management</small></div></div>
+            <div class="login-hero-copy">
+              <h1>Secure,<br /><span>Smarter,<br />Exams.</span></h1>
+              <p>Set up exams, monitor live sessions, and manage submissions securely.</p>
+            </div>
+            <img class="login-illustration" src="assets/login-illustration-transparent.png" alt="Illustration of a secure exam workspace" />
+            <div class="login-feature-list" aria-label="Platform benefits">
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg></span><div><strong>Secure</strong><small>Protected &amp; reliable</small></div></div>
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 14a5 5 0 0 1 3.5 4.8"/></svg></span><div><strong>Easy Setup</strong><small>Create &amp; manage exams</small></div></div>
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20v-5M12 20V5M19 20v-9"/></svg></span><div><strong>Real-time</strong><small>Live monitoring &amp; reports</small></div></div>
             </div>
           </div>
         </aside>
-      <div class="login-card">
+      <main class="login-card">
 
-        <!-- Logo — exact match to website LoginPage.jsx -->
         <h2 class="login-welcome">Welcome back</h2>
-        <p class="login-sub">Sign in to your account</p>
+        <p class="login-sub">Sign in to continue to your workspace</p>
 
         <div id="login-error" class="error-banner" style="display:none;"></div>
 
-        <div class="role-tabs">
-          <button class="role-tab active" data-role="student" id="tab-student">Student</button>
-          <button class="role-tab" data-role="teacher" id="tab-teacher">Teacher / Invigilator</button>
+        <label class="role-prompt" for="tab-student">Choose your role</label>
+        <div class="role-tabs" role="group" aria-label="Choose your role">
+          <button class="role-tab active" data-role="student" id="tab-student"><span>Student</span></button>
+          <button class="role-tab" data-role="teacher" id="tab-teacher"><span>Teacher / Invigilator</span></button>
         </div>
 
         <form id="login-form">
           <div class="field-group">
             <label id="login-label">Registration No / Email</label>
+            <svg class="login-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg>
             <input type="text" id="login-username" placeholder="e.g. 231593" autocomplete="off" required />
           </div>
           <div class="field-group">
             <label>Password</label>
+            <svg class="login-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
             <input type="password" id="login-password" placeholder="••••••••" required />
           </div>
+          <button type="button" class="login-forgot" id="forgot-password-btn">Forgot password?</button>
           <button type="submit" class="btn-primary" id="login-btn">
             <span id="login-btn-text">Sign in to PROCTR</span>
           </button>
           <div class="login-options">
             <label class="login-remember"><input type="checkbox" />Remember me</label>
-            <button type="button" class="login-forgot" id="forgot-password-btn">Forgot password?</button>
           </div>
         </form>
-      </div>
+        <p class="login-access-note">Need access? Contact your department administrator</p>
+      </main>
       </div>
     </div>
   </div>

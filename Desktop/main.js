@@ -33,7 +33,15 @@ function backupActiveSubmission(webContentsId) {
   const activeSubmission = activeSubmissions.get(webContentsId);
   const signedInUser = signedInUsers.get(webContentsId);
   if (!activeSubmission) return null;
-  const job = submissionQueue.save({ ...activeSubmission, apiBase: API_BASE, accessToken: signedInUser?.accessToken, macAddress: getMacAddress() });
+  const job = submissionQueue.save({
+    ...activeSubmission,
+    apiBase: API_BASE,
+    // Desktop login responses use sessionToken. Keep accessToken compatibility
+    // for previously stored sessions so queued submissions can retry in both
+    // local and LAN runs.
+    accessToken: signedInUser?.sessionToken || signedInUser?.accessToken,
+    macAddress: getMacAddress(),
+  });
   activeSubmission.requestId = job.requestId;
   return job;
 }

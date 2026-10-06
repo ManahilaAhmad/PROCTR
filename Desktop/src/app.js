@@ -3,7 +3,10 @@
  * Connected to Express.js Backend (http://localhost:5000/api) & Neon PostgreSQL
  */
 
-const API_BASE = 'http://localhost:5000/api';
+// Electron supplies a LAN backend address when PROCTR_API_BASE is set by the
+// network launcher.  Normal `npm start` remains deliberately local for
+// development, demonstrations, and single-laptop testing.
+const API_BASE = window.proctrAPI?.apiBase || 'http://localhost:5000/api';
 const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, ''); // http://localhost:5000
 
 // Attach the signed login session to every backend request while leaving
@@ -14,6 +17,7 @@ window.fetch = (input, options = {}) => {
   if (!String(rawUrl || '').startsWith(SOCKET_BASE)) return nativeFetch(input, options);
 
   const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+  headers.set('X-PROCTR-Client', 'desktop');
   if (currentUser?.sessionToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${currentUser.sessionToken}`);
   }
@@ -1444,10 +1448,13 @@ async function loadQuestionPaperPreview(iframe, paperUrl, sessionCode) {
     blob = new Blob([bytes], { type: 'application/pdf' });
   }
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'question-paper');
-  const isWordDoc = /\.(docx?|rtf)$/i.test(fileName) || /wordprocessingml|msword/.test(blob.type);
-  if (isWordDoc) {
+  // Cloudinary raw files occasionally arrive as application/octet-stream.
+  // Only PDF is previewed in Chromium; every other file is downloaded with a
+  // clear message instead of leaving a blank iframe (especially Word files).
+  const isPdf = /\.pdf$/i.test(fileName) || /application\/pdf/i.test(blob.type);
+  if (!isPdf) {
     await downloadAuthenticatedResource(parsed.toString(), fileName);
-    iframe.srcdoc = '<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#0f172a"><h3>Question paper downloaded</h3><p>Open the downloaded Word document using the approved exam application. The paper was fetched securely without sharing its URL with a third-party viewer.</p></body></html>';
+    iframe.srcdoc = '<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#0f172a"><h3>Question paper downloaded</h3><p>Open the downloaded file using the approved exam application. The paper was fetched securely without sharing its URL with a third-party viewer.</p></body></html>';
   } else {
     const objectUrl = URL.createObjectURL(blob);
     iframe.src = `${objectUrl}#toolbar=0&navpanes=0&scrollbar=1`;
@@ -1507,9 +1514,9 @@ function startStudentSessionPoll(sessionCode) {
               // Full Cloudinary or external HTTPS URL — use directly
             } else if (paperUrl.startsWith('file:///') || paperUrl.includes(':\\')) {
               const filename = paperUrl.split('/').pop().split('\\').pop();
-              paperUrl = `http://localhost:5000/uploads/${filename}`;
+              paperUrl = `${SOCKET_BASE}/uploads/${filename}`;
             } else {
-              paperUrl = `http://localhost:5000${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
+              paperUrl = `${SOCKET_BASE}${paperUrl.startsWith('/') ? '' : '/'}${paperUrl}`;
             }
 
             try {
