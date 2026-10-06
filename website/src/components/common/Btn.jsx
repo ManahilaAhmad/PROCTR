@@ -11,5 +11,5 @@ export default function Btn({ children, variant = "primary", onClick, style = {}
     danger: { background: C.red, color: C.white },
     success: { background: C.green, color: C.white },
   };
-  return <button disabled={disabled} style={{ ...base, ...variants[variant], ...(disabled ? { opacity: 0.5, cursor: "wait" } : {}) }} onClick={onClick}>{children}</button>;
+  return <button className={`dashboard-btn dashboard-btn-${variant}`} disabled={disabled} style={{ ...base, ...variants[variant], ...(disabled ? { opacity: 0.5, cursor: "wait" } : {}) }} onClick={onClick}>{children}</button>;
 }

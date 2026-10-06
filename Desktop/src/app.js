@@ -14,6 +14,7 @@ window.fetch = (input, options = {}) => {
   if (!String(rawUrl || '').startsWith(SOCKET_BASE)) return nativeFetch(input, options);
 
   const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+  headers.set('X-PROCTR-Client', 'desktop');
   if (currentUser?.sessionToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${currentUser.sessionToken}`);
   }
@@ -274,7 +275,7 @@ loginForm.addEventListener('submit', async (e) => {
     loginError.style.display = 'block';
   } finally {
     loginBtn.disabled = false;
-    loginBtnTxt.textContent = 'Sign in to PROCTR';
+    loginBtnTxt.textContent = currentRole === 'teacher' ? 'Sign in as Invigilator' : 'Sign in to PROCTR';
   }
 });
 
@@ -486,14 +487,14 @@ function renderStudentScheduleTable(schedule) {
 
     if (examExpired) {
       // Date passed — lock joining entirely
-      statusPill = '<span class="status-pill" style="background:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">📅 Exam Date Passed</span>';
+      statusPill = '<span class="status-pill" style="background:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">Exam Date Passed</span>';
       actionBtn = '<span style="font-size:11px; color:#94a3b8; font-style:italic;">—</span>';
     } else if (isLiveActive) {
-      statusPill = '<span class="status-pill active-pill">⚡ Live Active</span>';
-      actionBtn = `<button class="btn-primary join-scheduled-exam" data-course-code="${escapeHtmlJS(item.course_code)}" style="padding:4px 10px; font-size:11px; width:auto;">⚡ Join Exam</button>`;
+      statusPill = '<span class="status-pill active-pill">Live Active</span>';
+      actionBtn = `<button class="btn-primary join-scheduled-exam" data-course-code="${escapeHtmlJS(item.course_code)}" style="padding:4px 10px; font-size:11px; width:auto;">Join Exam</button>`;
     } else {
-      statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
-      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" disabled title="Wait for your invigilator to create and start the session.">⏳ Waiting for Invigilator</button>`;
+      statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">Session Not Started</span>';
+      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" disabled title="Wait for your invigilator to create and start the session.">Waiting for Invigilator</button>`;
     }
 
     return `
@@ -621,13 +622,13 @@ function renderTeacherScheduleTable(schedule) {
     let actionBtn = '';
     if (isCompleted) {
       // Exam was explicitly completed by invigilator
-      actionBtn = `<button class="btn-action-secondary view-teacher-submissions">📁 View Submissions & Logs</button>`;
+      actionBtn = `<button class="btn-action-secondary view-teacher-submissions">View Submissions & Logs</button>`;
     } else if (isInvigilator) {
       // Assigned Invigilator can create & start live session
-      actionBtn = `<button class="btn-action-primary create-live-session" data-exam-id="${Number(examId)}" data-course-code="${courseCodeStr}">⚡ Create Live Session</button>`;
+      actionBtn = `<button class="btn-action-primary create-live-session" data-exam-id="${Number(examId)}" data-course-code="${courseCodeStr}">Create Live Session</button>`;
     } else {
       // Course Instructor only (Not Invigilator)
-      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" disabled title="Only the assigned invigilator can start this session.">🔒 Invigilation: ${escapeHtmlJS(item.invigilator_name || 'Assigned')}</button>`;
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" disabled title="Only the assigned invigilator can start this session.">Invigilation: ${escapeHtmlJS(item.invigilator_name || 'Assigned')}</button>`;
     }
 
     return `
@@ -774,12 +775,12 @@ function renderInvigilatorLiveRoomUI(session) {
     let secs = Math.max(0, session.secondsRemaining);
     const timerEl = document.getElementById('teacher-timer');
     if (timerEl) {
-      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : 'Time Expired';
     }
     teacherLocalCountdown = setInterval(() => {
       secs = Math.max(0, secs - 1);
       const el = document.getElementById('teacher-timer');
-      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : 'Time Expired';
       if (secs <= 0) clearInterval(teacherLocalCountdown);
     }, 1000);
   }
@@ -814,7 +815,7 @@ function renderInvigilatorLiveRoomUI(session) {
         const studentViolations = recentViolations.filter(v => String(v.reg_no) === studentReg || String(v.student_id) === String(s.student_id));
         const isSelected = selectedStudentFilter === studentReg;
         const violBadge = studentViolations.length > 0
-          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">🚨 ${studentViolations.length} Alert(s)</span>`
+          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">${studentViolations.length} Alert(s)</span>`
           : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">🟢 Clean</span>`;
 
         return `
@@ -1086,7 +1087,7 @@ if (roomBtnExtend) {
       });
       const data = await res.json();
       if (data.status === 'success') {
-        alert(`⏱️ ${data.message}`);
+        alert(data.message);
       }
     } catch (err) {
       console.error('Error extending time:', err);
@@ -1327,8 +1328,8 @@ function startStudentSessionPoll(sessionCode) {
         }
 
         const statusEl = document.getElementById('exam-status-text');
-        if (statusEl) statusEl.textContent = '🔒 Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
-        alert('🔴 The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
+        if (statusEl) statusEl.textContent = 'Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
+        alert('The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
         return;
       }
 
@@ -1414,7 +1415,7 @@ function startStudentSessionPoll(sessionCode) {
             const warningEl = document.getElementById('five-min-warning');
 
             if (secs <= 0) {
-              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              if (timerEl) timerEl.textContent = 'Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
@@ -1453,7 +1454,7 @@ function startStudentSessionPoll(sessionCode) {
             const timerEl = document.getElementById('student-room-timer');
             const warningEl = document.getElementById('five-min-warning');
             if (secs <= 0) {
-              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              if (timerEl) timerEl.textContent = 'Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
@@ -1597,12 +1598,12 @@ async function submitExamAndShowResult(type) {
   const succeeded = result.status === 'success';
   if (button) {
     button.disabled = succeeded;
-    button.textContent = succeeded ? '✓ Submitted' : result.status === 'pending' ? 'Retry saved submission' : '✓ Submit Solution';
+    button.textContent = succeeded ? 'Submitted' : result.status === 'pending' ? 'Retry saved submission' : 'Submit Solution';
   }
   if (status) {
     status.textContent = succeeded
-      ? `✅ ${result.message || 'Your submission has been saved successfully.'}`
-      : `${result.status === 'pending' ? 'Saved copy: ' : '✖ '}${result.message}`;
+      ? (result.message || 'Your submission has been saved successfully.')
+      : `${result.status === 'pending' ? 'Saved copy: ' : ''}${result.message}`;
     status.style.color = succeeded ? 'var(--teal)' : result.status === 'pending' ? '#b45309' : '#dc2626';
   }
   return result;
@@ -1638,18 +1639,18 @@ if (submitExamBtn) {
     const result = await performExamSubmission('MANUAL');
 
     if (result.status === 'success') {
-      submitExamBtn.textContent = '✓ Submitted';
+      submitExamBtn.textContent = 'Submitted';
       if (status) {
-        status.textContent = `✅ ${result.message || 'Your submission has been sent successfully.'}`;
+        status.textContent = result.message || 'Your submission has been sent successfully.';
         status.style.display = 'block';
         status.style.color = 'var(--teal)';
       }
       enableLeaveExamButton();
     } else {
       submitExamBtn.disabled = false;
-      submitExamBtn.textContent = '✓ Submit Solution';
+      submitExamBtn.textContent = 'Submit Solution';
       if (status) {
-        status.textContent = `✖ ${result.message || 'Submission failed — you can try again.'}`;
+        status.textContent = result.message || 'Submission failed — you can try again.';
         status.style.display = 'block';
         status.style.color = '#dc2626';
       }
@@ -1721,7 +1722,6 @@ function renderStudentLabsList(labs) {
     <div class="folder-grid">
       ${labs.map((lab, i) => `
         <button class="folder-card" data-co-id="${lab.course_offering_id}" data-idx="${i}">
-          <div class="folder-icon">📁</div>
           <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
           <div class="folder-meta">Submitted ${new Date(lab.submitted_at).toLocaleString()}</div>
         </button>
@@ -1962,7 +1962,6 @@ function renderTeacherLabsList(labs) {
     <div class="folder-grid">
       ${labs.map(lab => `
         <button class="folder-card" data-co-id="${lab.course_offering_id}">
-          <div class="folder-icon">📁</div>
           <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
           <div class="folder-meta">${lab.submission_count} submission${lab.submission_count === 1 ? '' : 's'}</div>
         </button>
@@ -1993,7 +1992,6 @@ async function loadLabStudents(courseOfferingId, labLabel) {
       <div class="folder-grid">
         ${students.map(s => `
           <button class="folder-card" data-student-id="${s.student_id}">
-            <div class="folder-icon">🧑‍🎓</div>
             <div class="folder-name">${escapeHtmlJS(s.registration_no)}</div>
             <div class="folder-meta">${escapeHtmlJS(s.name)} · ${s.file_count} file${s.file_count === 1 ? '' : 's'}</div>
           </button>
@@ -2030,12 +2028,12 @@ async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel
       ${submission.has_report ? `
       <div class="report-download-bar">
         <div>
-          <div style="font-weight:800; font-size:13px; color:var(--navy);">📋 Security Log Report</div>
+          <div style="font-weight:800; font-size:13px; color:var(--navy);">Security Log Report</div>
           <div style="font-size:11.5px; color:var(--grey-500); margin-top:2px;">Filterable by severity (Critical / High / Medium / Low) — open in browser or download at any time.</div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="report-btn open-secure-resource" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false`)}" data-title="Security Log Report">📖 Open Security Log Report</button>
-          <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true`)}" data-name="security_log_report.html">⬇ Download</button>
+          <button type="button" class="report-btn open-secure-resource" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false`)}" data-title="Security Log Report">Open Security Log Report</button>
+          <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true`)}" data-name="security_log_report.html">Download</button>
         </div>
       </div>` : ''}
       ${files.length === 0 ? '<div class="empty-state">No files in this submission.</div>' : `
@@ -2121,7 +2119,7 @@ if (changePwdForm) {
 
       if (res.ok && data.status === 'success') {
         if (changePwdSucc) {
-          changePwdSucc.textContent = '✅ Password updated successfully!';
+          changePwdSucc.textContent = 'Password updated successfully!';
           changePwdSucc.style.display = 'block';
         }
         changePwdForm.reset();
@@ -2337,3 +2335,40 @@ window.proctrAPI?.onSubmissionState(job => {
   if (button) { button.disabled = job.state === 'synced'; button.textContent = job.state === 'synced' ? 'Submitted' : 'Retry saved submission'; }
 });
 window.proctrAPI?.onSubmissionStorageError(message => alert(message));
+
+function alignLoginBrandWithCard() {
+  const panel = document.querySelector('.login-brand-panel');
+  const card = document.querySelector('.login-card');
+  const heading = panel?.querySelector('.login-brand-content h1');
+  const features = panel?.querySelector('.login-feature-list');
+  if (!panel || !card || !heading || !features) return;
+
+  const panelRect = panel.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  if (!panelRect.height || !cardRect.height) return;
+
+  panel.style.setProperty('--login-brand-logo-adjustment', '0px');
+  panel.style.setProperty('--login-feature-bottom-adjustment', '0px');
+  const cardTop = cardRect.top - panelRect.top;
+  const cardBottom = panelRect.bottom - cardRect.bottom;
+  const headingHeight = heading.getBoundingClientRect().height;
+  const featureHeight = features.getBoundingClientRect().height;
+  const centeredHeadingTop = (cardRect.height - headingHeight) / 2;
+  const maxHeadingTop = cardRect.height - headingHeight - featureHeight - 12;
+  const headingTop = cardTop + Math.max(0, Math.min(centeredHeadingTop, maxHeadingTop));
+
+  panel.style.setProperty('--login-card-top-inset', `${cardTop}px`);
+  panel.style.setProperty('--login-card-bottom-inset', `${cardBottom}px`);
+  panel.style.setProperty('--login-heading-top', `${headingTop}px`);
+
+  const logo = panel.querySelector('.brand-logo');
+  if (logo) panel.style.setProperty('--login-brand-logo-adjustment', `${cardRect.top - logo.getBoundingClientRect().top}px`);
+  panel.style.setProperty('--login-feature-bottom-adjustment', `${features.getBoundingClientRect().bottom - cardRect.bottom}px`);
+}
+
+window.addEventListener('resize', alignLoginBrandWithCard);
+if (window.ResizeObserver) {
+  const loginCard = document.querySelector('.login-card');
+  if (loginCard) new ResizeObserver(alignLoginBrandWithCard).observe(loginCard);
+}
+requestAnimationFrame(alignLoginBrandWithCard);

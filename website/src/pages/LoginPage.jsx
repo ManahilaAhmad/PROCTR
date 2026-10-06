@@ -254,7 +254,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
             <div className="login-hero-logo-mark">{Icon.shield}</div>
             <div><div className="login-hero-logo-name">PROCTR</div><div className="login-hero-logo-sub">Secure Lab Exams</div></div>
           </div>
-          <h1>Secure.<br /><span>Smarter.<br />Exams.</span></h1>
+          <h1>Secure,<br /><span>Smarter,<br />Exams.</span></h1>
           <p>Set up exams, monitor live sessions, and manage submissions securely.</p>
         </div>
         <img className="login-illustration" src={loginIllustration} alt="Pixel art exam workspace" />

@@ -27,6 +27,8 @@ class TestLANDetector(unittest.TestCase):
         self.assertTrue(d._ip_in_allowed_networks("192.168.1.50", "255.255.255.0"))
         # IP outside
         self.assertFalse(d._ip_in_allowed_networks("192.168.2.50", "255.255.255.0"))
+        # An overlapping interface subnet does not make an outside host a member.
+        self.assertFalse(d._ip_in_allowed_networks("192.168.2.10", "255.255.254.0"))
 
     def test_update_allowed_subnets_with_mixed(self):
         d = LANDetector(violation_callback=None, allowed_subnets=["172.20.0.0/16"], allowed_subnet_prefix="172.30.")

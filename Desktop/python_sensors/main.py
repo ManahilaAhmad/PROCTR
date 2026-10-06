@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PROCTR Background OS Sensor Engine (MVC Backend)")
     parser.add_argument("--exam_id", type=str, default="1", help="Exam ID")
     parser.add_argument("--student_id", type=str, default="101", help="Student ID")
+    parser.add_argument("--allowed_subnet", type=str, default="192.168.18.0/24", help="Allowed lab IPv4 CIDR")
     parser.add_argument("--whitelist", type=str, default="", help="Comma-separated whitelisted processes")
 
     args = parser.parse_args()
@@ -57,7 +58,8 @@ if __name__ == "__main__":
     controller = SensorController(
         exam_id=args.exam_id,
         student_id=args.student_id,
-        custom_whitelist=custom_whitelist
+        custom_whitelist=custom_whitelist,
+        allowed_subnet=args.allowed_subnet
     )
 
     def cleanup_on_exit(sig=None, frame=None):

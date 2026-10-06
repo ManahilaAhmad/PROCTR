@@ -25,13 +25,32 @@ export function RiskBadge({ severity, level }) {
 =========================================================== */
 export function ExamTimer({ durationMinutes = 120, startTime }) {
   const [timeLeft, setTimeLeft] = useState(durationMinutes * 60);
+  const [startedAt, setStartedAt] = useState(() => {
+    if (!startTime) return null;
+    const parsedStart = new Date(startTime).getTime();
+    return Number.isFinite(parsedStart) ? parsedStart : null;
+  });
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setTimeLeft(prev => Math.max(0, prev - 1));
-    }, 1000);
+    if (!startTime) return;
+    const parsedStart = new Date(startTime).getTime();
+    if (Number.isFinite(parsedStart)) setStartedAt(parsedStart);
+  }, [startTime]);
+
+  useEffect(() => {
+    if (!startedAt) {
+      setTimeLeft(durationMinutes * 60);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      setTimeLeft(Math.max(0, durationMinutes * 60 - elapsedSeconds));
+    };
+    updateRemaining();
+    const interval = setInterval(updateRemaining, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [durationMinutes, startedAt]);
 
   const mins = Math.floor(timeLeft / 60);
   const secs = timeLeft % 60;
@@ -52,7 +71,17 @@ export function ExamTimer({ durationMinutes = 120, startTime }) {
       border: isUrgent ? `1.5px solid ${C.red}` : 'none'
     }}>
       <span style={{ display: 'flex', color: isUrgent ? C.red : C.teal }}>{Icon.clock || Icon.calendar}</span>
-      <span>{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}</span>
+      {startedAt ? (
+        <span>{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setStartedAt(Date.now())}
+          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", cursor: "pointer" }}
+        >
+          Start Timer
+        </button>
+      )}
     </div>
   );
 }

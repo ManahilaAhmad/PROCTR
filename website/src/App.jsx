@@ -166,7 +166,7 @@ export default function App() {
 
     if (isDashboard) {
       return (
-        <div className="resp-layout-container">
+        <div className="resp-layout-container dashboard-shell">
           {/* Mobile top navigation header */}
           <header className="resp-mobile-header">
             <button

@@ -23,7 +23,7 @@ class SensorController:
     Orchestrates Workspace setup, Database connection, Sensors & IPC stream to Electron.
     """
 
-    def __init__(self, exam_id=1, student_id=101, custom_whitelist=None):
+    def __init__(self, exam_id=1, student_id=101, custom_whitelist=None, allowed_subnet="192.168.18.0/24"):
         self.exam_id = exam_id
         self.student_id = student_id
 
@@ -44,7 +44,7 @@ class SensorController:
         self.window_sensor = WindowSensor(violation_callback=self.on_violation, custom_whitelist=custom_whitelist)
         self.fs_sensor = FileSystemSensor(workspace_path=self.workspace_ctrl.get_workspace_path(), violation_callback=self.on_violation)
         self.dns_sensor = DNSSensor(violation_callback=self.on_violation, active_blocking=True)
-        self.lan_sensor = LANDetector(violation_callback=self.on_violation, allowed_subnet_prefix="172.30.")
+        self.lan_sensor = LANDetector(violation_callback=self.on_violation, allowed_subnets=[allowed_subnet], allowed_subnet_prefix=None)
 
     def on_violation(self, code, detected_value="", title="", severity="", description="", event_key="", *args, **kwargs):
         val = detected_value or description or str(kwargs)

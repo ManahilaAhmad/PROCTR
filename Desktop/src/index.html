@@ -3,69 +3,70 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' http://localhost:5000 ws://localhost:5000; frame-src 'self' about: blob: data: http://localhost:5000 https:; form-action 'none'" />
-  <title>PROCTR — Secure Exam Desktop Client</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' http: https: ws: wss:; frame-src 'self' about: blob: data: http: https:; form-action 'none'" />
+  <title>PROCTR</title>
   <link rel="stylesheet" href="styles/main.css" />
+  <link rel="stylesheet" href="styles/dashboard-theme.css" />
 </head>
 <body>
 
   <!-- ─── LOGIN VIEW ─────────────────────────────────── -->
   <div id="view-login" class="view active">
     <div class="login-bg">
+      <span class="login-float-ball login-float-ball-one" aria-hidden="true"></span>
+      <span class="login-float-ball login-float-ball-two" aria-hidden="true"></span>
+      <span class="login-float-ball login-float-ball-three" aria-hidden="true"></span>
       <div class="login-frame">
         <aside class="login-brand-panel">
-          <div class="login-logo brand-logo">
-            <div class="logo-badge">
-              <div class="logo-badge-ring"></div>
-              <div class="logo-badge-inner">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              </div>
+          <div class="desktop-login-brand">
+            <div class="desktop-login-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>
             </div>
-            <div>
-              <div class="login-logo-name">PROCTR</div>
-              <div class="login-logo-sub">Secure Lab Exams</div>
-            </div>
+            <div><div class="desktop-login-brand-name">PROCTR</div><div class="desktop-login-brand-sub">Secure Lab Exams</div></div>
           </div>
           <div class="login-brand-content">
-            <h1>Secure.<br />Smarter.<br />Exams.</h1>
-            <div class="login-feature-list" aria-hidden="true">
-              <div class="login-feature"><span>✓</span><div><strong>Trusted &amp; secure</strong><small>Protected exam access</small></div></div>
-              <div class="login-feature"><span>◎</span><div><strong>Role-based access</strong><small>For every university role</small></div></div>
-              <div class="login-feature"><span>↗</span><div><strong>Streamlined process</strong><small>Efficient exam management</small></div></div>
+            <div class="login-hero-copy">
+              <h1>Secure,<br /><span>Smarter,<br />Exams.</span></h1>
+              <p>Set up exams, monitor live sessions, and manage submissions securely.</p>
+            </div>
+            <img class="login-illustration" src="assets/login-illustration-transparent.png" alt="Illustration of a secure exam workspace" />
+            <div class="login-feature-list" aria-label="Platform benefits">
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg></span><div><strong>Secure</strong><small>Protected &amp; reliable</small></div></div>
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 14a5 5 0 0 1 3.5 4.8"/></svg></span><div><strong>Easy Setup</strong><small>Create &amp; manage exams</small></div></div>
+              <div class="login-feature"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20v-5M12 20V5M19 20v-9"/></svg></span><div><strong>Real-time</strong><small>Live monitoring &amp; reports</small></div></div>
             </div>
           </div>
         </aside>
-      <div class="login-card">
-
-        <!-- Logo — exact match to website LoginPage.jsx -->
+        <main class="login-card">
         <h2 class="login-welcome">Welcome back</h2>
-        <p class="login-sub">Sign in to your account</p>
+        <p class="login-sub">Sign in to continue to your workspace</p>
 
         <div id="login-error" class="error-banner" style="display:none;"></div>
 
-        <div class="role-tabs">
-          <button class="role-tab active" data-role="student" id="tab-student">Student</button>
-          <button class="role-tab" data-role="teacher" id="tab-teacher">Teacher / Invigilator</button>
+        <label class="role-prompt" for="tab-student">Choose your role</label>
+        <div class="role-tabs" role="group" aria-label="Choose your role">
+          <button class="role-tab active" data-role="student" id="tab-student"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 14a5 5 0 0 1 3.5 4.8"/></svg><span>Student</span></button>
+          <button class="role-tab" data-role="teacher" id="tab-teacher"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6"/></svg><span>Teacher / Invigilator</span></button>
         </div>
 
         <form id="login-form">
           <div class="field-group">
             <label id="login-label">Registration No / Email</label>
+            <svg class="login-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg>
             <input type="text" id="login-username" placeholder="e.g. 231593" autocomplete="off" required />
           </div>
           <div class="field-group">
             <label>Password</label>
+            <svg class="login-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
             <input type="password" id="login-password" placeholder="••••••••" required />
           </div>
+          <button type="button" class="login-forgot" id="login-forgot">Forgot password?</button>
           <button type="submit" class="btn-primary" id="login-btn">
             <span id="login-btn-text">Sign in to PROCTR</span>
           </button>
-          <div class="login-options">
-            <label class="login-remember"><input type="checkbox" />Remember me</label>
-            <span class="login-forgot">Forgot password?</span>
-          </div>
         </form>
-      </div>
+        <p class="login-access-note">Need access? Contact your department administrator</p>
+        </main>
       </div>
     </div>
   </div>
@@ -75,14 +76,11 @@
     <div class="app-shell">
       <!-- Sidebar -->
       <aside class="sidebar">
-        <div class="sidebar-brand">
-          <div class="logo-badge-sm">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div class="sidebar-brand student-sidebar-brand">
+          <div class="student-sidebar-logo" role="img" aria-label="PROCTR">
+            <img src="assets/logo/PROCTR%20-%20white%20bg.png" alt="" />
           </div>
-          <div class="sidebar-brand-text">
-            <span class="sidebar-brand-name">PROCTR</span>
-            <span class="sidebar-brand-role">Student</span>
-          </div>
+          <span class="sidebar-brand-role">Student</span>
         </div>
         <nav class="sidebar-nav">
           <button class="nav-item active" data-section="s-dashboard">
@@ -124,8 +122,7 @@
         <section id="section-s-dashboard" class="content-section active">
           <div class="page-header">
             <div>
-              <h2><span id="greeting-text">Good morning</span>, <span id="student-first-name">Student</span> 👋</h2>
-              <p class="subtitle">Here's your exam schedule and enrolled courses</p>
+              <h2><span id="greeting-text">Good day</span>, <span id="student-first-name">Student</span></h2>
             </div>
             <div class="timer-badge" id="student-timer" style="display:none;">01:30:00</div>
           </div>
@@ -133,7 +130,7 @@
           <!-- Join Exam Session Card -->
           <div class="card" id="join-exam-card" style="margin-bottom:20px; border-left:4px solid var(--teal);">
             <div class="card-title" style="display:flex; align-items:center; gap:8px;">
-              <span>🔑 Join Exam Session</span>
+              <span>Join Exam Session</span>
             </div>
             <p style="font-size:13px; color:var(--grey-500); margin-bottom:16px;">
               Enter the Exam ID and Passcode provided by your invigilator to join the exam session and create your local exam workspace folder.
@@ -157,7 +154,6 @@
           <!-- Active Exam Banner (Shown after joining) -->
           <div class="exam-banner" id="exam-banner" style="display:none;">
             <div class="exam-banner-left">
-              <div class="exam-banner-icon">📋</div>
               <div>
                 <div class="exam-banner-course" id="active-exam-course">CS601 — Data Structures &amp; Algorithms</div>
                 <div class="exam-banner-meta" id="active-exam-meta">Exam Workspace Created &nbsp;•&nbsp; Room: CS-Lab-2</div>
@@ -165,7 +161,7 @@
             </div>
             <div class="exam-banner-right" style="display:flex; align-items:center; gap:12px;">
               <button class="btn-secondary" id="btn-open-workspace" style="padding: 8px 16px; font-size: 12px; display:inline-block;">
-                📁 Open Exam Folder
+                Open Exam Folder
               </button>
               <div class="exam-time-pill">
                 <span class="blip-dot"></span>
@@ -177,22 +173,22 @@
           <!-- Secure Read-Only Exam Document Viewer (Revealed by Invigilator) -->
           <div class="card" id="exam-document-card" style="display:none; margin-bottom:20px; border-left:4px solid var(--navy);">
             <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-              <span>📜 Exam Question Paper (Read-Only)</span>
+              <span>Exam Question Paper (Read-Only)</span>
               <span class="status-pill active-pill" style="font-size:10px;">PROCTR SECURE VIEWER</span>
             </div>
             <div id="exam-doc-notice" style="font-size:12px; color:var(--grey-500); margin-bottom:12px; background:var(--grey-100); padding:10px 14px; border-radius:6px;">
-              🔒 <strong>Security Restriction:</strong> Downloading, printing, copying, or capturing this document is strictly monitored. Solve your code in your workspace folder.
+              <strong>Security Restriction:</strong> Downloading, printing, copying, or capturing this document is strictly monitored. Solve your code in your workspace folder.
             </div>
             <div class="exam-paper-body" id="exam-paper-content" style="user-select:none; -webkit-user-select:none; background:#fff; border:1px solid var(--grey-200); padding:20px; border-radius:8px; font-family:var(--font-mono); font-size:13px; line-height:1.6; max-height:350px; overflow-y:auto; position:relative;">
               <div style="text-align:center; padding:30px; color:var(--grey-500);">
-                ⏳ Waiting for the invigilator to reveal the exam question paper...
+                Waiting for the invigilator to reveal the exam question paper...
               </div>
             </div>
           </div>
 
           <!-- Exam Schedule Table -->
           <div class="card" style="margin-top:18px; margin-bottom:18px;">
-            <div class="card-title">📅 Exam Schedule</div>
+            <div class="card-title">Exam Schedule</div>
             <div class="table-responsive">
               <table class="data-table">
                 <thead>
@@ -217,7 +213,7 @@
 
           <!-- Enrolled Courses -->
           <div class="card">
-            <div class="card-title">📚 Enrolled Courses</div>
+            <div class="card-title">Enrolled Courses</div>
             <div class="courses-grid" id="student-courses-grid">
               <div class="empty-state" style="grid-column: 1 / -1; padding:24px;">Loading enrolled courses...</div>
             </div>
@@ -229,7 +225,7 @@
           <div class="page-header" style="margin-bottom:16px;">
             <div>
               <h2 style="display:flex; align-items:center; gap:10px;">
-                🔒 Secure Student Exam Environment
+                Secure Student Exam Environment
                 <span class="live-badge" style="font-size:10px;"><span class="blip-dot"></span> EXAM IN PROGRESS</span>
               </h2>
               <p class="subtitle" id="student-room-course-title">CS604 — Database Systems Lab Exam</p>
@@ -242,9 +238,8 @@
 
           <!-- 5-Minute Warning Banner (hidden by default, shown when ≤5 mins remain) -->
           <div id="five-min-warning" style="display:none; background:linear-gradient(135deg,#fef9c3,#fef3c7); border:2px solid #f59e0b; border-radius:12px; padding:14px 20px; margin-bottom:18px; display:none; align-items:center; gap:14px; animation: pulse-warning 1.5s ease-in-out infinite;">
-            <span style="font-size:28px;">⚠️</span>
             <div>
-              <div style="font-size:14px; font-weight:800; color:#92400e;">⏰ Only 5 Minutes Remaining!</div>
+              <div style="font-size:14px; font-weight:800; color:#92400e;">Only 5 Minutes Remaining!</div>
               <div style="font-size:12px; color:#b45309; margin-top:2px;">Please save and <strong>Submit your work now</strong> before time expires. Go to your workspace folder and submit!</div>
             </div>
           </div>
@@ -264,7 +259,7 @@
               </div>
               <div style="display:flex; gap:10px; align-items:center;">
                 <button class="btn-secondary" id="btn-room-open-ws" style="padding:8px 16px; font-size:12px;">
-                  📁 Open Exam Workspace Folder
+                  Open Exam Workspace Folder
                 </button>
                 <button class="btn-primary" id="btn-submit-exam" style="padding:8px 16px; font-size:12px; width:auto; background:var(--teal);">
                   ✓ Submit Solution
@@ -278,9 +273,8 @@
           </div>
 
           <!-- Starter Code Notice Box -->
-          <div class="card" style="background:#eff6ff; border:1px solid #bfdbfe; margin-bottom:18px; padding:14px 18px;">
-            <div style="font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
-              <span style="font-size:16px;">📦</span>
+          <div class="card student-material-notice" style="margin-bottom:18px; padding:14px 18px;">
+            <div style="font-size:12px; color:var(--navy); display:flex; align-items:center; gap:8px;">
               <span><strong>Starter Code &amp; Exam Materials:</strong> Unpacked to <code>C:\PROCTR_Exams\<span id="student-room-code-tag">CS604</span>_LAB\starter_code\</code>. Write your solutions in your workspace directory.</span>
             </div>
           </div>
@@ -288,12 +282,11 @@
           <!-- Secure Read-Only Question Paper Viewer -->
           <div class="card">
             <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-              <span>📜 Official Approved Exam Question Paper</span>
+              <span>Official Approved Exam Question Paper</span>
               <span class="status-pill active-pill">HOD APPROVED PAPER</span>
             </div>
             <div id="student-paper-viewer-container" style="min-height:350px; background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:20px; position:relative; overflow:hidden;">
               <div id="student-paper-placeholder" style="text-align:center; padding:60px 20px; color:var(--grey-500);">
-                <div style="font-size:32px; margin-bottom:12px;">⏳</div>
                 <div style="font-weight:700; font-size:14px; color:var(--navy);">Waiting for Invigilator to Reveal Paper...</div>
                 <div style="font-size:12px; margin-top:4px;">The question paper will appear here automatically once revealed by your invigilator.</div>
               </div>
@@ -307,7 +300,6 @@
           <div class="page-header">
             <div>
               <h2>My Profile</h2>
-              <p class="subtitle">Your student information and academic details</p>
             </div>
           </div>
 
@@ -319,7 +311,7 @@
               <div class="profile-reg">Registration No: <strong id="profile-reg-no">231593</strong></div>
               <div class="profile-dept">Department of Computer Science &amp; IT</div>
               <div class="profile-badges">
-                <span class="info-pill">6th Semester</span>
+                <span class="info-pill">7th Semester</span>
                 <span class="info-pill">BSCS</span>
                 <span class="info-pill">Air University Islamabad</span>
               </div>
@@ -371,7 +363,7 @@
 
           <!-- Security & Change Password Card -->
           <div class="card" style="margin-top:16px;">
-            <div class="card-title">🔒 Security &amp; Change Password</div>
+            <div class="card-title">Security &amp; Change Password</div>
             <div id="change-pwd-error" class="error-banner" style="display:none; margin-bottom:14px;"></div>
             <div id="change-pwd-success" class="submit-status" style="display:none; margin-bottom:14px;"></div>
             <form id="change-pwd-form" style="display:flex; flex-direction:column; gap:14px; max-width:420px;">
@@ -426,7 +418,6 @@
           <div class="page-header">
             <div>
               <h2>Submitted Work</h2>
-              <p class="subtitle">Everything you've submitted, organized by lab</p>
             </div>
           </div>
           <div id="student-submitted-work-root">
@@ -443,9 +434,11 @@
     <div class="app-shell">
       <!-- Sidebar -->
       <aside class="sidebar teacher-sidebar">
-        <div class="sidebar-brand">
-          <div class="logo-badge small">P</div>
-          <span>PROCTR</span>
+        <div class="sidebar-brand teacher-sidebar-brand">
+          <div class="student-sidebar-logo teacher-sidebar-logo" role="img" aria-label="PROCTR">
+            <img src="assets/logo/PROCTR%20-%20white%20bg.png" alt="" />
+          </div>
+          <span class="sidebar-brand-role">Teacher / Invigilator</span>
         </div>
         <nav class="sidebar-nav">
           <button class="nav-item active" data-section="t-overview">
@@ -490,14 +483,12 @@
           </div>
           <div class="stats-row">
             <div class="stat-card teal">
-              <div class="stat-icon">👥</div>
               <div>
                 <div class="stat-label">Connected Students</div>
                 <div class="stat-val" id="stat-connected">0</div>
               </div>
             </div>
             <div class="stat-card red">
-              <div class="stat-icon">🚨</div>
               <div>
                 <div class="stat-label">Total Violations</div>
                 <div class="stat-val" id="stat-total-violations">0</div>
@@ -507,7 +498,7 @@
 
           <!-- My Assigned Exams Table -->
           <div class="card" style="margin-top:18px;">
-            <div class="card-title">📅 My Course &amp; Invigilation Schedule</div>
+            <div class="card-title">My Course &amp; Invigilation Schedule</div>
             <div class="table-responsive">
               <table class="data-table">
                 <thead>
@@ -541,7 +532,7 @@
             <div style="display:flex; align-items:center; gap:10px;">
               <div style="font-size:11px; font-weight:800; color:var(--grey-500);">TIME LEFT <strong id="teacher-timer" style="font-size:16px; color:var(--navy);">—</strong></div>
               <button class="btn-secondary" id="btn-clear-student-filter" style="display:none; padding:5px 12px; font-size:11px;">
-                🔄 Show All Candidates
+                Show All Candidates
               </button>
               <span class="badge-count" id="teacher-alert-count">0 Alerts</span>
             </div>
@@ -553,15 +544,15 @@
                 <div style="font-size:10px; font-weight:800; color:var(--grey-500); text-transform:uppercase; letter-spacing:1px;">Active Session Code</div>
                 <div style="font-size:26px; font-weight:900; color:var(--navy); font-family:var(--font-mono);" id="room-session-code">----</div>
               </div>
-              <div style="background:#ffffff; padding:10px 20px; border-radius:10px; border:2px solid var(--teal); text-align:center;">
+              <div class="teacher-passcode-panel" style="background:#ffffff; padding:10px 20px; border-radius:0; border:2px solid var(--teal); text-align:center;">
                 <div style="font-size:10px; font-weight:800; color:var(--grey-500); text-transform:uppercase; letter-spacing:1px;">Student Passcode</div>
                 <div style="font-size:28px; font-weight:900; color:var(--teal); letter-spacing:6px; font-family:var(--font-mono);" id="room-passcode">----</div>
               </div>
               <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <button class="btn-primary" id="room-btn-reveal" style="padding:10px 16px; font-size:12px; width:auto; background:var(--teal);">📜 Reveal Approved Paper</button>
-                <button class="btn-primary" id="room-btn-timer" style="padding:10px 16px; font-size:12px; width:auto; background:var(--navy);">⏱️ Start Exam Timer</button>
-                <button class="btn-primary" id="room-btn-extend" style="padding:10px 16px; font-size:12px; width:auto; background:#d97706;">➕ Extend Time (+10m)</button>
-                <button class="btn-primary" id="room-btn-end" style="padding:10px 16px; font-size:12px; width:auto; background:#ef4444;">🔴 End Session</button>
+                <button class="btn-primary" id="room-btn-reveal" style="padding:10px 16px; font-size:12px; width:auto; background:var(--teal);">Reveal Approved Paper</button>
+                <button class="btn-primary" id="room-btn-timer" style="padding:10px 16px; font-size:12px; width:auto; background:var(--navy);">Start Exam Timer</button>
+                <button class="btn-primary" id="room-btn-extend" style="padding:10px 16px; font-size:12px; width:auto; background:#d97706;">Extend Time (+10m)</button>
+                <button class="btn-primary" id="room-btn-end" style="padding:10px 16px; font-size:12px; width:auto; background:#ef4444;">End Session</button>
               </div>
             </div>
           </div>
@@ -569,7 +560,7 @@
           <!-- Connected Candidates Grid -->
           <div class="card" style="margin-bottom:20px;">
             <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-              <span>👥 Connected Candidates (<span id="candidate-count-val">0</span>)</span>
+              <span>Connected Candidates (<span id="candidate-count-val">0</span>)</span>
               <span style="font-size:11px; color:var(--grey-500); font-weight:600;">Click a candidate card below to view their specific log feed</span>
             </div>
             <div id="monitoring-candidates-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px;">
@@ -580,9 +571,9 @@
           <!-- Active Filter Header -->
           <div id="filter-active-header" style="display:none; padding:10px 16px; background:var(--teal-light, #f0fdfa); border:1.5px solid var(--teal); border-radius:8px; margin-bottom:14px; justify-content:space-between; align-items:center;">
             <div style="font-size:13px; font-weight:800; color:var(--navy);">
-              🔍 Filtered Inspection: <span id="filter-student-name" style="color:var(--teal);">--</span>
+              Filtered Inspection: <span id="filter-student-name" style="color:var(--teal);">--</span>
             </div>
-            <button type="button" id="clear-student-filter-inline" style="font-size:11px; color:var(--grey-600); cursor:pointer; font-weight:700; border:0; background:none;">✕ Clear Filter</button>
+            <button type="button" id="clear-student-filter-inline" style="font-size:11px; color:var(--grey-600); cursor:pointer; font-weight:700; border:0; background:none;">Clear Filter</button>
           </div>
 
           <div class="feed-list" id="teacher-feed">
@@ -595,7 +586,6 @@
           <div class="page-header">
             <div>
               <h2>Software Whitelist</h2>
-              <p class="subtitle">Configure which applications students are permitted to use</p>
             </div>
           </div>
           <div class="card">
@@ -612,7 +602,6 @@
           <div class="page-header">
             <div>
               <h2>Student Submissions</h2>
-              <p class="subtitle">One folder per lab you teach — click in to see student roll-number folders</p>
             </div>
           </div>
           <div id="teacher-submissions-root">
@@ -640,7 +629,6 @@
   <!-- ─── CLOSE WARNING MODAL ────────────────────────── -->
   <div class="modal-overlay" id="warning-modal">
     <div class="modal-card danger">
-      <div class="modal-icon">⚠️</div>
       <h2>Exam Session Active</h2>
       <p>Closing PROCTR during an active exam is a violation and will be reported to the invigilator.</p>
       <button class="btn-primary" id="modal-close-btn">Return to Exam</button>

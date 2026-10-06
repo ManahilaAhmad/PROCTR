@@ -58,9 +58,23 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 };
 
+// Packaged Electron windows load from file:// and send the opaque "null"
+// origin. Accept it only when the request identifies itself as the desktop
+// client; normal browser origins still use the explicit website allowlist.
+const corsOptionsForRequest = (req, callback) => {
+  const requestedHeaders = (req.get('access-control-request-headers') || '')
+    .toLowerCase().split(',').map(header => header.trim());
+  const isDesktopRequest = req.get('x-proctr-client') === 'desktop'
+    || (req.method === 'OPTIONS' && requestedHeaders.includes('x-proctr-client'));
+  if (req.get('origin') === 'null' && isDesktopRequest) {
+    return callback(null, { ...corsOptions, origin: 'null' });
+  }
+  callback(null, corsOptions);
+};
+
 // ── Core Middleware ─────────────────────────────────────────
 app.use(securityHeaders);
-app.use(cors(corsOptions));
+app.use(cors(corsOptionsForRequest));
 app.use(verifyRequestOrigin(configuredOrigins));
 // Desktop sends base64 files in JSON (40 MB decoded total plus encoding).
 app.use('/api/submission/upload', express.json({ limit: '64mb' }));
@@ -202,8 +216,18 @@ app.use((err, req, res, next) => {
 // reports a hard violation — no polling delay.
 const httpServer = createServer(app);
 
+const socketCorsOptions = {
+  ...corsOptions,
+  origin(origin, callback) {
+    // Electron's file:// renderer has an opaque null origin. Socket access is
+    // still protected by the authenticated session token in the handshake.
+    if (origin === 'null') return callback(null, 'null');
+    return corsOptions.origin(origin, callback);
+  },
+};
+
 const io = new SocketIOServer(httpServer, {
-  cors: corsOptions
+  cors: socketCorsOptions
 });
 
 io.use(async (socket, next) => {

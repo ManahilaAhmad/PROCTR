@@ -139,7 +139,8 @@ function startPythonSensors(examId, studentId, securityPolicy = {}, targetWebCon
   pythonProcess = spawn('python', [
     pythonScriptPath,
     '--exam_id', String(examId),
-    '--student_id', String(studentId)
+    '--student_id', String(studentId),
+    '--allowed_subnet', String(securityPolicy.allowed_subnet || '192.168.18.0/24')
   ]);
 
   console.log('[Electron] Spawned Python Background Sensor Engine PID:', pythonProcess.pid);

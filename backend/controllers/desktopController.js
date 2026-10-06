@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
 import { emitToSession } from '../socketRegistry.js';
-import { isAllowedLabIp } from '../middleware/labNetwork.js';
+import { isAllowedLabIp, resolveLabNetwork } from '../middleware/labNetwork.js';
 import { auditSecurityEvent, clientIp as requestClientIp } from '../middleware/security.js';
 
 /* ===========================================================
@@ -174,32 +174,17 @@ export const joinLiveSession = async (req, res) => {
     const rawIp = reqSimulatedIp || req.ip || req.socket.remoteAddress || '127.0.0.1';
     const clientIp = String(rawIp).replace('::ffff:', '').trim();
 
-    const labRes = await pool.query(
-      `SELECT l.lab_name, l.network_range
-       FROM live_exam_session les
-       JOIN exam e ON les.exam_id = e.exam_id
-       JOIN exam_schedule es ON es.exam_id = e.exam_id
-       JOIN lab l ON es.lab_id = l.lab_id
-       WHERE les.session_code = $1`,
-      [codeUpper]
-    );
-
-    if (labRes.rows.length > 0 && labRes.rows[0].network_range) {
-      const allowedRange = (labRes.rows[0].network_range || '').trim();
-      const labName = labRes.rows[0].lab_name || 'Assigned Lab';
-
-      if (allowedRange && allowedRange !== '*') {
-        const settingsResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('allow_loopback_exam_access','clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
-        const securitySettings = Object.fromEntries(settingsResult.rows.map(row => [row.setting_key, row.setting_value]));
-        const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1';
-        const isMatch = isAllowedLabIp(clientIp, allowedRange) || (securitySettings.allow_loopback_exam_access === true && isLoopback);
-        if (!isMatch) {
-          return res.status(403).json({
-            status: 'error',
-            message: `Network Restriction Violation: Your device IP (${clientIp}) is outside the allowed lab subnet (${allowedRange}) for ${labName}. Joining from external network is blocked.`
-          });
-        }
-      }
+    const labNetwork = await resolveLabNetwork(codeUpper);
+    const allowedRange = String(labNetwork.network_range || '').trim();
+    const settingsResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('allow_loopback_exam_access','clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
+    const securitySettings = Object.fromEntries(settingsResult.rows.map(row => [row.setting_key, row.setting_value]));
+    const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1';
+    const isMatch = isAllowedLabIp(clientIp, allowedRange) || (securitySettings.allow_loopback_exam_access === true && isLoopback);
+    if (!isMatch) {
+      return res.status(403).json({
+        status: 'error',
+        message: `Network Restriction Violation: Your device IP (${clientIp}) is outside the allowed lab subnet (${allowedRange}) for ${labNetwork.lab_name}. Joining from external network is blocked.`
+      });
     }
 
     // Record student connected in desktop_exam_session
@@ -260,7 +245,7 @@ export const joinLiveSession = async (req, res) => {
         isPaperRevealed: session.is_paper_revealed,
         isTimerStarted: session.is_timer_started,
         durationMinutes: session.duration_minutes,
-        labNetworkRange: labRes.rows[0]?.network_range || null,
+        labNetworkRange: allowedRange,
         securityPolicy
       }
     });

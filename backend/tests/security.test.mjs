@@ -6,6 +6,7 @@ process.env.NODE_ENV = 'test';
 
 const { createRateLimiter, securityHeaders, verifyRequestOrigin } = await import('../middleware/security.js');
 const { createSessionToken, sessionCookie } = await import('../middleware/sessionAuth.js');
+const { isAllowedLabIp } = await import('../middleware/labNetwork.js');
 
 function mockResponse() {
   return {
@@ -68,4 +69,11 @@ test('signed sessions include an opaque session id and HttpOnly cookie flags', (
   assert.equal(payload.ver, 2);
   assert.match(sessionCookie(token), /HttpOnly/);
   assert.match(sessionCookie(token), /SameSite=Strict/);
+});
+
+test('lab network validation accepts only host IPs inside the configured CIDR', () => {
+  assert.equal(isAllowedLabIp('192.168.18.44', '192.168.18.0/24'), true);
+  assert.equal(isAllowedLabIp('192.168.19.44', '192.168.18.0/24'), false);
+  assert.equal(isAllowedLabIp('192.168.19.1', '192.168.18.0/24'), false);
+  assert.equal(isAllowedLabIp('192.168.18.44', 'invalid-range'), false);
 });
