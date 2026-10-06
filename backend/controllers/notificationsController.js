@@ -150,7 +150,12 @@ export const getMyNotifications = async (req, res) => {
                 r.audience_type,
         }));
 
-        const personal = personalResult.rows.map(r => ({
+        const broadcastKeys = new Set(broadcasts.map(notification =>
+            `${notification.title}\u0000${notification.message}`
+        ));
+        const personal = personalResult.rows
+          .filter(r => !broadcastKeys.has(`${r.subject}\u0000${r.message}`))
+          .map(r => ({
             id: `n-${r.notification_id}`,
             source: "personal",
             title: r.subject,
@@ -163,7 +168,7 @@ export const getMyNotifications = async (req, res) => {
             audience_type: null,
             is_personal: true, // always targeted at exactly this user
             scope_label: `Automated · ${r.notification_type}`,
-        }));
+          }));
 
         const combined = [...broadcasts, ...personal].sort(
             (a, b) => new Date(b.created_at) - new Date(a.created_at)

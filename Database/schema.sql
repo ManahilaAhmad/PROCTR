@@ -31,6 +31,7 @@ DROP TABLE IF EXISTS student_submission CASCADE;
 DROP TABLE IF EXISTS approval CASCADE;
 DROP TABLE IF EXISTS duty_swap_request CASCADE;
 DROP TABLE IF EXISTS invigilator_assignment CASCADE;
+DROP TABLE IF EXISTS coordinator_exam_timetable CASCADE;
 DROP TABLE IF EXISTS exam_schedule CASCADE;
 DROP TABLE IF EXISTS rubric CASCADE;
 DROP TABLE IF EXISTS question_paper CASCADE;
@@ -227,6 +228,9 @@ CREATE TABLE section (
     UNIQUE (batch_id, section_name)
 );
 
+ALTER TABLE student ADD COLUMN section_id INT;
+ALTER TABLE student ADD CONSTRAINT student_section_fk FOREIGN KEY (section_id) REFERENCES section(section_id);
+
 CREATE TABLE course_offering (
     course_offering_id  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     section_id          INT NOT NULL REFERENCES section(section_id),
@@ -313,6 +317,30 @@ CREATE TABLE exam_schedule (
     CHECK (end_time > start_time),
     CONSTRAINT unique_exam_schedule_exam UNIQUE (exam_id)
 );
+
+CREATE TABLE coordinator_exam_timetable (
+    timetable_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_offering_id INT NOT NULL REFERENCES course_offering(course_offering_id),
+    exam_type          VARCHAR(20) NOT NULL CHECK (exam_type IN ('LabMid','LabFinal','LabPractical')),
+    lab_id             INT NOT NULL REFERENCES lab(lab_id),
+    coordinator_id     INT NOT NULL REFERENCES coordinator(coordinator_id),
+    exam_date          DATE NOT NULL,
+    start_time         TIME NOT NULL,
+    end_time           TIME NOT NULL,
+    status             VARCHAR(20) NOT NULL DEFAULT 'Published'
+                       CHECK (status IN ('Published','Cancelled')),
+    linked_exam_id     INT REFERENCES exam(exam_id),
+    linked_schedule_id INT REFERENCES exam_schedule(schedule_id),
+    created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (end_time > start_time),
+    UNIQUE (linked_exam_id),
+    UNIQUE (linked_schedule_id)
+);
+
+CREATE UNIQUE INDEX unique_published_coordinator_exam_timetable
+    ON coordinator_exam_timetable (course_offering_id, exam_type)
+    WHERE status = 'Published';
 
 CREATE TABLE invigilator_assignment (
     invigilator_assignment_id  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

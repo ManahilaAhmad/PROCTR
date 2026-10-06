@@ -6,20 +6,127 @@ import Card from "../components/common/Card";
 import Btn from "../components/common/Btn";
 import Input from "../components/common/Input";
 import Badge from "../components/common/Badge";
-import StatCard from "../components/common/StatCard";
-import JoinExamModal from "../components/JoinExamModal";
 import { API_BASE_URL } from "../config/apiConfig";
 
-export default function StudentPage({ activePage, user }) {
-  const [selectedExam, setSelectedExam] = useState(null);
-  const [showJoinExam, setShowJoinExam] = useState(false);
+const studentAccent = "#557987";
+const studentAccentLight = "#e5f0f4";
+const studentAdminStyles = `
+  @keyframes studentAdminRise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .student-admin-page {
+    position: relative;
+    isolation: isolate;
+    z-index: 0;
+    background: transparent !important;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+  }
+  .student-admin-page::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 16% 18%, rgba(255,255,255,.92), transparent 28%),
+      radial-gradient(circle at 84% 12%, rgba(85,121,135,.16), transparent 24%),
+      linear-gradient(90deg, #ffffff 0%, #ffffff 42%, #eef7fa 58%, #c3d8e4 100%);
+  }
+  .student-admin-page .resp-page-padding {
+    width: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 36px 40px 48px;
+    box-sizing: border-box;
+  }
+  .student-admin-page h1 {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+    color: #557987 !important;
+    font-size: 30px !important;
+    font-weight: 800 !important;
+    letter-spacing: -.5px !important;
+  }
+  .student-admin-page h2,
+  .student-admin-page h3,
+  .student-admin-page h4 {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+    color: #557987 !important;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: -.3px;
+  }
+  .student-admin-page p,
+  .student-admin-page label,
+  .student-admin-page input,
+  .student-admin-page button {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+  }
+  .student-admin-page .student-admin-card {
+    background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(255,255,255,.56)) !important;
+    border: 1px solid rgba(255,255,255,.86) !important;
+    box-shadow: 0 22px 55px rgba(41,91,117,.16), inset 0 1px 0 rgba(255,255,255,.96) !important;
+    backdrop-filter: blur(20px) saturate(135%);
+    -webkit-backdrop-filter: blur(20px) saturate(135%);
+    animation: studentAdminRise .4s ease both;
+  }
+  .student-admin-page .student-admin-card,
+  .student-admin-page .student-course-card {
+    color: #1a2b4b;
+  }
+  .student-admin-page .student-admin-card input {
+    background: rgba(255,255,255,.5) !important;
+    border: 1px solid rgba(255,255,255,.9) !important;
+    border-radius: 11px !important;
+    box-shadow: inset 0 1px 2px rgba(48,91,112,.06), 0 7px 22px rgba(47,110,139,.14);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    outline: none;
+  }
+  .student-admin-page .student-admin-card input:focus {
+    border-color: rgba(85,121,135,.62) !important;
+    box-shadow: 0 0 0 3px rgba(85,121,135,.12), 0 7px 22px rgba(47,110,139,.18);
+  }
+  .student-admin-page .student-admin-card button {
+    border-radius: 11px !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .student-admin-page .student-admin-card button:hover {
+    transform: translateY(-1px);
+  }
+  .student-admin-page .student-course-card {
+    background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(255,255,255,.56)) !important;
+    border: 1px solid rgba(255,255,255,.86) !important;
+    box-shadow: 0 16px 36px rgba(41,91,117,.12), inset 0 1px 0 rgba(255,255,255,.96) !important;
+    backdrop-filter: blur(20px) saturate(135%);
+    -webkit-backdrop-filter: blur(20px) saturate(135%);
+  }
+  @media (max-width: 768px) {
+    .student-admin-page h1 { font-size: 27px !important; }
+    .student-admin-page .resp-page-padding { padding: 20px 16px 32px; }
+  }
+`;
 
+function getExamDateTime(date, time) {
+  if (!date) return null;
+  const [year, month, day] = String(date).slice(0, 10).split("-").map(Number);
+  const [hours = "0", minutes = "0"] = String(time || "00:00").split(":");
+  return new Date(year, month - 1, day, Number(hours), Number(minutes));
+}
+
+export default function StudentPage({ activePage, user }) {
   // Profile states
   const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [toast, setToast] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [notificationFilter, setNotificationFilter] = useState("all");
   const [schedule, setSchedule] = useState([]);
 
   useEffect(() => {
@@ -30,9 +137,30 @@ export default function StudentPage({ activePage, user }) {
     }
 
     if (user?.userId) {
-      fetch(`${API_BASE_URL}/student/${user.userId}/schedule`)
-        .then(res => res.json())
-        .then(data => { if (data.status === "success") setSchedule(data.schedule); });
+      Promise.all([
+        fetch(`${API_BASE_URL}/student/${user.userId}/schedule`).then(res => res.json()).catch(() => null),
+        fetch(`${API_BASE_URL}/student/${user.userId}/planned-schedule`).then(res => res.json()).catch(() => null),
+      ]).then(([scheduledData, plannedData]) => {
+          const scheduled = scheduledData?.status === "success" ? scheduledData.schedule : [];
+          const planned = plannedData?.status === "success" ? plannedData.schedule : [];
+        const combined = [...scheduled];
+        planned.forEach(plan => {
+          const existingIndex = combined.findIndex(item =>
+            !item.schedule_id &&
+            String(item.course_offering_id) === String(plan.course_offering_id) &&
+            item.exam_type === plan.exam_type
+          );
+          if (existingIndex >= 0) {
+            combined[existingIndex] = { ...combined[existingIndex], ...plan, exam_id: combined[existingIndex].exam_id };
+          } else {
+            combined.push(plan);
+          }
+        });
+        setSchedule(combined);
+        if (scheduledData?.status !== "success" || plannedData?.status !== "success") {
+          console.error("One or more student exam schedule requests failed.");
+        }
+        })
     }
   }, [user]);
 
@@ -47,8 +175,6 @@ export default function StudentPage({ activePage, user }) {
   };
 
   const [avatarImg, setAvatarImg] = useState(null); // File object url or null
-
-  const pastExams = [];
 
   function showToast(msg, type = "success") {
     setToast({ msg, type });
@@ -128,40 +254,116 @@ export default function StudentPage({ activePage, user }) {
   }
 
   const currentAvatar = avatarImg || user?.profilePictureUrl || user?.profile_picture_url;
-
-  function gradeColor(g) {
-    if (g === "A+" || g === "A") return [C.navy, C.tealLight];
-    if (g === "B") return [C.teal, C.tealLight];
-    return [C.grey500, C.grey100];
+  const enrolledCourses = [...new Map(schedule.map(item => [
+    item.course_offering_id,
+    item,
+  ])).values()];
+  const exams = [...schedule.reduce((byExam, item) => {
+    if (!item.exam_id && !item.is_independent_schedule) return byExam;
+    const key = item.is_independent_schedule
+      ? `planned-${item.timetable_id}`
+      : `${item.exam_id}-${item.schedule_id || "unscheduled"}`;
+    if (!byExam.has(key)) byExam.set(key, { ...item, invigilators: [] });
+    const exam = byExam.get(key);
+    if (item.invigilator_name && !exam.invigilators.includes(item.invigilator_name)) {
+      exam.invigilators.push(item.invigilator_name);
+    }
+    return byExam;
+  }, new Map()).values()];
+  const now = new Date();
+  const upcomingExams = exams
+    .filter(exam => exam.exam_date && getExamDateTime(exam.exam_date, exam.start_time) >= now)
+    .sort((a, b) => getExamDateTime(a.exam_date, a.start_time) - getExamDateTime(b.exam_date, b.start_time));
+  const awaitingScheduleExams = exams.filter(exam => !exam.exam_date);
+  const pastExams = exams
+    .filter(exam => exam.exam_date && getExamDateTime(exam.exam_date, exam.start_time) < now)
+    .sort((a, b) => getExamDateTime(b.exam_date, b.start_time) - getExamDateTime(a.exam_date, a.start_time));
+  function renderExamSection(items, emptyMessage, isScheduled = true) {
+    if (!items.length) {
+      return <Card className="student-admin-card" style={{ color: C.grey500, fontSize: 13 }}>{emptyMessage}</Card>;
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {items.map(exam => {
+          const examDateTime = getExamDateTime(exam.exam_date, exam.start_time);
+          return (
+            <Card key={exam.is_independent_schedule ? `planned-${exam.timetable_id}` : `${exam.exam_id}-${exam.schedule_id || "unscheduled"}`} className="student-admin-card" style={{ border: `1px solid ${C.grey200}` }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <strong style={{ color: C.navy }}>{exam.course_code} — {exam.course_title}</strong>
+                <Badge color={studentAccent} bg={studentAccentLight}>{exam.section_name}</Badge>
+                <Badge color={C.navy} bg={C.grey50}>{exam.exam_type}</Badge>
+                {isScheduled
+                  ? <Badge color={studentAccent} bg={studentAccentLight}>{exam.schedule_status || "Scheduled"}</Badge>
+                  : <Badge color={C.amber} bg="#fffbeb">{exam.exam_status || "Awaiting schedule"}</Badge>}
+                {exam.is_independent_schedule && (
+                  <Badge color={C.amber} bg="#fffbeb">
+                    {exam.exam_status === "PendingHOD" ? "Paper under HOD review" :
+                      exam.exam_status === "Approved" ? "Paper approved · schedule link pending" :
+                      exam.exam_status === "Rejected" ? "Paper rejected · timetable remains published" :
+                      exam.exam_status === "Draft" ? "Paper is a draft" :
+                      "Paper not submitted yet"}
+                  </Badge>
+                )}
+              </div>
+              {isScheduled ? (
+                <>
+                  <div style={{ display: "flex", gap: 18, rowGap: 6, fontSize: 13, color: C.grey600, flexWrap: "wrap" }}>
+                    <span>📅 {examDateTime.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+                    <span>🕐 {exam.start_time?.substring(0, 5)} – {exam.end_time?.substring(0, 5)}</span>
+                    <span>🏛 Lab: <strong style={{ color: C.navy }}>{exam.lab_name || "Not assigned"}</strong></span>
+                    {exam.duration && <span>⏱ {exam.duration} min</span>}
+                    {exam.total_marks && <span>📊 Total marks: <strong style={{ color: C.navy }}>{exam.total_marks}</strong></span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.grey500, marginTop: 7 }}>
+                    Teacher: <strong style={{ color: C.navy }}>{exam.teacher_name}</strong>
+                    {" · "}Invigilator{exam.invigilators.length === 1 ? "" : "s"}: <strong style={{ color: C.navy }}>{exam.invigilators.join(", ") || "Not yet assigned"}</strong>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: C.grey500 }}>
+                  <span>Teacher: <strong style={{ color: C.navy }}>{exam.teacher_name}</strong></span>
+                  {exam.proposed_date && <span>Proposed date: <strong style={{ color: C.navy }}>{getExamDateTime(exam.proposed_date, "00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong></span>}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    );
   }
-
-  const avg = Math.round(pastExams.reduce((s, e) => s + e.score, 0) / pastExams.length);
+  const visibleNotifications = notifications.filter(notification => {
+    if (notificationFilter === "direct") {
+      return notification.source === "broadcast" && notification.audience_type === "Specific";
+    }
+    if (notificationFilter === "students") return notification.audience_type === "AllStudents";
+    if (notificationFilter === "department") return notification.audience_type === "Department";
+    if (notificationFilter === "automated") return notification.source === "personal";
+    return true;
+  });
 
   // ── Render Dashboard Page ──
   if (activePage === "student") {
     return (
-      <PageWrap title="Student Dashboard" subtitle="Manage your profile, update credentials, and check announcements">
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
-            <Btn variant="navy" onClick={() => setShowJoinExam(true)}>Join Exam</Btn>
-          </div>
-          {showJoinExam && <JoinExamModal onClose={() => setShowJoinExam(false)} />}
+      <>
+      <style>{studentAdminStyles}</style>
+      <PageWrap className="student-admin-page" style={{ background: "transparent" }} title="Student Dashboard" subtitle="Manage your profile, update credentials, and check announcements">
         {toast && (
-          <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: toast.type === "warn" ? C.amber : C.navy, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: toast.type === "warn" ? C.amber : studentAccent, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10 }}>
             {toast.type === "warn" ? Icon.alertTriangle : Icon.check} {toast.msg}
           </div>
         )}
 
         <div className="resp-grid-2" style={{ gap: 24, marginBottom: 28 }}>
           {/* Profile Card */}
-          <Card style={{ display: "flex", flexDirection: "column", gap: 22, position: "relative" }}>
+          <Card className="student-admin-card" style={{ display: "flex", flexDirection: "column", gap: 22, position: "relative" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 {/* Avatar with click-to-upload option */}
-                <div style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", overflow: "hidden", cursor: "pointer", border: `2px solid ${C.teal}` }} onClick={() => document.getElementById("avatar-upload-input").click()}>
+                <div style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", overflow: "hidden", cursor: "pointer", border: `2px solid ${studentAccent}` }} onClick={() => document.getElementById("avatar-upload-input").click()}>
                   {currentAvatar ? (
                     <img src={currentAvatar} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
-                    <div style={{ width: "100%", height: "100%", background: C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: C.teal, fontSize: 24, fontWeight: 800 }}>
+                    <div style={{ width: "100%", height: "100%", background: studentAccentLight, display: "flex", alignItems: "center", justifyContent: "center", color: studentAccent, fontSize: 24, fontWeight: 800 }}>
                       {studentInfo.name.split(" ").map(w => w[0]).join("")}
                     </div>
                   )}
@@ -174,7 +376,7 @@ export default function StudentPage({ activePage, user }) {
                 
                 <div>
                   <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800, color: C.navy }}>{studentInfo.name}</h3>
-                  <Badge>{studentInfo.rollNo}</Badge>
+                  <Badge color={studentAccent} bg={studentAccentLight}>{studentInfo.rollNo}</Badge>
                 </div>
               </div>
             </div>
@@ -205,68 +407,69 @@ export default function StudentPage({ activePage, user }) {
           </Card>
 
           {/* Password Update Card */}
-          <Card>
+          <Card className="student-admin-card">
             <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 800, color: C.navy }}>Change Security Password</h3>
             <Input label="Current Password" type="password" value={currentPass} onChange={e => setCurrentPass(e.target.value)} />
             <Input label="New Password" type="password" value={newPass} onChange={e => setNewPass(e.target.value)} />
             <Input label="Confirm New Password" type="password" value={confirmPass} onChange={e => setConfirmPass(e.target.value)} />
-            <Btn variant="navy" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={handlePasswordUpdate}>Update Password</Btn>
+            <Btn variant="navy" style={{ width: "100%", justifyContent: "center", marginTop: 8, background: "linear-gradient(135deg, #557987 0%, #7899a6 100%)", boxShadow: "0 10px 24px rgba(47,110,139,.18)" }} onClick={handlePasswordUpdate}>Update Password</Btn>
           </Card>
         </div>
 
-        {/* Enrolled Courses quick-view on dashboard */}
-        {schedule.length > 0 && (
-          <Card style={{ marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div style={{ color: C.teal, display: "flex" }}>{Icon.calendar}</div>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Lab Courses</h3>
-              <Badge color={C.teal} bg={C.tealLight}>{schedule.filter(e => e.exam_date).length} scheduled</Badge>
-              {schedule.filter(e => !e.exam_date).length > 0 && (
-                <Badge color={C.grey500} bg={C.grey100}>{schedule.filter(e => !e.exam_date).length} not scheduled</Badge>
-              )}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {schedule.slice(0, 4).map((e, i) => {
-                const hasSchedule = !!e.exam_date;
-                return (
-                  <div key={e.course_offering_id + (e.exam_id || i)} style={{ padding: "12px 16px", borderRadius: 10, background: hasSchedule ? C.tealLight : C.grey50, border: `1px solid ${hasSchedule ? C.tealMid : C.grey200}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14, color: C.navy }}>{e.course_code} — {e.course_title}</div>
-                      <div style={{ fontSize: 12, color: C.grey500, marginTop: 2 }}>
-                        {hasSchedule
-                          ? <>📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })} at {e.start_time?.substring(0,5)} · Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></>
-                          : e.exam_id ? `Exam created (${e.exam_type}) — awaiting schedule` : "No exam created yet"
-                        }
-                      </div>
-                    </div>
-                    {hasSchedule
-                      ? <Badge color={C.teal} bg="white">Scheduled</Badge>
-                      : <Badge color={C.grey500} bg={C.grey100}>Not Scheduled</Badge>
-                    }
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        )}
-
         {/* Faculty Announcements */}
-        <Card>
+        <Card className="student-admin-card">
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-            <div style={{ color: C.navy, display: "flex" }}>{Icon.bell}</div>
+            <div style={{ color: studentAccent, display: "flex" }}>{Icon.bell}</div>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Faculty Announcements & Broadcasts</h3>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {notifications.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "20px 0", color: C.grey400, fontSize: 13 }}>No announcements yet.</div>
-            ) : notifications.map(n => {
-              const isBroadcast = n.source === "broadcast";
+          <div role="group" aria-label="Filter notifications" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+            {[
+              ["all", "All notifications"],
+              ["direct", "Direct to me"],
+              ["students", "All-student broadcasts"],
+              ["department", "Department broadcasts"],
+              ["automated", "Automated updates"],
+            ].map(([filter, label]) => {
+              const selected = notificationFilter === filter;
               return (
-                <div key={n.id} style={{ padding: "16px 20px", borderRadius: 10, background: !n.is_read ? "rgba(20,184,166,.06)" : C.grey50, border: `1px solid ${!n.is_read ? "#14b8a633" : C.grey200}` }}>
+                <button
+                  key={filter}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setNotificationFilter(filter)}
+                  style={{
+                    border: `1px solid ${selected ? studentAccent : C.grey200}`,
+                    borderRadius: 20,
+                    padding: "7px 13px",
+                    background: selected ? "linear-gradient(135deg, #557987 0%, #7899a6 100%)" : C.white,
+                    color: selected ? C.white : C.grey500,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {visibleNotifications.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px 0", color: C.grey400, fontSize: 13 }}>
+                {notifications.length === 0 ? "No announcements yet." : "No notifications match this filter."}
+              </div>
+            ) : visibleNotifications.map(n => {
+              const isBroadcast = n.source === "broadcast";
+              const senderLabel = isBroadcast
+                ? `${n.sender_name || "Faculty"} · ${n.scope_label || "Broadcast"}`
+                : `SYSTEM · AUTOMATED · ${n.notification_type || "UPDATE"}`;
+              return (
+                <div key={n.id} style={{ padding: "16px 20px", borderRadius: 10, background: !n.is_read ? "rgba(85,121,135,.06)" : C.grey50, border: `1px solid ${!n.is_read ? "rgba(85,121,135,.22)" : C.grey200}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
                     <div>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: isBroadcast ? C.teal : C.navy, textTransform: "uppercase", letterSpacing: 0.5 }}>{n.sender_name || "System"}{n.scope_label ? ` · ${n.scope_label}` : ""}</span>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: isBroadcast ? studentAccent : C.navy, textTransform: "uppercase", letterSpacing: 0.5 }}>{senderLabel}</span>
                       <h4 style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 800, color: C.navy }}>{n.title}</h4>
                     </div>
                     <span style={{ fontSize: 12, color: C.grey400 }}>{new Date(n.created_at).toLocaleDateString()}</span>
@@ -278,99 +481,69 @@ export default function StudentPage({ activePage, user }) {
           </div>
         </Card>
       </PageWrap>
+      </>
     );
   }
 
   // ── Render Results Page ──
   return (
-    <PageWrap title="My Exam Schedule" subtitle="Upcoming lab exams assigned to your section">
-      <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-        <StatCard label="Enrolled Courses"  value={schedule.length}                                                                    icon={Icon.clipboardList} delay={0} />
-        <StatCard label="Scheduled"         value={schedule.filter(e => !!e.exam_date).length}                                        icon={Icon.calendar}     delay={80} />
-        <StatCard label="Not Scheduled"     value={schedule.filter(e => !e.exam_date).length}                                         icon={Icon.clipboard}    delay={160} />
-        <StatCard label="Upcoming"          value={schedule.filter(e => e.exam_date && new Date(e.exam_date) >= new Date()).length}    icon={Icon.trendingUp}   delay={240} />
-      </div>
-
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: C.navy, margin: "0 0 18px", letterSpacing: -0.2 }}>My Enrolled Lab Courses</h2>
-
+    <>
+    <style>{studentAdminStyles}</style>
+    <PageWrap className="student-admin-page" style={{ background: "transparent" }} title="My Courses & Exams" subtitle="Your enrolled courses, upcoming exams, and published exam schedules">
       {schedule.length === 0 ? (
-        <Card style={{ textAlign: "center", padding: "56px 24px" }}>
+        <Card className="student-admin-card" style={{ textAlign: "center", padding: "56px 24px" }}>
           <div style={{ width: 60, height: 60, borderRadius: 16, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 16px" }}>{Icon.clipboard}</div>
           <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 800, color: C.navy }}>No Enrolled Courses Found</h3>
           <p style={{ margin: "0 auto", color: C.grey500, fontSize: 14, maxWidth: 340 }}>Your enrolled courses will appear here. Contact your department if this seems incorrect.</p>
         </Card>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {schedule.map((e, i) => {
-            const hasSchedule = !!e.exam_date;
-            const isPast = hasSchedule && new Date(e.exam_date) < new Date();
-            const hasExam = !!e.exam_id;
-
-            // Determine card accent color
-            const borderColor = !hasSchedule ? C.grey200 : isPast ? C.grey300 : C.tealMid;
-            const iconBg = !hasSchedule ? C.grey100 : isPast ? C.grey100 : C.tealLight;
-            const iconColor = !hasSchedule ? C.grey400 : isPast ? C.grey400 : C.teal;
-
-            return (
-              <Card key={`${e.course_offering_id}-${e.exam_id || i}`} style={{ border: `1.5px solid ${borderColor}`, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${i * 60}ms both` }}>
-                <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
-
-                  {/* Icon */}
-                  <div style={{ width: 50, height: 50, borderRadius: 13, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", color: iconColor, flexShrink: 0 }}>{Icon.clipboard}</div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Course header */}
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
-                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{e.course_code}</h3>
-                      <span style={{ fontSize: 13, color: C.grey600, fontWeight: 600 }}>{e.course_title}</span>
-                      <Badge>{e.section_name}</Badge>
-                    </div>
-
-                    {/* Teacher */}
-                    <div style={{ fontSize: 12, color: C.grey400, marginBottom: 8 }}>
-                      Teacher: <strong style={{ color: C.navy }}>{e.teacher_name}</strong>
-                    </div>
-
-                    {/* Exam & Schedule Info */}
-                    {!hasExam ? (
-                      <div style={{ fontSize: 13, color: C.grey400, fontStyle: "italic" }}>No exam created for this course yet.</div>
-                    ) : !hasSchedule ? (
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                        <Badge color={C.amber} bg="#fffbeb">{e.exam_type}</Badge>
-                        <span style={{ fontSize: 12, color: C.grey500 }}>Exam created</span>
-                        {e.proposed_date && (
-                          <span style={{ fontSize: 12, color: C.grey500 }}>· Proposed Date: <strong style={{ color: C.navy }}>{new Date(e.proposed_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong></span>
-                        )}
-                        <Badge color={C.grey500} bg={C.grey100}>Awaiting Schedule</Badge>
+        <section style={{ marginBottom: 28 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, color: C.navy, margin: "0 0 14px" }}>All Enrolled Courses</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+            {enrolledCourses.map(course => (
+              <Card key={course.course_offering_id} className="student-course-card" style={{ padding: 0, overflow: "hidden", border: `1px solid ${C.grey200}`, transition: "transform .18s ease, box-shadow .18s ease" }}>
+                <div style={{ padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: studentAccent, fontSize: 11, fontWeight: 800, letterSpacing: .7, textTransform: "uppercase", marginBottom: 6 }}>
+                        {course.course_code}
                       </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                          <Badge color={isPast ? C.grey500 : C.teal} bg={isPast ? C.grey100 : C.tealLight}>
-                            {isPast ? "Completed" : "Upcoming"}
-                          </Badge>
-                          <Badge color={C.navy} bg={C.grey50}>{e.exam_type}</Badge>
-                        </div>
-                        <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap", marginTop: 4 }}>
-                          <span>📅 {new Date(e.exam_date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
-                          <span>🕐 {e.start_time?.substring(0,5)} – {e.end_time?.substring(0,5)}</span>
-                          <span>🏛 Lab: <strong style={{ color: C.navy }}>{e.lab_name}</strong></span>
-                          {e.duration && <span>⏱ {e.duration} min</span>}
-                          {e.total_marks && <span>📊 Total Marks: <strong style={{ color: C.navy }}>{e.total_marks}</strong></span>}
-                        </div>
-                        <div style={{ fontSize: 12, color: C.grey400, marginTop: 2 }}>
-                          Invigilator: <strong style={{ color: C.navy }}>{e.invigilator_name || "Not yet assigned"}</strong>
-                        </div>
-                      </div>
-                    )}
+                      <h3 style={{ color: C.navy, fontSize: 15, lineHeight: 1.4, margin: 0 }}>{course.course_title}</h3>
+                    </div>
+                    <div style={{ width: 38, height: 38, flexShrink: 0, borderRadius: 10, background: studentAccentLight, color: studentAccent, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {Icon.clipboard}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, borderTop: `1px solid ${C.grey100}`, marginTop: 16, paddingTop: 13 }}>
+                    <span style={{ fontSize: 12, color: C.grey500 }}>Instructor</span>
+                    <strong style={{ fontSize: 12, color: C.navy, textAlign: "right" }}>{course.teacher_name}</strong>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <Badge color={studentAccent} bg={studentAccentLight}>{course.section_name}</Badge>
                   </div>
                 </div>
               </Card>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </section>
       )}
+
+      <section style={{ marginBottom: 28 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: C.navy, margin: "0 0 14px" }}>Upcoming Exams</h2>
+        {renderExamSection(upcomingExams, "No upcoming scheduled exams.")}
+      </section>
+
+      <section style={{ marginBottom: 28 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: C.navy, margin: "0 0 14px" }}>Exams Awaiting Schedule</h2>
+        {renderExamSection(awaitingScheduleExams, "No exams are currently awaiting a schedule.", false)}
+      </section>
+
+      <section style={{ marginBottom: 28 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: C.navy, margin: "0 0 14px" }}>Past Exams</h2>
+        {renderExamSection(pastExams, "No past exams.")}
+      </section>
       <div style={{ height: 48 }} />
     </PageWrap>
+    </>
   );
 }

@@ -23,7 +23,7 @@ export function RiskBadge({ severity, level }) {
 /* ===========================================================
    EXAM TIMER
 =========================================================== */
-export function ExamTimer({ durationMinutes = 120, startTime }) {
+export function ExamTimer({ durationMinutes = 120, startTime, accentColor = C.teal }) {
   const [timeLeft, setTimeLeft] = useState(durationMinutes * 60);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function ExamTimer({ durationMinutes = 120, startTime }) {
       fontFamily: 'monospace',
       border: isUrgent ? `1.5px solid ${C.red}` : 'none'
     }}>
-      <span style={{ display: 'flex', color: isUrgent ? C.red : C.teal }}>{Icon.clock || Icon.calendar}</span>
+      <span style={{ display: 'flex', color: isUrgent ? C.red : accentColor }}>{Icon.clock || Icon.calendar}</span>
       <span>{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}</span>
     </div>
   );

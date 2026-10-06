@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import ensureCoordinatorTimetableSchema from '../service/coordinatorTimetableSchema.js';
 import { upload, getFileUrl } from '../middleware/upload.js';
 
 async function notifyDepartmentHods(examId) {
@@ -124,6 +125,34 @@ export const getSchedule = async (req, res) => {
   } catch (error) {
     console.error('Error fetching teacher schedule:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch schedule.' });
+  }
+};
+
+export const getPlannedSchedule = async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await ensureCoordinatorTimetableSchema();
+    const teacher = await pool.query('SELECT teacher_id FROM teacher WHERE user_id=$1', [userId]);
+    if (!teacher.rowCount) return res.status(404).json({ status: 'error', message: 'Teacher profile not found.' });
+    const result = await pool.query(`
+      SELECT cet.timetable_id,cet.exam_type,cet.exam_date,cet.start_time,cet.end_time,
+             c.course_code,c.course_title,p.program_code,b.batch_name,s.section_name,
+             l.lab_name,l.capacity
+      FROM coordinator_exam_timetable cet
+      JOIN course_offering co ON co.course_offering_id=cet.course_offering_id
+      JOIN course c ON c.course_id=co.course_id
+      JOIN program p ON p.program_id=c.program_id
+      JOIN section s ON s.section_id=co.section_id
+      JOIN batch b ON b.batch_id=s.batch_id
+      JOIN lab l ON l.lab_id=cet.lab_id
+      WHERE co.teacher_id=$1
+        AND cet.status='Published' AND cet.linked_schedule_id IS NULL
+      ORDER BY cet.exam_date,cet.start_time,c.course_code
+    `, [teacher.rows[0].teacher_id]);
+    res.status(200).json({ status: 'success', schedule: result.rows });
+  } catch (error) {
+    console.error('Error fetching teacher planned exam timetable:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch planned exam timetable.' });
   }
 };
 
@@ -493,13 +522,16 @@ export const getSharedPapers = async (req, res) => {
     const result = await pool.query(`
       SELECT e.exam_id, e.exam_type, e.total_marks, e.duration, e.status, e.approved_at,
              qp.file_path AS exam_paper_url, qp.shared_with_dec_at,
-             c.course_code, c.course_title, s.section_name,
+             c.course_code, c.course_title, s.section_name, b.batch_name,
+             p.program_code, p.program_name,
              u.first_name || ' ' || u.last_name AS teacher_name,
              d.department_name, d.department_code
       FROM exam e
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
+      JOIN program p ON c.program_id=p.program_id
       JOIN section s ON co.section_id = s.section_id
+      JOIN batch b ON s.batch_id=b.batch_id
       JOIN teacher t ON co.teacher_id = t.teacher_id
       JOIN users u ON t.user_id = u.user_id
       JOIN department d ON t.department_id = d.department_id

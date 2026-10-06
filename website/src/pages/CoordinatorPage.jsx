@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
-import Tabs from "../components/common/Tabs";
 import Card from "../components/common/Card";
 import Btn from "../components/common/Btn";
 import Input from "../components/common/Input";
@@ -10,7 +9,6 @@ import Select from "../components/common/Select";
 import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
-import statusBadge from "../components/common/statusBadge";
 import { API_BASE_URL } from "../config/apiConfig";
 
 // Small inline icon buttons for row actions (edit / delete)
@@ -56,15 +54,11 @@ function RowActionBtn({ onClick, title, hoverColor, children }) {
   );
 }
 
-export default function CoordinatorPage({ activePage, setPage, user }) {
-  const [activeTab, setActiveTab] = useState(activePage === "rooms" ? "rooms" : "schedule");
+export default function CoordinatorPage({ activePage, user }) {
   const [schedule, setSchedule] = useState([]);
   const [labs, setLabs] = useState([]);
   const [approvedExams, setApprovedExams] = useState([]);
-
-  useEffect(() => {
-    setActiveTab(activePage === "rooms" ? "rooms" : "schedule");
-  }, [activePage]);
+  const [schedulableOfferings, setSchedulableOfferings] = useState([]);
 
   // Fetch labs, schedule, and approved exams from database
   const fetchData = () => {
@@ -79,6 +73,10 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
    fetch(`${API_BASE_URL}/coordinator/exams/approved`)
       .then(res => res.json())
       .then(data => { if (data.status === "success") setApprovedExams(data.exams); });
+
+   fetch(`${API_BASE_URL}/coordinator/schedule-options`)
+     .then(res => res.json())
+     .then(data => { if (data.status === "success") setSchedulableOfferings(data.offerings); });
   };
 
   useEffect(() => {
@@ -94,6 +92,8 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   const [showSchedule, setShowSchedule] = useState(false);
 
   const [schedExam, setSchedExam] = useState("");
+  const [schedOffering, setSchedOffering] = useState("");
+  const [schedExamType, setSchedExamType] = useState("LabMid");
   const [schedDate, setSchedDate] = useState("");
   const [schedLab, setSchedLab] = useState("");
   const [schedStartTime, setSchedStartTime] = useState("09:00");
@@ -101,6 +101,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
   // Tracks whether the modal is creating a new schedule entry or editing an existing one
   const [editingScheduleId, setEditingScheduleId] = useState(null);
+  const [editingIndependentSchedule, setEditingIndependentSchedule] = useState(false);
 
   // Broadcast states
   const [broadcastType, setBroadcastType] = useState("all"); // "all" | "specific"
@@ -173,13 +174,17 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
 
   function openScheduleModal() {
     setEditingScheduleId(null);
-    setSchedExam(""); setSchedDate(""); setSchedLab("");
+    setEditingIndependentSchedule(false);
+    setSchedExam(""); setSchedOffering(""); setSchedExamType("LabMid"); setSchedDate(""); setSchedLab("");
     setSchedStartTime("09:00"); setSchedEndTime("10:30");
     setShowSchedule(true);
   }
 
   function openEditSchedule(s) {
     setEditingScheduleId(s?.schedule_id ?? s?.id);
+    setEditingIndependentSchedule(Boolean(s?.is_independent_schedule));
+    setSchedOffering(s?.course_offering_id != null ? String(s.course_offering_id) : "");
+    setSchedExamType(s?.exam_type || "LabMid");
     setSchedExam(s?.exam_id != null ? String(s.exam_id) : "");
     setSchedDate(s?.exam_date ? String(s.exam_date).substring(0, 10) : "");
     setSchedLab(s?.lab_id != null ? String(s.lab_id) : "");
@@ -191,32 +196,43 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   function closeScheduleModal() {
     setShowSchedule(false);
     setEditingScheduleId(null);
+    setEditingIndependentSchedule(false);
   }
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function confirmSchedule() {
     if (isSubmitting) return;
-    if (!schedExam || !schedLab || !schedDate || !schedStartTime || !schedEndTime) {
+    const isIndependent = editingScheduleId == null || editingIndependentSchedule;
+    if ((isIndependent ? !schedOffering : !schedExam) || !schedLab || !schedDate || !schedStartTime || !schedEndTime) {
       alert("Please fill all scheduling fields.");
       return;
     }
 
     setIsSubmitting(true);
 
-    const payload = {
-      exam_id: parseInt(schedExam),
-      lab_id: parseInt(schedLab),
-      user_id: user?.userId || 1,
-      exam_date: schedDate,
-      start_time: schedStartTime + ":00",
-      end_time: schedEndTime + ":00",
-    };
+    const payload = isIndependent
+      ? {
+          course_offering_id: Number(schedOffering),
+          exam_type: schedExamType,
+          lab_id: Number(schedLab),
+          exam_date: schedDate,
+          start_time: schedStartTime + ":00",
+          end_time: schedEndTime + ":00",
+        }
+      : {
+          exam_id: Number(schedExam),
+          lab_id: Number(schedLab),
+          user_id: user?.userId || 1,
+          exam_date: schedDate,
+          start_time: schedStartTime + ":00",
+          end_time: schedEndTime + ":00",
+        };
 
     const isEdit = editingScheduleId != null;
-    const url = isEdit
-      ? `${API_BASE_URL}/coordinator/schedule/${editingScheduleId}`
-      : `${API_BASE_URL}/coordinator/schedule`;
+    const url = isIndependent
+      ? (isEdit ? `${API_BASE_URL}/coordinator/timetable/${editingScheduleId}` : `${API_BASE_URL}/coordinator/timetable`)
+      : (isEdit ? `${API_BASE_URL}/coordinator/schedule/${editingScheduleId}` : `${API_BASE_URL}/coordinator/schedule`);
 
     fetch(url, {
       method: isEdit ? "PUT" : "POST",
@@ -227,7 +243,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
       .then(data => {
         setIsSubmitting(false);
         if (data.status === "success") {
-          alert(isEdit ? "Exam schedule updated!" : "Exam scheduled successfully!");
+          alert(isEdit ? "Exam schedule updated!" : "Exam timetable published. Students and the course teacher have been notified.");
           closeScheduleModal();
           fetchData();
         } else {
@@ -245,7 +261,10 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
     if (!window.confirm(`Remove the scheduled slot for ${label}?`)) return;
 
     const id = s?.schedule_id ?? s?.id;
-    fetch(`${API_BASE_URL}/coordinator/schedule/${id}`, { method: "DELETE" })
+    const url = s?.is_independent_schedule
+      ? `${API_BASE_URL}/coordinator/timetable/${s?.timetable_id ?? id}`
+      : `${API_BASE_URL}/coordinator/schedule/${id}`;
+    fetch(url, { method: "DELETE" })
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
@@ -258,21 +277,169 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
   }
 
   function exportDateSheet() {
-    alert("Date sheet exported as PDF.");
+    if (safeSchedule.length === 0) {
+      alert("There are no scheduled exams to export.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("The date sheet could not open because the browser blocked the new window. Allow pop-ups for this site and try again.");
+      return;
+    }
+
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+    const sortedSchedule = [...safeSchedule].sort((a, b) => {
+      const programOrder = String(a?.program_code || a?.program_name || "").localeCompare(String(b?.program_code || b?.program_name || ""));
+      if (programOrder) return programOrder;
+      const sectionOrder = `${a?.batch_name || ""} ${a?.section_name || ""}`.localeCompare(`${b?.batch_name || ""} ${b?.section_name || ""}`);
+      if (sectionOrder) return sectionOrder;
+      const dateOrder = String(a?.exam_date || "").localeCompare(String(b?.exam_date || ""));
+      return dateOrder || String(a?.start_time || "").localeCompare(String(b?.start_time || ""));
+    });
+    const programs = new Map();
+    sortedSchedule.forEach((exam) => {
+      const scheduleRef = exam?.schedule_id ?? "unknown";
+      const programName = exam?.program_name || (exam?.program_id ? `Program ID ${exam.program_id}` : `Program details unavailable · schedule #${scheduleRef}`);
+      const programCode = exam?.program_code || "";
+      const programKey = String(exam?.program_id ?? `missing-${scheduleRef}`);
+      if (!programs.has(programKey)) {
+        programs.set(programKey, { name: programName, code: programCode, sections: new Map() });
+      }
+      const sectionName = exam?.section_name || (exam?.section_id ? `Section ID ${exam.section_id}` : `Section details unavailable · schedule #${scheduleRef}`);
+      const batchName = exam?.batch_name || (exam?.batch_id ? `Batch ID ${exam.batch_id}` : `Batch details unavailable · schedule #${scheduleRef}`);
+      const sectionKey = `${exam?.batch_id ?? `missing-${scheduleRef}`}|${exam?.section_id ?? scheduleRef}`;
+      const program = programs.get(programKey);
+      if (!program.sections.has(sectionKey)) {
+        program.sections.set(sectionKey, { name: sectionName, batch: batchName, batchId: exam?.batch_id, sectionId: exam?.section_id, exams: [] });
+      }
+      program.sections.get(sectionKey).exams.push(exam);
+    });
+    const renderTable = (exams) => `
+      <table>
+        <thead><tr><th>Course</th><th>Exam</th><th>Date</th><th>Time</th><th>Lab</th><th>Invigilator</th><th>Capacity</th></tr></thead>
+        <tbody>${exams.map((exam) => `
+          <tr>
+            <td>${escapeHtml([exam?.course_code, exam?.course_title].filter(Boolean).join(" - ") || "—")}</td>
+            <td>${escapeHtml(exam?.exam_type || "—")}</td>
+            <td>${escapeHtml(exam?.exam_date ? new Date(exam.exam_date).toLocaleDateString() : "TBD")}</td>
+            <td>${escapeHtml(`${(exam?.start_time || "--:--").substring(0, 5)}–${(exam?.end_time || "--:--").substring(0, 5)}`)}</td>
+            <td>${escapeHtml(exam?.lab_name || "N/A")}</td>
+            <td>${escapeHtml(exam?.invigilator_name || "Unassigned")}</td>
+            <td>${escapeHtml(exam?.capacity ?? "—")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+    const groupedSheets = Array.from(programs.values()).map((program) => `
+      <section class="program-group">
+        <h2>${escapeHtml([program.code, program.name].filter(Boolean).join(" — "))}</h2>
+        ${Array.from(program.sections.values()).map((section) => `
+          <section class="section-group">
+            <h3>${escapeHtml([section.batch, `Section ${section.name}`].filter(Boolean).join(" · "))}</h3>
+            ${renderTable(section.exams)}
+          </section>`).join("")}
+      </section>`).join("");
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Exam Date Sheet</title>
+          <style>
+            body { font: 14px Arial, sans-serif; color: #1a2b4b; margin: 32px; }
+            header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+            h1 { margin: 0 0 6px; font-size: 24px; }
+            h2 { margin: 0 0 14px; padding-bottom: 8px; color: #385966; border-bottom: 2px solid #d7e0e6; font-size: 20px; }
+            h3 { margin: 0 0 10px; color: #557987; font-size: 16px; }
+            p { margin: 0; color: #557987; }
+            .generated { color: #64748b; font-size: 12px; text-align: right; }
+            button { border: 0; border-radius: 7px; padding: 10px 16px; background: #557987; color: white; font-size: 13px; font-weight: 700; cursor: pointer; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #d7e0e6; padding: 9px 10px; text-align: left; }
+            th { background: #eaf1f4; color: #385966; font-size: 11px; text-transform: uppercase; }
+            tr { break-inside: avoid; }
+            .program-group { margin: 28px 0; break-inside: avoid; }
+            .section-group { margin: 18px 0 24px; }
+            @media print {
+              body { margin: 12mm; }
+              .print-action { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <header>
+            <div><h1>Exam Date Sheet</h1><p>Scheduled exams, rooms, and invigilator assignments</p></div>
+            <div><div class="generated">Generated ${escapeHtml(new Date().toLocaleString())}</div><button class="print-action" onclick="window.print()">Print / Save as PDF</button></div>
+          </header>
+          ${groupedSheets}
+          <script>window.addEventListener("load", () => setTimeout(() => window.print(), 250));</script>
+        </body>
+      </html>`);
+    printWindow.document.close();
   }
 
   const safeSchedule = (Array.isArray(schedule) ? schedule : []).filter(Boolean);
   const safeLabs     = (Array.isArray(labs) ? labs : []).filter(Boolean);
   const safeApproved = (Array.isArray(approvedExams) ? approvedExams : []).filter(Boolean);
+  const safeOfferings = (Array.isArray(schedulableOfferings) ? schedulableOfferings : []).filter(Boolean);
+  const groupedSchedule = (() => {
+    const programs = new Map();
+    const sortedSchedule = [...safeSchedule].sort((a, b) => {
+      const programOrder = String(a?.program_code || a?.program_name || "").localeCompare(String(b?.program_code || b?.program_name || ""));
+      if (programOrder) return programOrder;
+      const sectionOrder = `${a?.batch_name || ""} ${a?.section_name || ""}`.localeCompare(`${b?.batch_name || ""} ${b?.section_name || ""}`);
+      if (sectionOrder) return sectionOrder;
+      const dateOrder = String(a?.exam_date || "").localeCompare(String(b?.exam_date || ""));
+      return dateOrder || String(a?.start_time || "").localeCompare(String(b?.start_time || ""));
+    });
+
+    sortedSchedule.forEach((exam) => {
+      const scheduleRef = exam?.schedule_id ?? "unknown";
+      const programName = exam?.program_name || "";
+      const programCode = exam?.program_code || "";
+      const programId = exam?.program_id ?? `missing-${scheduleRef}`;
+      const programKey = String(programId);
+      if (!programs.has(programKey)) {
+        programs.set(programKey, { key: programKey, name: programName, code: programCode, id: exam?.program_id, sections: new Map() });
+      }
+
+      const sectionName = exam?.section_name || "";
+      const batchName = exam?.batch_name || "";
+      const sectionKey = `${exam?.batch_id ?? `missing-${scheduleRef}`}|${exam?.section_id ?? scheduleRef}`;
+      const program = programs.get(programKey);
+      if (!program.sections.has(sectionKey)) {
+        program.sections.set(sectionKey, { key: sectionKey, name: sectionName, batch: batchName, batchId: exam?.batch_id, sectionId: exam?.section_id, exams: [] });
+      }
+      program.sections.get(sectionKey).exams.push(exam);
+    });
+
+    return Array.from(programs.values()).map(program => ({
+      ...program,
+      sections: Array.from(program.sections.values()),
+    }));
+  })();
+  const scheduleDetailsMissing = safeSchedule.some(exam =>
+    !exam?.program_id || !exam?.program_name || !exam?.batch_id || !exam?.batch_name || !exam?.section_id
+  );
 
   return (
-    <PageWrap title={activeTab === "rooms" ? "Lab Rooms" : "Scheduling & Date Sheets"} subtitle={activeTab === "rooms" ? "Current lab availability and network details" : "Manage exam timetables, lab assignments, and invigilators"}
-      actions={activeTab === "schedule" ? <><Btn variant="ghost" size="sm" onClick={exportDateSheet}>Export Date Sheet</Btn><Btn variant="primary" onClick={openScheduleModal}>+ Schedule Exam</Btn></> : undefined}>
-      {showSchedule && (
+    <PageWrap
+      className={activePage === "coordinator-broadcast" ? "coordinator-broadcast-page" : ""}
+      title={activePage === "coordinator-broadcast" ? "Broadcast Notification" : "Scheduling & Date Sheets"}
+      subtitle={activePage === "coordinator-broadcast" ? "Send updates to a group or a specific user" : "Manage exam timetables, lab assignments, and invigilators"}
+      actions={activePage === "coordinator-broadcast" ? undefined : <><Btn variant="ghost" size="sm" onClick={exportDateSheet}>Export Date Sheet</Btn><Btn variant="primary" onClick={openScheduleModal}>+ Schedule Exam</Btn></>}>
+      {activePage !== "coordinator-broadcast" && showSchedule && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(17,29,51,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={closeScheduleModal}>
           <div style={{ background: C.white, borderRadius: 16, padding: 40, width: 440, boxShadow: "0 24px 64px rgba(0,0,0,.18)", animation: "popIn .28s cubic-bezier(.22,.68,0,1.3) both" }} onClick={e => e.stopPropagation()}>
             <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 800, color: C.navy }}>{editingScheduleId != null ? "Edit Scheduled Exam" : "Schedule Exam"}</h2>
-            <Select label="Approved Exam" value={schedExam} onChange={(e) => {
+            {editingScheduleId != null && !editingIndependentSchedule ? <Select label="Approved Exam" value={schedExam} onChange={(e) => {
               const selectedId = e.target.value;
               setSchedExam(selectedId);
               if (selectedId) {
@@ -299,7 +466,21 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
                     </option>
                   );
                 })}
-            </Select>
+            </Select> : <>
+              <Select label="Program / Batch / Section / Course" value={schedOffering} onChange={(e) => setSchedOffering(e.target.value)} disabled={editingIndependentSchedule}>
+                <option value="">{safeOfferings.length ? "Select a course offering..." : "No course offerings available"}</option>
+                {safeOfferings.map(offering => (
+                  <option key={offering.course_offering_id} value={offering.course_offering_id}>
+                    {offering.program_code} · {offering.batch_name} · Section {offering.section_name} · {offering.course_code} — {offering.course_title}
+                  </option>
+                ))}
+              </Select>
+              <Select label="Exam Type" value={schedExamType} onChange={(e) => setSchedExamType(e.target.value)} disabled={editingIndependentSchedule}>
+                <option value="LabMid">Lab Mid</option>
+                <option value="LabFinal">Lab Final</option>
+                <option value="LabPractical">Lab Practical</option>
+              </Select>
+            </>}
             <Input label="Date" type="date" min={new Date().toISOString().split('T')[0]} value={schedDate} onChange={(e) => setSchedDate(e.target.value)} />
             <Select label="Lab" value={schedLab} onChange={(e) => setSchedLab(e.target.value)}>
               <option value="">Select a lab…</option>
@@ -312,73 +493,90 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <Btn variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={closeScheduleModal} disabled={isSubmitting}>Cancel</Btn>
               <Btn variant="navy" style={{ flex: 1, justifyContent: "center", opacity: isSubmitting ? 0.6 : 1 }} onClick={confirmSchedule} disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : (editingScheduleId != null ? "Save Changes" : "Confirm Schedule")}
+                {isSubmitting ? "Saving..." : (editingScheduleId != null ? "Save Changes" : "Publish Timetable")}
               </Btn>
             </div>
           </div>
         </div>
       )}
 
-      <Tabs tabs={[{ id: "schedule", label: "Date Sheets" }, { id: "rooms", label: "Lab Rooms" }]} active={activeTab} onChange={(id) => {
-        setActiveTab(id);
-        if (setPage) {
-          const pageMap = { schedule: "coordinator", rooms: "rooms" };
-          setPage(pageMap[id]);
-        }
-      }} />
-
-      {/* ── DATE SHEETS ── */}
-      {activeTab === "schedule" && <>
-        <div className="resp-grid-3" style={{ marginBottom: 28 }}>
-          <StatCard label="Scheduled Exams" value={safeSchedule.length} icon={Icon.calendar} />
-          <StatCard label="Labs Available" value={safeLabs.filter(l => l?.status === "Available").length} icon={Icon.server} />
-          <StatCard label="Total Capacity" value={safeSchedule.reduce((s, e) => s + (e?.capacity || 0), 0)} icon={Icon.users} />
-        </div>
+      {activePage !== "coordinator-broadcast" && <>
+      <div className="resp-grid-2" style={{ marginBottom: 28 }}>
+        <StatCard label="Scheduled Exams" value={safeSchedule.length} icon={Icon.calendar} />
+        <StatCard label="Total Capacity" value={safeSchedule.reduce((s, e) => s + (e?.capacity || 0), 0)} icon={Icon.users} />
+      </div>
         <Card style={{ padding: 0, overflow: "hidden", marginBottom: 24 }}>
           <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontWeight: 700, fontSize: 15, color: C.navy }}>Exam Schedule</span>
             <Badge>Spring 2026</Badge>
           </div>
-          <Table
-            columns={["Course", "Section", "Exam", "Date", "Time", "Lab", "Invigilator", "Actions"]}
-            rows={safeSchedule.map((s) => [
-              <span style={{ fontWeight: 700, color: C.navy }}>
-                {s?.course_code}
-                {s?.course_title ? <span style={{ fontWeight: 500, color: C.grey500 }}> - {s.course_title}</span> : null}
-              </span>,
-              <Badge>{s?.section_name}</Badge>,
-              s?.exam_type || "—",
-              s?.exam_date ? new Date(s.exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD",
-              `${(s?.start_time || "--:--").substring(0, 5)}–${(s?.end_time || "--:--").substring(0, 5)}`,
-              s?.lab_name || "N/A",
-              s?.invigilator_name || <span style={{ color: C.grey500, fontWeight: 600 }}>Unassigned</span>,
-              <div style={{ display: "flex", gap: 4 }}>
-                <RowActionBtn title="Edit" hoverColor={C.teal} onClick={() => openEditSchedule(s)}>
-                  <EditIcon />
-                </RowActionBtn>
-                <RowActionBtn title="Delete" hoverColor="#e5484d" onClick={() => deleteSchedule(s)}>
-                  <TrashIcon />
-                </RowActionBtn>
-              </div>,
-            ])} />
+          {scheduleDetailsMissing && <div role="alert" style={{ margin: "16px 20px 0", padding: "12px 14px", borderRadius: 9, background: C.amberLight, color: C.navy, fontSize: 13 }}>
+            Some schedule entries are missing program or batch details from the API. Restart the backend and refresh this page to load the full identifiers; incomplete entries below are kept separate rather than being grouped together.
+          </div>}
+          {groupedSchedule.length === 0
+            ? <div style={{ padding: 28, textAlign: "center", color: C.grey500 }}>No exams have been scheduled yet.</div>
+            : groupedSchedule.map(program => (
+              <section key={program.key} style={{ padding: "20px 20px 4px" }}>
+                <h3 style={{ margin: "0 0 14px", paddingBottom: 10, borderBottom: "1px solid rgba(85,121,135,.2)", color: "#557987", fontSize: 16, fontWeight: 800, textAlign: "left" }}>
+                  {[program.code, program.name || `Program details unavailable · schedule #${program.key.replace("missing-", "")}`].filter(Boolean).join(" — ")}
+                </h3>
+                {program.sections.map(section => (
+                  <div key={`${program.key}-${section.key}`} style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <Badge color="#557987" bg="#e5f0f4">{section.batch || `Batch details unavailable · ID ${section.batchId ?? section.key.split("|").pop()}`}</Badge>
+                      <strong style={{ color: C.navy, fontSize: 13 }}>{section.name ? `Section ${section.name}` : `Section details unavailable · ID ${section.sectionId ?? section.key.split("|").pop()}`}</strong>
+                    </div>
+                    <Table
+                      columns={["Course", "Exam", "Date", "Time", "Lab", "Invigilator", "Actions"]}
+                      rows={section.exams.map((s) => [
+                        <span style={{ fontWeight: 700, color: C.navy }}>
+                          {s?.course_code}
+                          {s?.course_title ? <span style={{ fontWeight: 500, color: C.grey500 }}> - {s.course_title}</span> : null}
+                        </span>,
+                        s?.exam_type || "—",
+                        s?.exam_date ? new Date(s.exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBD",
+                        `${(s?.start_time || "--:--").substring(0, 5)}–${(s?.end_time || "--:--").substring(0, 5)}`,
+                        s?.lab_name || "N/A",
+                        s?.invigilator_name || <span style={{ color: C.grey500, fontWeight: 600 }}>Unassigned</span>,
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <RowActionBtn title="Edit" hoverColor={C.teal} onClick={() => openEditSchedule(s)}>
+                            <EditIcon />
+                          </RowActionBtn>
+                          <RowActionBtn title="Delete" hoverColor="#e5484d" onClick={() => deleteSchedule(s)}>
+                            <TrashIcon />
+                          </RowActionBtn>
+                        </div>,
+                      ])} />
+                  </div>
+                ))}
+              </section>
+            ))}
         </Card>
 
-        {/* Dynamic Broadcast & Target Specific User Notifications */}
-        <Card>
-          <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Broadcast Notification</h3>
+      </>}
+
+      {activePage === "coordinator-broadcast" && <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        <Card style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 14, background: "rgba(85,121,135,.12)", color: "#557987", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icon.bell}</div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, color: "#557987" }}>Create a notification</h2>
+              <p style={{ margin: "4px 0 0", color: C.grey500, fontSize: 13 }}>Choose your recipients, add a subject and message, then send.</p>
+            </div>
+          </div>
           {notifSent && (
             <div style={{
               marginBottom: 16,
               padding: "14px 18px",
-              background: "linear-gradient(135deg, #0d9488, #14b8a6)",
+              background: "linear-gradient(135deg, #557987, #7899a6)",
               borderRadius: 10,
               display: "flex",
               alignItems: "center",
               gap: 12,
-              boxShadow: "0 4px 16px rgba(20,184,166,0.3)",
+              boxShadow: "0 8px 20px rgba(47,110,139,.18)",
               animation: "slideDown 0.3s ease",
             }}>
-              <span style={{ fontSize: 20 }}>✅</span>
+              <span style={{ fontSize: 20 }}>{Icon.checkCircle}</span>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 2 }}>Notification Sent Successfully!</div>
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)" }}>Your message has been delivered to <strong>{notifSentTo}</strong>.</div>
@@ -389,23 +587,25 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
           <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
             <button
               onClick={() => setBroadcastType("all")}
+              aria-pressed={broadcastType === "all"}
               style={{
-                flex: 1, padding: "10px", borderRadius: 8, border: `2px solid ${broadcastType === "all" ? C.teal : C.grey200}`,
-                background: broadcastType === "all" ? C.tealLight : C.white,
-                color: C.navy, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+                flex: 1, padding: "12px 14px", borderRadius: 10, border: `1.5px solid ${broadcastType === "all" ? "#557987" : C.grey200}`,
+                background: broadcastType === "all" ? "rgba(85,121,135,.1)" : "rgba(255,255,255,.5)",
+                color: broadcastType === "all" ? "#557987" : C.grey600, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
               }}
             >
-              📢 Broadcast to All
+              Broadcast to a group
             </button>
             <button
               onClick={() => setBroadcastType("specific")}
+              aria-pressed={broadcastType === "specific"}
               style={{
-                flex: 1, padding: "10px", borderRadius: 8, border: `2px solid ${broadcastType === "specific" ? C.teal : C.grey200}`,
-                background: broadcastType === "specific" ? C.tealLight : C.white,
-                color: C.navy, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+                flex: 1, padding: "12px 14px", borderRadius: 10, border: `1.5px solid ${broadcastType === "specific" ? "#557987" : C.grey200}`,
+                background: broadcastType === "specific" ? "rgba(85,121,135,.1)" : "rgba(255,255,255,.5)",
+                color: broadcastType === "specific" ? "#557987" : C.grey600, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
               }}
             >
-              👤 Message Specific User
+              Message a specific user
             </button>
           </div>
 
@@ -420,7 +620,7 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
                 {selectedTarget ? (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: C.tealLight, borderRadius: 8, border: `1.5px solid ${C.teal}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: "rgba(85,121,135,.1)", borderRadius: 10, border: "1.5px solid rgba(85,121,135,.4)" }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>{targetLabel(selectedTarget)}</span>
                     <button
                       onClick={() => { setSelectedTarget(null); setSpecificSearch(""); }}
@@ -462,12 +662,12 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
                 )}
               </div>
             )}
-            <Input label="Subject" placeholder="e.g. July Exam Schedule Published" value={notifSubject} onChange={(e) => setNotifSubject(e.target.value)} />
+            <Input label="Subject" placeholder="e.g. Exam schedule published" value={notifSubject} onChange={(e) => setNotifSubject(e.target.value)} />
           </div>
 
           <div style={{ marginBottom: 18 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.grey800, marginBottom: 6 }}>Message</label>
-            <textarea value={notifMsg} onChange={(e) => setNotifMsg(e.target.value)} placeholder="Write your notification here..." style={{ width: "100%", padding: "11px 14px", borderRadius: 8, border: `1.5px solid ${C.grey200}`, fontSize: 14, color: C.grey800, background: C.grey50, minHeight: 80, resize: "vertical", boxSizing: "border-box", outline: "none", fontFamily: "inherit" }} />
+            <label htmlFor="coordinator-notification-message" style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#557987", marginBottom: 6 }}>Message</label>
+            <textarea id="coordinator-notification-message" value={notifMsg} onChange={(e) => setNotifMsg(e.target.value)} placeholder="Write the notification message…" style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,.9)", fontSize: 14, color: C.grey800, background: "rgba(255,255,255,.5)", minHeight: 140, resize: "vertical", boxSizing: "border-box", outline: "none", fontFamily: "inherit", boxShadow: "0 7px 22px rgba(47,110,139,.08)" }} />
           </div>
           <Btn
             variant="primary"
@@ -477,63 +677,10 @@ export default function CoordinatorPage({ activePage, setPage, user }) {
           >
             {isSending ? (
               <><span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Sending…</>
-            ) : "📤 Send Notification"}
+            ) : <>{Icon.send} Send Notification</>}
           </Btn>
         </Card>
-      </>}
-
-      {/* ── LAB ROOMS ── */}
-      {activeTab === "rooms" && <>
-        <div className="resp-grid-3" style={{ marginBottom: 28 }}>
-          <StatCard label="Total Labs" value={labs.length} icon={Icon.server} />
-          <StatCard label="Available Now" value={labs.filter(l => l.status === "Available").length} icon={Icon.check} accent={C.green} light={C.greenLight} />
-          <StatCard label="Total PC Capacity" value={labs.reduce((s, l) => s + l.capacity, 0)} icon={Icon.monitor} />
-        </div>
-        <Card style={{ padding: 0, overflow: "hidden", marginBottom: 24 }}>
-          <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>Lab Status</div>
-          <Table
-            columns={["Lab", "PCs", "Capacity", "Network Range", "Current Exam", "Status"]}
-            rows={safeLabs.map((lab) => {
-              const sc = lab?.status === "Available" ? [C.teal, C.tealLight] : lab?.status === "In Use" ? [C.navy, C.grey200] : [C.amber, C.amberLight];
-              return [
-                <span style={{ fontWeight: 800, color: C.navy }}>{lab?.lab_name}</span>,
-                lab?.total_pcs || 0, lab?.capacity || 0,
-                <span style={{ fontFamily: "monospace", fontSize: 13 }}>{lab?.network_range || "10.0.0.0/24"}</span>,
-                lab?.status === "InUse" ? <Badge>Lab Active</Badge> : <span style={{ color: C.grey400 }}>—</span>,
-                <Badge color={sc[0]} bg={sc[1]}>{lab?.status || "Available"}</Badge>,
-              ];
-            })} />
-        </Card>
-        <div className="resp-grid-2">
-          <Card>
-            <h3 style={{ margin: "0 0 16px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Capacity Utilization</h3>
-            {safeLabs.map((lab) => {
-              const pct = Math.round(((lab?.capacity || 1) / (lab?.total_pcs || 1)) * 100);
-              return (
-                <div key={lab?.lab_id || Math.random()} style={{ marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, color: C.grey800, marginBottom: 5 }}>
-                    <span>{lab?.lab_name}</span><span style={{ color: C.grey500 }}>{lab?.capacity}/{lab?.total_pcs} PCs usable</span>
-                  </div>
-                  <div style={{ height: 7, background: C.grey100, borderRadius: 99 }}>
-                    <div style={{ height: "100%", width: `${pct}%`, background: lab?.status === "Maintenance" ? C.amber : C.teal, borderRadius: 99 }} />
-                  </div>
-                </div>
-              );
-            })}
-          </Card>
-          <Card>
-            <h3 style={{ margin: "0 0 16px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Network IP Ranges</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {safeLabs.map((lab) => (
-                <div key={lab?.lab_id || Math.random()} style={{ display: "flex", justifyContent: "space-between", padding: "11px 14px", background: C.grey50, borderRadius: 8, border: `1px solid ${C.grey200}` }}>
-                  <span style={{ fontWeight: 700, color: C.navy, fontSize: 14 }}>{lab?.lab_name}</span>
-                  <span style={{ fontFamily: "monospace", fontSize: 13, color: C.grey500 }}>{lab?.network_range}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      </>}
+      </div>}
 
       <div style={{ height: 48 }} />
     </PageWrap>

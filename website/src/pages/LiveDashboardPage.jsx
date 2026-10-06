@@ -9,6 +9,9 @@ import StatCard from '../components/common/StatCard';
 import { StudentRiskCard, ViolationTimeline, ExamTimer, RiskBadge } from '../components/common/ExamMonitorComponents';
 import { API_BASE_URL, SERVER_BASE_URL } from '../config/apiConfig';
 
+const teacherAccent = '#557987';
+const teacherAccentLight = '#e5f0f4';
+
 export default function LiveDashboardPage({ setPage, examId = 1 }) {
   const [summary, setSummary] = useState([]);
   const [events, setEvents]   = useState([]);
@@ -98,7 +101,7 @@ export default function LiveDashboardPage({ setPage, examId = 1 }) {
             {isConnected ? 'LIVE FEED ACTIVE' : 'DISCONNECTED'}
           </div>
 
-          <ExamTimer durationMinutes={120} />
+          <ExamTimer durationMinutes={120} accentColor={teacherAccent} />
 
           <Btn variant="ghost" onClick={() => setPage('teacher')}>
             ← Back to Exams
@@ -108,10 +111,10 @@ export default function LiveDashboardPage({ setPage, examId = 1 }) {
     >
       {/* ── Stat Cards Bar ── */}
       <div className="resp-grid-4" style={{ marginBottom: 24 }}>
-        <StatCard label="Enrolled Students" value={totalStudents} icon={Icon.users} delay={0} />
-        <StatCard label="Flagged Students" value={flaggedStudents.length} icon={Icon.bell} accent={flaggedStudents.length ? C.red : C.teal} light={flaggedStudents.length ? C.redLight : C.tealLight} delay={60} />
-        <StatCard label="Hard Violations" value={hardViolations} icon={Icon.alertTriangle} accent={hardViolations ? C.red : C.teal} light={hardViolations ? C.redLight : C.tealLight} delay={120} />
-        <StatCard label="Clean Students" value={cleanStudents.length} icon={Icon.check} delay={180} />
+        <StatCard label="Enrolled Students" value={totalStudents} icon={Icon.users} accent={teacherAccent} light={teacherAccentLight} delay={0} />
+        <StatCard label="Flagged Students" value={flaggedStudents.length} icon={Icon.bell} accent={flaggedStudents.length ? C.red : teacherAccent} light={flaggedStudents.length ? C.redLight : teacherAccentLight} delay={60} />
+        <StatCard label="Hard Violations" value={hardViolations} icon={Icon.alertTriangle} accent={hardViolations ? C.red : teacherAccent} light={hardViolations ? C.redLight : teacherAccentLight} delay={120} />
+        <StatCard label="Clean Students" value={cleanStudents.length} icon={Icon.check} accent={teacherAccent} light={teacherAccentLight} delay={180} />
       </div>
 
       {/* ── DETAIL VIEW FOR A SELECTED STUDENT ── */}
@@ -157,9 +160,9 @@ export default function LiveDashboardPage({ setPage, examId = 1 }) {
                   style={{
                     padding: '8px 16px',
                     borderRadius: 8,
-                    border: `1.5px solid ${filterMode === tab.id ? C.teal : C.grey200}`,
-                    background: filterMode === tab.id ? C.tealLight : C.white,
-                    color: filterMode === tab.id ? C.navy : C.grey500,
+                    border: `1.5px solid ${filterMode === tab.id ? teacherAccent : C.grey200}`,
+                    background: filterMode === tab.id ? teacherAccentLight : C.white,
+                    color: filterMode === tab.id ? teacherAccent : C.grey500,
                     fontSize: 13,
                     fontWeight: 700,
                     cursor: 'pointer'

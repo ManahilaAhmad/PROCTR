@@ -43,7 +43,9 @@ export default function App() {
     const savedUser = localStorage.getItem("proctr_user");
     const savedPage = localStorage.getItem("proctr_page");
     if (savedUser && savedPage) {
-      return ["admin", "admin-security", "admin-users"].includes(savedPage) ? "admin-students" : savedPage;
+      if (["admin", "admin-security", "admin-users"].includes(savedPage)) return "admin-students";
+      if (savedPage === "director" || savedPage === "dir-results") return "dir-timetable";
+      return savedPage;
     }
     return "login";
   });
@@ -73,7 +75,7 @@ export default function App() {
   }, [user]);
 
   const navigateTo = (p) => {
-    const targetPage = p === "home" ? "login" : p;
+    const targetPage = p === "home" ? "login" : p === "director" || p === "dir-results" ? "dir-timetable" : p;
     setPage(targetPage);
     setSidebarOpen(false);
     if (targetPage === "login" || targetPage === "forgot-password" || targetPage === "reset-password") {
@@ -112,6 +114,8 @@ export default function App() {
         return <TeacherPage activePage="upload" setPage={navigateTo} user={user} />;
       case "inv-schedule":
         return <TeacherPage activePage="inv-schedule" setPage={navigateTo} user={user} />;
+      case "teacher-swaps":
+        return <TeacherPage activePage="teacher-swaps" setPage={navigateTo} user={user} />;
       case "student":
         return <StudentPage activePage="student" setPage={navigateTo} user={user} />;
       case "results":
@@ -121,7 +125,7 @@ export default function App() {
       case "reports":
         return <HODPage activePage="reports" setPage={navigateTo} user={user} />;
       case "director":
-        return <DirectorPage activePage="overview" setPage={navigateTo} user={user} />;
+        return <DirectorPage activePage="dir-timetable" setPage={navigateTo} user={user} />;
       case "dir-papers":
         return <DirectorPage activePage="dir-papers" setPage={navigateTo} user={user} />;
       case "dir-timetable":
@@ -129,11 +133,13 @@ export default function App() {
       case "dir-labs":
         return <DirectorPage activePage="dir-labs" setPage={navigateTo} user={user} />;
       case "dir-results":
-        return <DirectorPage activePage="dir-results" setPage={navigateTo} user={user} />;
+        return <DirectorPage activePage="dir-timetable" setPage={navigateTo} user={user} />;
       case "coordinator":
-        return <CoordinatorPage activePage="coordinator" setPage={navigateTo} user={user} />;
+        return <CoordinatorPage activePage="coordinator" user={user} />;
+      case "coordinator-broadcast":
+        return <CoordinatorPage activePage="coordinator-broadcast" user={user} />;
       case "rooms":
-        return <CoordinatorPage activePage="rooms" setPage={navigateTo} user={user} />;
+        return <CoordinatorPage user={user} />;
       case "dec":
         return <DECPage activePage="dec" setPage={navigateTo} user={user} />;
       case "dec-exams":
@@ -165,11 +171,11 @@ export default function App() {
     if (page === "reset-password") return <ResetPasswordPage token={resetToken} setPage={navigateTo} />;
 
     const isDashboard = dashboardPages.includes(page) ||
-      ["submissions", "admin-labs", "admin-students", "admin-teachers", "admin-hod", "admin-coordinator", "admin-director", "admin-dec", "admin-admins", "upload", "inv-schedule", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
+      ["submissions", "admin-labs", "admin-students", "admin-teachers", "admin-hod", "admin-coordinator", "admin-director", "admin-dec", "admin-admins", "upload", "inv-schedule", "teacher-swaps", "coordinator-broadcast", "live-monitor", "exam-reports", "results", "reports", "dir-papers", "dir-timetable", "dir-labs", "dir-results", "rooms", "dec-exams", "dec-invigilators", "dec-swaps", "inv-exams", "inv-monitor"].includes(page);
 
     if (isDashboard) {
       return (
-        <div className="resp-layout-container">
+        <div className={`resp-layout-container${role === "teacher" || role === "hod" || role === "coordinator" || role === "dec" ? " teacher-workspace" : ""}`}>
           {/* Mobile top navigation header */}
           <header className="resp-mobile-header">
             <button
@@ -184,11 +190,11 @@ export default function App() {
               </svg>
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 6, background: C.teal, display: "flex", alignItems: "center", justifyContent: "center", color: C.white }}>
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: role === "teacher" || role === "hod" || role === "coordinator" || role === "dec" ? "#1a2b4b" : C.teal, display: "flex", alignItems: "center", justifyContent: "center", color: C.white }}>
                 {Icon.shield}
               </div>
               <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: -0.3 }}>PROCTR</span>
-              <span style={{ background: "rgba(0,180,166,.15)", color: C.teal, fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, textTransform: "uppercase" }}>{role}</span>
+              <span style={{ background: role === "teacher" || role === "hod" || role === "coordinator" || role === "dec" ? "rgba(85,121,135,.15)" : "rgba(0,180,166,.15)", color: role === "teacher" || role === "hod" || role === "coordinator" || role === "dec" ? "#557987" : C.teal, fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 10, textTransform: "uppercase" }}>{role}</span>
             </div>
             <button
               onClick={handleLogout}
@@ -225,6 +231,126 @@ export default function App() {
   return (
     <div style={{ fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif", minHeight: "100vh" }}>
       <style>{`
+        .teacher-workspace {
+          position: relative;
+          isolation: isolate;
+          z-index: 0;
+          background: transparent !important;
+        }
+        .teacher-workspace::before {
+          content: '';
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          background:
+            radial-gradient(circle at 16% 18%, rgba(255,255,255,.92), transparent 28%),
+            radial-gradient(circle at 84% 12%, rgba(85,121,135,.16), transparent 24%),
+            linear-gradient(90deg, #ffffff 0%, #ffffff 42%, #eef7fa 58%, #c3d8e4 100%);
+        }
+        .teacher-workspace .resp-page-padding {
+          width: 100%;
+          max-width: 1440px;
+          margin: 0 auto;
+          padding: 36px 40px 48px;
+          box-sizing: border-box;
+        }
+        .teacher-workspace .proctr-page-wrap {
+          background: transparent !important;
+        }
+        .teacher-workspace h1 {
+          font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+          color: #557987 !important;
+          font-size: 30px !important;
+          font-weight: 800 !important;
+          letter-spacing: -.5px !important;
+        }
+        .teacher-workspace h2,
+        .teacher-workspace h3,
+        .teacher-workspace h4 {
+          font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+          color: #557987 !important;
+          line-height: 1.25;
+          font-weight: 800;
+          letter-spacing: -.3px;
+        }
+        .teacher-workspace p,
+        .teacher-workspace label,
+        .teacher-workspace input,
+        .teacher-workspace select,
+        .teacher-workspace textarea,
+        .teacher-workspace button {
+          font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+        }
+        .teacher-workspace .proctr-card {
+          background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(255,255,255,.56)) !important;
+          border: 1px solid rgba(255,255,255,.86) !important;
+          box-shadow: 0 22px 55px rgba(41,91,117,.16), inset 0 1px 0 rgba(255,255,255,.96) !important;
+          backdrop-filter: blur(20px) saturate(135%);
+          -webkit-backdrop-filter: blur(20px) saturate(135%);
+        }
+        .teacher-workspace .proctr-card input,
+        .teacher-workspace .proctr-card select,
+        .teacher-workspace .proctr-card textarea {
+          background: rgba(255,255,255,.5) !important;
+          border-color: rgba(255,255,255,.9) !important;
+          border-radius: 11px !important;
+          box-shadow: inset 0 1px 2px rgba(48,91,112,.06), 0 7px 22px rgba(47,110,139,.14);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          outline: none;
+        }
+        .teacher-workspace .proctr-card input:focus,
+        .teacher-workspace .proctr-card select:focus,
+        .teacher-workspace .proctr-card textarea:focus {
+          border-color: rgba(85,121,135,.62) !important;
+          box-shadow: 0 0 0 3px rgba(85,121,135,.12), 0 7px 22px rgba(47,110,139,.18);
+        }
+        .teacher-workspace .proctr-btn-primary {
+          background: linear-gradient(135deg, #557987 0%, #7899a6 100%) !important;
+          box-shadow: 0 10px 24px rgba(47,110,139,.18);
+        }
+        .teacher-workspace .proctr-btn-navy {
+          background: linear-gradient(135deg, #557987 0%, #7899a6 100%) !important;
+          box-shadow: 0 10px 24px rgba(47,110,139,.18);
+        }
+        .teacher-workspace .proctr-card button {
+          border-radius: 11px !important;
+          font-size: 13px;
+          font-weight: 700;
+          transition: transform .18s ease, box-shadow .18s ease;
+        }
+        .teacher-workspace .proctr-badge-default {
+          background: #e5f0f4 !important;
+          color: #557987 !important;
+        }
+        .teacher-workspace .proctr-tab.active {
+          color: #557987 !important;
+          border-bottom-color: #557987 !important;
+        }
+        .teacher-workspace table thead th {
+          color: #557987 !important;
+          border-bottom-color: rgba(255,255,255,.9) !important;
+        }
+        .teacher-workspace table thead tr {
+          background: rgba(255,255,255,.42) !important;
+        }
+        .teacher-workspace table tbody tr:hover {
+          background: rgba(255,255,255,.34);
+        }
+        .teacher-workspace table td {
+          border-bottom-color: rgba(255,255,255,.65) !important;
+        }
+        @media (max-width: 768px) {
+          .teacher-workspace h1 { font-size: 27px !important; }
+          .teacher-workspace .resp-page-padding { padding: 20px 16px 32px; }
+          .teacher-workspace .resp-mobile-header {
+            background: #c3d8e4;
+            color: #1a2b4b;
+            border-bottom-color: rgba(255,255,255,.82);
+          }
+          .teacher-workspace .resp-mobile-header button { color: #557987 !important; }
+        }
         @keyframes pageIn   { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
         @keyframes slideInLeft { from{opacity:0;transform:translateX(-32px)} to{opacity:1;transform:translateX(0)} }
         @keyframes slideInRight { from{opacity:0;transform:translateX(32px)} to{opacity:1;transform:translateX(0)} }

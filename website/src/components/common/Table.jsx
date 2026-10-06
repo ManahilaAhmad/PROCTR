@@ -15,7 +15,7 @@ export default function Table({ columns, rows }) {
           {rows.map((row, i) => (
             <tr key={i} style={{ borderBottom: `1px solid ${C.grey100}`, animation: `rowIn .28s ease ${i * 40}ms both` }}>
               {row.map((cell, j) => (
-                <td key={j} style={{ padding: "13px 16px", fontSize: 14, color: C.grey800 }}>{cell}</td>
+                <td key={j} style={{ padding: "13px 16px", fontSize: 14, color: C.grey800, textAlign: "left" }}>{cell}</td>
               ))}
             </tr>
           ))}

@@ -5,6 +5,7 @@ import {
   getLabStudents,
   getStudentSubmissionFiles,
   getStudentOwnLabs,
+  getStudentOwnSubmissionFiles,
   getStudentOwnFiles,
   downloadFile,
   downloadReport
@@ -37,6 +38,7 @@ router.get('/teacher/:teacherId/report/:submissionId', requireOwnTeacherProfile(
 
 // Student browsing: their own submitted labs → files (no report exposed)
 router.get('/student/:studentId/labs', requireOwnStudentProfile(), getStudentOwnLabs);
+router.get('/student/:studentId/submission/:submissionId/files', requireOwnStudentProfile(), getStudentOwnSubmissionFiles);
 router.get('/student/:studentId/lab/:courseOfferingId/files', requireOwnStudentProfile(), getStudentOwnFiles);
 
 // Shared: download an individual file (path-based — pass ?relativePath=...&teacherId=... or &studentId=...)

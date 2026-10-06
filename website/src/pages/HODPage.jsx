@@ -11,6 +11,9 @@ import Badge from "../components/common/Badge";
 import { API_BASE_URL } from "../config/apiConfig";
 import { trustedFileUrl } from "../utils/safeUrl";
 
+const hodAccent = "#557987";
+const hodAccentLight = "#e5f0f4";
+
 export default function HODPage({ activePage, setPage }) {
   const [activeTab, setActiveTab] = useState(activePage === "reports" ? "reports" : "queue");
 
@@ -90,8 +93,8 @@ export default function HODPage({ activePage, setPage }) {
                 ["Submitted Date", preview.submitted_at ? new Date(preview.submitted_at).toLocaleDateString() : "Pending"],
                 ["Total Marks", preview.total_marks || 100],
                 ["Duration", `${preview.duration || 120} mins`],
-                ["Exam Paper", trustedFileUrl(preview.exam_paper_url) ? <a href={trustedFileUrl(preview.exam_paper_url)} target="_blank" rel="noopener noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Exam Paper ({preview.exam_paper_url.toLowerCase().includes('.docx') ? 'DOCX' : 'PDF'}) ↗</a> : "No trusted file uploaded"],
-                ["Rubric", trustedFileUrl(preview.rubric_url) ? <a href={trustedFileUrl(preview.rubric_url)} target="_blank" rel="noopener noreferrer" style={{ color: C.teal, fontWeight: 700 }}>View Marking Rubric ↗</a> : "No trusted rubric uploaded"],
+                ["Exam Paper", trustedFileUrl(preview.exam_paper_url) ? <a href={trustedFileUrl(preview.exam_paper_url)} target="_blank" rel="noopener noreferrer" style={{ color: hodAccent, fontWeight: 700 }}>View Exam Paper ({preview.exam_paper_url.toLowerCase().includes('.docx') ? 'DOCX' : 'PDF'}) ↗</a> : "No trusted file uploaded"],
+                ["Rubric", trustedFileUrl(preview.rubric_url) ? <a href={trustedFileUrl(preview.rubric_url)} target="_blank" rel="noopener noreferrer" style={{ color: hodAccent, fontWeight: 700 }}>View Marking Rubric ↗</a> : "No trusted rubric uploaded"],
               ].map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: C.grey50, borderRadius: 8 }}>
                   <span style={{ fontSize: 13, color: C.grey500 }}>{l}</span>
@@ -123,14 +126,14 @@ export default function HODPage({ activePage, setPage }) {
       {/* ── REVIEW QUEUE ── */}
       {activeTab === "queue" && <>
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-          <StatCard label="Pending Review" value={safeQueue.length} icon={Icon.clipboardList} />
-          <StatCard label="Approved Papers" value={safeDecisions.filter(d => d.decision === "Approved").length} icon={Icon.check} />
-          <StatCard label="Rejected Papers" value={safeDecisions.filter(d => d.decision === "Rejected").length} icon={Icon.x} />
-          <StatCard label="Total Reviewed" value={safeDecisions.length} icon={Icon.users} />
+          <StatCard label="Pending Review" value={safeQueue.length} icon={Icon.clipboardList} accent={hodAccent} light={hodAccentLight} />
+          <StatCard label="Approved Papers" value={safeDecisions.filter(d => d.decision === "Approved").length} icon={Icon.check} accent={hodAccent} light={hodAccentLight} />
+          <StatCard label="Rejected Papers" value={safeDecisions.filter(d => d.decision === "Rejected").length} icon={Icon.x} accent={hodAccent} light={hodAccentLight} />
+          <StatCard label="Total Reviewed" value={safeDecisions.length} icon={Icon.users} accent={hodAccent} light={hodAccentLight} />
         </div>
         {safeQueue.length === 0 && (
           <Card style={{ textAlign: "center", padding: "40px 24px", marginBottom: 28 }}>
-            <div style={{ color: C.teal, margin: "0 auto 12px", display: "flex", justifyContent: "center" }}>{Icon.check}</div>
+            <div style={{ color: hodAccent, margin: "0 auto 12px", display: "flex", justifyContent: "center" }}>{Icon.check}</div>
             <p style={{ margin: 0, color: C.grey500, fontSize: 14 }}>All exam papers have been reviewed. No pending papers in queue.</p>
           </Card>
         )}
@@ -147,7 +150,7 @@ export default function HODPage({ activePage, setPage }) {
                     <span>{item.teacher_name || "Faculty"}</span>
                     <span>Submitted: {item.submitted_at ? new Date(item.submitted_at).toLocaleDateString() : "Recent"}</span>
                     <span>Duration: {item.duration || 120} min</span>
-                    <span>Status: <span style={{ color: C.teal, fontWeight: 700 }}>{item.status}</span></span>
+                    <span>Status: <span style={{ color: hodAccent, fontWeight: 700 }}>{item.status}</span></span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
@@ -164,7 +167,7 @@ export default function HODPage({ activePage, setPage }) {
           <Table columns={["Exam", "Teacher", "Decision", "Date", "Notes"]}
             rows={safeDecisions.map((d) => [
               `${d.course_code || ""} ${d.exam_type || "Exam"}`, d.teacher_name || "Faculty",
-              <Badge color={d.decision === "Approved" ? C.teal : C.red} bg={d.decision === "Approved" ? C.tealLight : C.redLight}>{d.decision}</Badge>,
+              <Badge color={d.decision === "Approved" ? hodAccent : C.red} bg={d.decision === "Approved" ? hodAccentLight : C.redLight}>{d.decision}</Badge>,
               d.date ? new Date(d.date).toLocaleDateString() : "Recent", d.notes || "—",
             ])} />
         </Card>
@@ -172,29 +175,12 @@ export default function HODPage({ activePage, setPage }) {
 
       {/* ── REPORTS ── */}
       {activeTab === "reports" && <>
-        <div className="resp-grid-3" style={{ marginBottom: 28 }}>
-          <StatCard label="Total Submissions" value={safeQueue.length + safeDecisions.length} icon={Icon.fileText} />
-          <StatCard label="Approval Rate" value={safeDecisions.length ? `${Math.round((safeDecisions.filter(d => d.decision === "Approved").length / safeDecisions.length) * 100)}%` : "—"} icon={Icon.check} accent={C.green} light={C.greenLight} />
-          <StatCard label="Avg. Review Time" value="Same Day" icon={Icon.calendar} accent={C.amber} light={C.amberLight} />
-        </div>
-        <Card style={{ marginBottom: 22 }}>
-          <h3 style={{ margin: "0 0 18px", fontWeight: 800, color: C.navy, fontSize: 15 }}>Decision Breakdown</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 80, marginBottom: 10 }}>
-            {[["Approved", safeDecisions.filter(d => d.decision === "Approved").length, C.teal], ["Rejected", safeDecisions.filter(d => d.decision === "Rejected").length, C.red], ["Pending", safeQueue.length, C.amber]].map(([label, count, color]) => (
-              <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: C.navy }}>{count}</span>
-                <div style={{ width: "100%", height: Math.max(count * 20, 8), background: color, borderRadius: "5px 5px 0 0", opacity: 0.85 }} />
-                <span style={{ fontSize: 11, color: C.grey400, fontWeight: 600 }}>{label}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>Full Decision Log</div>
           <Table columns={["Exam", "Teacher", "Decision", "Date", "Notes"]}
             rows={safeDecisions.map((d) => [
               `${d.course_code || ""} ${d.exam_type || "Exam"}`, d.teacher_name || "Faculty",
-              <Badge color={d.decision === "Approved" ? C.teal : C.red} bg={d.decision === "Approved" ? C.tealLight : C.redLight}>{d.decision}</Badge>,
+              <Badge color={d.decision === "Approved" ? hodAccent : C.red} bg={d.decision === "Approved" ? hodAccentLight : C.redLight}>{d.decision}</Badge>,
               d.date ? new Date(d.date).toLocaleDateString() : "Recent", d.notes || "—",
             ])} />
         </Card>

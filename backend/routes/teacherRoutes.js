@@ -2,6 +2,7 @@ import express from 'express';
 import {
   listTeachers,
   getSchedule,
+  getPlannedSchedule,
   getTeacherCourses,
   getIncomingSwapRequests,
   getOutgoingSwapRequests,
@@ -23,6 +24,7 @@ router.use(requireSession, requireRole('teacher', 'hod', 'dec', 'coordinator', '
 router.get('/', listTeachers);
 router.get('/:userId/courses', requireSelfParam('userId', 'admin'), getTeacherCourses);
 router.get('/:userId/schedule', requireSelfParam('userId', 'admin'), getSchedule);
+router.get('/:userId/planned-schedule', requireSelfParam('userId', 'admin'), getPlannedSchedule);
 router.get('/:userId/swap-requests/incoming', requireSelfParam('userId', 'admin'), getIncomingSwapRequests);
 router.get('/:userId/swap-requests/outgoing', requireSelfParam('userId', 'admin'), getOutgoingSwapRequests);
 router.post('/swap-requests/:requestId/respond', requireSelfBody('user_id', 'admin'), respondToSwapRequest);

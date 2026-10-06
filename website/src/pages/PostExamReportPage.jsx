@@ -9,6 +9,9 @@ import StatCard from '../components/common/StatCard';
 import { RiskBadge, ViolationTimeline } from '../components/common/ExamMonitorComponents';
 import { API_BASE_URL } from '../config/apiConfig';
 
+const teacherAccent = '#557987';
+const teacherAccentLight = '#e5f0f4';
+
 export default function PostExamReportPage({ setPage, examId = 1 }) {
   const [summary, setSummary]   = useState([]);
   const [events, setEvents]     = useState([]);
@@ -82,10 +85,10 @@ export default function PostExamReportPage({ setPage, examId = 1 }) {
     >
       {/* ── Stat Bar ── */}
       <div className="resp-grid-4" style={{ marginBottom: 24 }}>
-        <StatCard label="Total Evaluated" value={totalStudents} icon={Icon.users} delay={0} />
-        <StatCard label="Flagged Cases" value={flaggedStudents} icon={Icon.bell} accent={flaggedStudents ? C.red : C.teal} light={flaggedStudents ? C.redLight : C.tealLight} delay={60} />
-        <StatCard label="Hard Violations" value={hardViolations} icon={Icon.alertTriangle} accent={hardViolations ? C.red : C.teal} light={hardViolations ? C.redLight : C.tealLight} delay={120} />
-        <StatCard label="Clean Submissions" value={totalStudents - flaggedStudents} icon={Icon.check} delay={180} />
+        <StatCard label="Total Evaluated" value={totalStudents} icon={Icon.users} accent={teacherAccent} light={teacherAccentLight} delay={0} />
+        <StatCard label="Flagged Cases" value={flaggedStudents} icon={Icon.bell} accent={flaggedStudents ? C.red : teacherAccent} light={flaggedStudents ? C.redLight : teacherAccentLight} delay={60} />
+        <StatCard label="Hard Violations" value={hardViolations} icon={Icon.alertTriangle} accent={hardViolations ? C.red : teacherAccent} light={hardViolations ? C.redLight : teacherAccentLight} delay={120} />
+        <StatCard label="Clean Submissions" value={totalStudents - flaggedStudents} icon={Icon.check} accent={teacherAccent} light={teacherAccentLight} delay={180} />
       </div>
 
       {/* ── STUDENT DETAIL MODAL/VIEW ── */}
@@ -133,9 +136,9 @@ export default function PostExamReportPage({ setPage, examId = 1 }) {
                   style={{
                     padding: '6px 12px',
                     borderRadius: 6,
-                    border: `1px solid ${filterMode === tab.id ? C.teal : C.grey200}`,
-                    background: filterMode === tab.id ? C.tealLight : C.white,
-                    color: filterMode === tab.id ? C.navy : C.grey500,
+                    border: `1px solid ${filterMode === tab.id ? teacherAccent : C.grey200}`,
+                    background: filterMode === tab.id ? teacherAccentLight : C.white,
+                    color: filterMode === tab.id ? teacherAccent : C.grey500,
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: 'pointer'

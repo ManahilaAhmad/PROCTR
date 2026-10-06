@@ -611,19 +611,17 @@ ipcMain.handle('write-local-log', async (event, { endpoint, payload, timestamp }
 ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCode, workspacePath, submissionType, apiBase, sessionToken }) => {
   try {
     const activeSubmission = activeSubmissions.get(event.sender.id);
-    if (!activeSubmission) throw new Error('No active exam workspace is registered. Join the exam session again before submitting.');
-
-    // Renderer values are UI state and can become stale after an Electron
-    // reload. The main process created the workspace and holds the canonical
-    // exam/student/path tuple, so use it rather than rejecting a legitimate
-    // local backup because two copies of the same state disagree.
+    if (!activeSubmission) throw new Error('No active exam workspace is registered for this window. Rejoin the exam before submitting.');
+    if (!activeSubmission.examId || !activeSubmission.studentId) {
+      throw new Error('The active exam workspace is missing its exam or student identity. Rejoin the exam before submitting.');
+    }
     if (activeSubmission.workspacePath !== workspacePath ||
         String(activeSubmission.examId) !== String(examId) || String(activeSubmission.studentId) !== String(studentId)) {
-      console.warn('[Electron] Submission UI state differed from active workspace; using canonical main-process values.');
+      console.warn('[Electron] Submission UI state differed from the active workspace; using canonical main-process values.');
     }
-    workspacePath = activeSubmission.workspacePath;
-    examId = activeSubmission.examId;
-    studentId = activeSubmission.studentId;
+    workspacePath = requireExamWorkspace(activeSubmission.workspacePath);
+    const submissionExamId = activeSubmission.examId;
+    const submissionStudentId = activeSubmission.studentId;
     // Only the contents of the Submissions folder are collected — that's
     // the folder students are expected to place their final work in.
     // Everything else in the workspace (starter_code, logs) is ignored.
@@ -643,8 +641,8 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
     // until Cloudinary returns a database-backed receipt.
     const job = submissionQueue.save({
       workspacePath,
-      examId,
-      studentId,
+      examId: submissionExamId,
+      studentId: submissionStudentId,
       apiBase: base,
       accessToken: sessionToken,
       macAddress: getMacAddress()
@@ -659,7 +657,7 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
     }
 
     const receipt = completedJob.receipt || {};
-    console.log(`[Electron] Submission confirmed in Cloudinary: ${files.length} file(s) for student ${studentId}, exam ${examId}`);
+    console.log(`[Electron] Submission confirmed in Cloudinary: ${files.length} file(s) for student ${submissionStudentId}, exam ${submissionExamId}`);
     return {
       status: 'success',
       message: receipt.message || 'Submission saved to Cloudinary successfully.',
@@ -669,6 +667,6 @@ ipcMain.handle('submit-exam-work', async (event, { examId, studentId, sessionCod
     };
   } catch (err) {
     console.error('[Electron] Error submitting exam work:', err.message);
-    return { status: 'error', message: `Could not reach the backend server to submit: ${err.message}` };
+    return { status: 'error', message: `Submission could not be completed: ${err.message}` };
   }
 });

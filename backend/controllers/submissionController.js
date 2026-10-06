@@ -388,7 +388,9 @@ export const getLabStudents = async (req, res) => {
     const result = await pool.query(
       `SELECT DISTINCT ON (ss.student_id)
               ss.submission_id, ss.student_id, ss.submitted_at, ss.submission_manifest,
-              s.registration_no, COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name
+              COUNT(*) OVER (PARTITION BY ss.student_id) AS submission_count,
+              e.exam_type, s.registration_no,
+              COALESCE(u.first_name || ' ' || u.last_name, 'Candidate') AS name
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        JOIN student s ON ss.student_id = s.student_id
@@ -406,6 +408,8 @@ export const getLabStudents = async (req, res) => {
         submitted_at: r.submitted_at,
         registration_no: r.registration_no,
         name: r.name,
+        submission_count: parseInt(r.submission_count, 10) || 1,
+        exam_type: r.exam_type,
         file_count: manifest?.files?.length || 0,
         migration_required: manifest?.provider !== 'cloudinary'
       };
@@ -433,29 +437,34 @@ export const getStudentSubmissionFiles = async (req, res) => {
     }
 
     const subRes = await pool.query(
-      `SELECT ss.submission_id, ss.submitted_at, ss.submission_manifest
+      `SELECT ss.submission_id, ss.submitted_at, ss.submission_manifest,
+              e.exam_id, e.exam_type
        FROM student_submission ss
        JOIN exam e ON ss.exam_id = e.exam_id
        WHERE e.course_offering_id = $1 AND ss.student_id = $2
-       ORDER BY ss.submitted_at DESC LIMIT 1`,
+       ORDER BY ss.submitted_at DESC`,
       [courseOfferingId, studentId]
     );
     if (subRes.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'No submission found for this student.' });
     }
-    const submission = subRes.rows[0];
-    const manifest = requireManifest(submission);
-    const hasReport = Boolean(manifest.report);
-    const files = listManifestFiles(manifest);
+    const submissions = subRes.rows.map(submission => {
+      const cloudinarySubmission = submission.submission_manifest?.provider === 'cloudinary';
+      const manifest = cloudinarySubmission ? submission.submission_manifest : null;
+      return {
+        submission_id: submission.submission_id,
+        exam_id: submission.exam_id,
+        exam_type: submission.exam_type,
+        submitted_at: submission.submitted_at,
+        has_report: Boolean(manifest?.report),
+        migration_required: !cloudinarySubmission,
+        files: manifest ? listManifestFiles(manifest) : []
+      };
+    });
 
     res.status(200).json({
       status: 'success',
-      submission: {
-        submission_id: submission.submission_id,
-        submitted_at: submission.submitted_at,
-        has_report: hasReport
-      },
-      files
+      submissions
     });
   } catch (error) {
     console.error('Error fetching student submission files:', error);
@@ -464,32 +473,71 @@ export const getStudentSubmissionFiles = async (req, res) => {
 };
 
 /* ===========================================================
-   5. STUDENT — their own "Submitted Work": labs they've
-      submitted to (no security log info exposed here).
+   5. STUDENT — enrolled course folders and their submissions.
 =========================================================== */
 export const getStudentOwnLabs = async (req, res) => {
   const { studentId } = req.params;
   try {
     const result = await pool.query(
-      `SELECT co.course_offering_id, c.course_code, c.course_title, s.section_name,
-              MAX(ss.submitted_at) AS submitted_at
-       FROM student_submission ss
-       JOIN exam e ON ss.exam_id = e.exam_id
-       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
-       JOIN course c ON co.course_id = c.course_id
-       JOIN section s ON co.section_id = s.section_id
-       WHERE ss.student_id = $1
-       GROUP BY co.course_offering_id, c.course_code, c.course_title, s.section_name
-       ORDER BY MAX(ss.submitted_at) DESC`,
+      `WITH enrolled_courses AS (
+         SELECT DISTINCT c.course_id,c.course_code,c.course_title
+         FROM enrollment en
+         JOIN course_offering enrolled_offering
+           ON enrolled_offering.course_offering_id=en.course_offering_id
+         JOIN course c ON c.course_id=enrolled_offering.course_id
+         WHERE en.student_id=$1
+       )
+       SELECT ec.course_id,ec.course_code,ec.course_title,
+              submissions.submission_id,submissions.submitted_at,
+              submissions.course_offering_id,submissions.section_name,
+              submissions.exam_type,submissions.submission_manifest
+       FROM enrolled_courses ec
+       LEFT JOIN LATERAL (
+         SELECT ss.submission_id,ss.submitted_at,co.course_offering_id,
+                s.section_name,e.exam_type,
+                ss.submission_manifest
+         FROM student_submission ss
+         JOIN exam e ON e.exam_id=ss.exam_id
+         JOIN course_offering co ON co.course_offering_id=e.course_offering_id
+         JOIN section s ON s.section_id=co.section_id
+         WHERE ss.student_id=$1 AND co.course_id=ec.course_id
+         ORDER BY ss.submitted_at DESC
+       ) submissions ON true
+       ORDER BY ec.course_code,submissions.submitted_at DESC`,
       [studentId]
     );
+    const courses = new Map();
+    for (const row of result.rows) {
+      if (!courses.has(row.course_id)) {
+        courses.set(row.course_id, {
+          course_id: row.course_id,
+          course_code: row.course_code,
+          course_title: row.course_title,
+          label: `${row.course_code} — ${row.course_title}`,
+          submissions: [],
+        });
+      }
+      if (row.submission_id !== null) {
+        const hasCloudinaryManifest = row.submission_manifest?.provider === 'cloudinary';
+        courses.get(row.course_id).submissions.push({
+          submission_id: row.submission_id,
+          course_offering_id: row.course_offering_id,
+          label: `${row.exam_type || 'Exam'} (${row.section_name})`,
+          exam_type: row.exam_type,
+          submitted_at: row.submitted_at,
+          files: hasCloudinaryManifest
+            ? listManifestFiles(requireManifest({ submission_manifest: row.submission_manifest }))
+              .map(file => ({ ...file, submission_id: row.submission_id }))
+            : [],
+          files_unavailable: hasCloudinaryManifest
+            ? null
+            : 'This older submission must be migrated to Cloudinary before its files can be accessed.',
+        });
+      }
+    }
     res.status(200).json({
       status: 'success',
-      labs: result.rows.map(r => ({
-        course_offering_id: r.course_offering_id,
-        label: `${r.course_code} — ${r.course_title} (${r.section_name})`,
-        submitted_at: r.submitted_at
-      }))
+      courses: Array.from(courses.values()),
     });
   } catch (error) {
     console.error('Error fetching student\'s own labs:', error);
@@ -526,6 +574,41 @@ export const getStudentOwnFiles = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching student\'s own files:', error);
+    sendError(res, error, 'Failed to fetch submitted files.');
+  }
+};
+
+export const getStudentOwnSubmissionFiles = async (req, res) => {
+  const { studentId, submissionId } = req.params;
+  try {
+    const subRes = await pool.query(
+      `SELECT ss.submission_id,ss.submitted_at,ss.submission_manifest,
+              co.course_offering_id,c.course_code,c.course_title,s.section_name,e.exam_type
+       FROM student_submission ss
+       JOIN exam e ON ss.exam_id=e.exam_id
+       JOIN course_offering co ON e.course_offering_id=co.course_offering_id
+       JOIN course c ON co.course_id=c.course_id
+       JOIN section s ON co.section_id=s.section_id
+       WHERE ss.submission_id=$1 AND ss.student_id=$2`,
+      [submissionId, studentId]
+    );
+    if (!subRes.rows.length) {
+      return res.status(404).json({ status: 'error', message: 'Submission not found.' });
+    }
+    const submission = subRes.rows[0];
+    const files = listManifestFiles(requireManifest(submission))
+      .map(file => ({ ...file, submission_id: submission.submission_id }));
+    res.status(200).json({
+      status: 'success',
+      submission: {
+        submission_id: submission.submission_id,
+        submitted_at: submission.submitted_at,
+        label: `${submission.course_code} — ${submission.course_title} (${submission.section_name}) · ${submission.exam_type || 'Exam'}`,
+      },
+      files,
+    });
+  } catch (error) {
+    console.error('Error fetching student submission files:', error);
     sendError(res, error, 'Failed to fetch submitted files.');
   }
 };

@@ -14,14 +14,16 @@ import NotificationBell from "../components/common/NotificationBell";
 import { API_BASE_URL } from "../config/apiConfig";
 import { openTrustedFile } from "../utils/safeUrl";
 
+const teacherAccent = "#557987";
+const teacherAccentLight = "#e5f0f4";
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function TeacherPage({ activePage, setPage, user }) {
-  const initTab = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : "exams";
+  const initTab = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : activePage === "teacher-swaps" ? "swaps" : "exams";
   const [activeTab, setActiveTab] = useState(initTab);
 
   useEffect(() => {
-    const target = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : "exams";
+    const target = activePage === "upload" ? "upload" : activePage === "inv-schedule" ? "invigilation" : activePage === "teacher-swaps" ? "swaps" : "exams";
     setActiveTab(target);
   }, [activePage]);
 
@@ -31,6 +33,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
   const [mySwaps, setMySwaps] = useState([]);
   const [incomingSwaps, setIncomingSwaps] = useState([]);
   const [myCourses, setMyCourses] = useState([]);
+  const [plannedTimetables, setPlannedTimetables] = useState([]);
 
   const [showCreate, setShowCreate] = useState(false);
   const [selectedCourseOffering, setSelectedCourseOffering] = useState("");
@@ -151,15 +154,17 @@ export default function TeacherPage({ activePage, setPage, user }) {
     if (!user) return;
     Promise.all([
       fetch(`${API_BASE_URL}/teacher/${user.userId}/schedule`).then(r => r.json()).catch(() => ({ status: 'error' })),
+      fetch(`${API_BASE_URL}/teacher/${user.userId}/planned-schedule`).then(r => r.json()).catch(() => ({ status: 'error' })),
       fetch(`${API_BASE_URL}/teachers`).then(r => r.json()).catch(() => ({ status: 'error' })),
       fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/outgoing`).then(r => r.json()).catch(() => ({ status: 'error' })),
       fetch(`${API_BASE_URL}/teacher/${user.userId}/courses`).then(r => r.json()).catch(() => ({ status: 'error' })),
       fetch(`${API_BASE_URL}/teacher/${user.userId}/swap-requests/incoming`).then(r => r.json()).catch(() => ({ status: 'error' }))
-    ]).then(([schedData, teachData, outSwap, courseData, inSwap]) => {
+    ]).then(([schedData, plannedData, teachData, outSwap, courseData, inSwap]) => {
       if (schedData.status === "success") {
         setExams(schedData.schedule.filter(s => s.is_instructor));
         setInvigilatorAssignments(schedData.schedule.filter(s => s.is_invigilator));
       }
+      if (plannedData.status === "success") setPlannedTimetables(plannedData.schedule);
       if (teachData.status === "success") setTeachersPool(teachData.teachers);
       if (outSwap.status === "success") setMySwaps(outSwap.requests);
       if (courseData.status === "success") setMyCourses(courseData.courses);
@@ -285,7 +290,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
 
   const statusBadge = (s) => {
     const map = {
-      Confirmed: [C.teal,   C.tealLight],
+      Confirmed: [teacherAccent, teacherAccentLight],
       Upcoming:  [C.amber,  C.amberLight],
       Accepted:  [C.green,  C.greenLight],
       Declined:  [C.red,    C.redLight],
@@ -301,18 +306,19 @@ export default function TeacherPage({ activePage, setPage, user }) {
   // (no space) to match the actual status string stored in the DB
   // (exam.status CHECK constraint only allows 'PendingHOD').
   const examBadge = (s) => {
-    const map = { Draft: [C.grey500, C.grey100], PendingHOD: [C.navy, C.grey200], Approved: [C.teal, C.tealLight], Rejected: [C.grey800, C.grey200] };
+    const map = { Draft: [C.grey500, C.grey100], PendingHOD: [C.navy, C.grey200], Approved: [teacherAccent, teacherAccentLight], Rejected: [C.grey800, C.grey200] };
     const [c, bg] = map[s] || [C.grey500, C.grey100];
     return <Badge color={c} bg={bg}>{s}</Badge>;
   };
 
   const pendingIncoming = 0;
 
-  const titleMap    = { exams: "My Exams", upload: "Upload Exam", invigilation: "Invigilation Duty" };
+  const titleMap    = { exams: "My Exams", upload: "Upload Exam", invigilation: "Invigilation Duty", swaps: "Swap Requests" };
   const subtitleMap = {
     exams:       "Create exam papers and submit for HOD approval",
     upload:      "Upload your exam paper file",
-    invigilation:"View your assigned invigilator duties and manage swap requests",
+    invigilation:"View your assigned invigilator duties",
+    swaps: "Review incoming requests and track your swap requests",
   };
 
   return (
@@ -321,7 +327,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       subtitle={subtitleMap[activeTab]}
       actions={
   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-    <NotificationBell userId={user?.userId} />
+    <NotificationBell userId={user?.userId} accentColor={teacherAccent} accentLight={teacherAccentLight} />
     {activeTab === "exams" && (
       <Btn variant="primary" onClick={() => setShowCreate(true)}>+ Create Exam</Btn>
     )}
@@ -353,7 +359,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                 <select
                   value={selectedCourseOffering}
                   onChange={handleCourseSelect}
-                  style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${selectedCourseOffering ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: selectedCourseOffering ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${selectedCourseOffering ? teacherAccent : C.grey200}`, fontSize: 13, fontWeight: 600, color: selectedCourseOffering ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
                 >
                   <option value="">Select a course you teach…</option>
                   {myCourses.map(c => (
@@ -379,7 +385,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
               <select
                 value={newTitle}
                 onChange={e => setNewTitle(e.target.value)}
-                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${newTitle ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: newTitle ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${newTitle ? teacherAccent : C.grey200}`, fontSize: 13, fontWeight: 600, color: newTitle ? C.navy : C.grey400, background: C.white, outline: "none", boxSizing: "border-box", cursor: "pointer" }}
               >
                 <option value="">Select exam type…</option>
                 <option value="LabMid">Lab Mid</option>
@@ -415,14 +421,14 @@ export default function TeacherPage({ activePage, setPage, user }) {
             </div>
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Replacement Teacher *</label>
-              <select value={swapFor} onChange={e => setSwapFor(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapFor ? C.teal : C.grey200}`, fontSize: 13, fontWeight: 600, color: C.navy, background: C.white, outline: "none", boxSizing: "border-box" }}>
+              <select value={swapFor} onChange={e => setSwapFor(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapFor ? teacherAccent : C.grey200}`, fontSize: 13, fontWeight: 600, color: C.navy, background: C.white, outline: "none", boxSizing: "border-box" }}>
                 <option value="">Select a teacher…</option>
                 {teachersPool.map(t => <option key={t.id} value={t.id}>{t.name} ({t.designation})</option>)}
               </select>
             </div>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.grey500, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Reason *</label>
-              <textarea value={swapReason} onChange={e => setSwapReason(e.target.value)} placeholder="e.g. Family emergency, conference, medical leave…" rows={3} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapReason.trim() ? C.teal : C.grey200}`, fontSize: 13, color: C.navy, background: C.grey50, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <textarea value={swapReason} onChange={e => setSwapReason(e.target.value)} placeholder="e.g. Family emergency, conference, medical leave…" rows={3} style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1.5px solid ${swapReason.trim() ? teacherAccent : C.grey200}`, fontSize: 13, color: C.navy, background: C.grey50, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <Btn variant="ghost"   style={{ flex: 1, justifyContent: "center" }} onClick={() => setSwapModal(null)}>Cancel</Btn>
@@ -448,7 +454,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: C.grey500, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Approval Pipeline</div>
               {[
-                { label: "Your Request", status: "Submitted", c: C.teal,  bg: C.tealLight },
+                { label: "Your Request", status: "Submitted", c: teacherAccent,  bg: teacherAccentLight },
                 { label: `${viewSwap.replacement} (Replacement)`, status: viewSwap.replacementStatus, c: viewSwap.replacementStatus === "Accepted" ? C.green : C.amber, bg: viewSwap.replacementStatus === "Accepted" ? C.greenLight : C.amberLight },
                 { label: "DEC Approval", status: viewSwap.decStatus, c: viewSwap.decStatus === "Approved" ? C.green : viewSwap.decStatus === "Rejected" ? C.red : C.grey400, bg: viewSwap.decStatus === "Approved" ? C.greenLight : viewSwap.decStatus === "Rejected" ? C.redLight : C.grey100 },
               ].map(({ label, status, c, bg }) => (
@@ -464,7 +470,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
       )}
 
       {/* Tabs */}
-      <Tabs
+      {activeTab !== "swaps" && <Tabs
         tabs={[
           { id: "exams",        label: "My Exams" },
           { id: "upload",       label: "Upload Exam" },
@@ -478,15 +484,70 @@ export default function TeacherPage({ activePage, setPage, user }) {
             setPage(pageMap[id]);
           }
         }}
-      />
+      />}
+
+      {activeTab === "swaps" && <>
+        <Card style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <div style={{ color: C.amber, display: "flex" }}>{Icon.bell}</div>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Incoming Swap Requests</h3>
+            {incomingSwaps.length > 0 && <Badge color={C.amber} bg={C.amberLight}>{incomingSwaps.length} pending</Badge>}
+          </div>
+          {incomingSwaps.length === 0
+            ? <div style={{ textAlign: "center", padding: "24px 0", color: C.grey400, fontSize: 13 }}>No incoming swap requests.</div>
+            : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {incomingSwaps.map(req => (
+                <div key={req.request_id} style={{ padding: "14px 18px", borderRadius: 10, background: C.grey50, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 3 }}>{req.requester_name} requests you to cover: {req.course_code} {req.exam_type}</div>
+                    <div style={{ fontSize: 12, color: C.grey500, marginBottom: 2 }}>Date: <strong style={{ color: C.navy }}>{new Date(req.exam_date).toLocaleDateString()}</strong> · Lab: <strong style={{ color: C.navy }}>{req.lab_name}</strong> · Section: <strong style={{ color: C.navy }}>{req.section_name}</strong></div>
+                    <div style={{ fontSize: 12, color: C.grey500 }}>Reason: <em>"{req.reason}"</em></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn variant="primary" size="sm" onClick={() => respondIncoming(req.request_id, "Accepted")}>Accept Swap</Btn>
+                    <Btn variant="ghost" size="sm" style={{ color: C.red, borderColor: C.redLight }} onClick={() => respondIncoming(req.request_id, "Declined")}>Decline</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>}
+        </Card>
+
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Swap Requests</h3>
+            {mySwaps.filter(r => r.dec_status === "Pending").length > 0 && <Badge color={C.amber} bg={C.amberLight}>{mySwaps.filter(r => r.dec_status === "Pending").length} pending</Badge>}
+          </div>
+          {mySwaps.length === 0
+            ? <div style={{ textAlign: "center", padding: "24px 0", color: C.grey400, fontSize: 13 }}>
+              <div style={{ marginBottom: 6, display: "flex", justifyContent: "center", opacity: 0.4 }}>{Icon.bell}</div>
+              No swap requests yet. Use <strong>"Request Swap"</strong> on a duty card in My Schedule.
+            </div>
+            : <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {mySwaps.map(req => (
+                <div key={req.request_id} style={{ padding: "13px 16px", borderRadius: 10, background: C.grey50, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 2 }}>{req.course_code} {req.exam_type}</div>
+                    <div style={{ fontSize: 12, color: C.grey500 }}>{req?.exam_date ? new Date(req.exam_date).toLocaleDateString() : "TBD"} · Replacement: <strong style={{ color: C.navy }}>{req?.replacement_name || "Teacher"}</strong></div>
+                    <div style={{ fontSize: 12, color: C.grey500 }}>Reason: {req.reason}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>Replacement</div>{statusBadge(req.replacement_status)}</div>
+                    <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>DEC</div>{statusBadge(req.dec_status)}</div>
+                    <Btn variant="ghost" size="sm" onClick={() => setViewSwap(req)}>Details</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>}
+        </Card>
+      </>}
 
       {/* ═══════════════ MY EXAMS ═══════════════ */}
       {activeTab === "exams" && <>
-        <div className="steps-container" style={{ marginBottom: 26, padding: "14px 22px", background: C.navy, borderRadius: 12 }}>
+        <div className="steps-container" style={{ marginBottom: 26, padding: "14px 22px", background: "linear-gradient(135deg, #1a2b4b 0%, #2d4560 100%)", borderRadius: 12 }}>
           {[["1","Create Draft"],["2","Submit to HOD"],["3","HOD Reviews"],["4","Invigilator Runs Exam"]].map(([n, label], i) => (
             <div key={n} style={{ display: "flex", alignItems: "center", flex: i < 3 ? 1 : undefined }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", background: C.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: C.white, flexShrink: 0 }}>{n}</div>
+                <div style={{ width: 24, height: 24, borderRadius: "50%", background: teacherAccent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: C.white, flexShrink: 0 }}>{n}</div>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.8)", whiteSpace: "nowrap" }}>{label}</span>
               </div>
               {i < 3 && <div className="step-line" />}
@@ -494,17 +555,32 @@ export default function TeacherPage({ activePage, setPage, user }) {
           ))}
         </div>
         <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-          <StatCard label="Total Exams"      value={exams.length}                                          icon={Icon.clipboardList} delay={0}   />
-          <StatCard label="Pending HOD"       value={exams.filter(e => e.exam_status === "PendingHOD").length}  icon={Icon.bell}          delay={80}  />
-          <StatCard label="Approved"          value={exams.filter(e => e.exam_status === "Approved").length}    icon={Icon.check}         delay={160} />
-          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + (e.students || 0), 0)}      icon={Icon.users}         delay={240} />
+          <StatCard label="Total Exams"      value={exams.length}                                          icon={Icon.clipboardList} accent={teacherAccent} light={teacherAccentLight} delay={0}   />
+          <StatCard label="Pending HOD"       value={exams.filter(e => e.exam_status === "PendingHOD").length}  icon={Icon.bell} accent={teacherAccent} light={teacherAccentLight} delay={80}  />
+          <StatCard label="Approved"          value={exams.filter(e => e.exam_status === "Approved").length}    icon={Icon.check} accent={teacherAccent} light={teacherAccentLight} delay={160} />
+          <StatCard label="Students Enrolled" value={exams.reduce((s, e) => s + (e.students || 0), 0)}      icon={Icon.users} accent={teacherAccent} light={teacherAccentLight} delay={240} />
         </div>
+        {plannedTimetables.length > 0 && (
+          <Card style={{ padding: 0, overflow: "hidden", marginBottom: 24 }}>
+            <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>
+              Coordinator Timetable <span style={{ fontSize: 12, fontWeight: 500, color: C.grey500 }}>— paper review still independent</span>
+            </div>
+            <Table columns={["Course", "Program / Batch / Section", "Exam", "Date & Time", "Lab"]}
+              rows={plannedTimetables.map(item => [
+                <span style={{ fontWeight: 700, color: C.navy }}>{item.course_code} — {item.course_title}</span>,
+                `${item.program_code} · ${item.batch_name} · Section ${item.section_name}`,
+                item.exam_type,
+                `${new Date(item.exam_date).toLocaleDateString()} · ${item.start_time?.substring(0, 5)}–${item.end_time?.substring(0, 5)}`,
+                item.lab_name,
+              ])} />
+          </Card>
+        )}
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.grey100}`, fontWeight: 700, fontSize: 15, color: C.navy }}>Exam Papers</div>
           <Table columns={["Course", "Section", "Exam Date", "Lab", "Status", "Actions"]}
             rows={exams.map(e => [
               <span style={{ fontWeight: 700, color: C.navy }}>{e.course_code} {e.exam_type}</span>,
-              <Badge>{e.section_name}</Badge>,
+              <Badge color={teacherAccent} bg={teacherAccentLight}>{e.section_name}</Badge>,
               new Date(e.exam_date).toLocaleDateString(),
               e.lab_name,
               examBadge(e.exam_status),
@@ -514,7 +590,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                   <Btn variant="navy" size="sm" onClick={() => shareWithDEC(e.exam_id)}>Share with Director Exam</Btn>
                 )}
                 {e.exam_status === "Approved" && e.shared_with_dec_at && (
-                  <span style={{ fontSize: 12, color: C.teal, fontWeight: 700, padding: "7px 0" }}>✓ Shared with Director Exam</span>
+                  <span style={{ fontSize: 12, color: teacherAccent, fontWeight: 700, padding: "7px 0" }}>✓ Shared with Director Exam</span>
                 )}
                 {e.exam_status === "PendingHOD" && <span style={{ fontSize: 12, color: C.grey400, padding: "7px 0" }}>Awaiting review</span>}
                 {e.exam_status === "Rejected" && (
@@ -559,17 +635,17 @@ export default function TeacherPage({ activePage, setPage, user }) {
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${isDragging ? C.teal : selectedFile ? C.teal : C.grey200}`,
+                border: `2px dashed ${isDragging ? teacherAccent : selectedFile ? teacherAccent : C.grey200}`,
                 borderRadius: 10,
                 padding: "36px 24px",
                 textAlign: "center",
-                background: isDragging ? C.tealLight : selectedFile ? C.tealLight : C.grey50,
+                background: isDragging ? teacherAccentLight : selectedFile ? teacherAccentLight : C.grey50,
                 marginBottom: 18,
                 cursor: "pointer",
                 transition: "background .15s, border-color .15s",
               }}
             >
-              <div style={{ color: selectedFile ? C.teal : C.grey400, display: "flex", justifyContent: "center", marginBottom: 12 }}>
+              <div style={{ color: selectedFile ? teacherAccent : C.grey400, display: "flex", justifyContent: "center", marginBottom: 12 }}>
                 {selectedFile ? Icon.fileText : Icon.upload}
               </div>
               {selectedFile ? (
@@ -595,12 +671,12 @@ export default function TeacherPage({ activePage, setPage, user }) {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
-              <label style={{ padding: 14, border: `1.5px solid ${rubricFile ? C.teal : C.grey200}`, borderRadius: 10, background: rubricFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+              <label style={{ padding: 14, border: `1.5px solid ${rubricFile ? teacherAccent : C.grey200}`, borderRadius: 10, background: rubricFile ? teacherAccentLight : C.grey50, cursor: "pointer" }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Rubric (optional)</div>
                 <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rubricFile?.name || "PDF, DOC or DOCX"}</div>
                 <input type="file" accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={e => setRubricFile(e.target.files?.[0] || null)} />
               </label>
-              <label style={{ padding: 14, border: `1.5px solid ${starterFile ? C.teal : C.grey200}`, borderRadius: 10, background: starterFile ? C.tealLight : C.grey50, cursor: "pointer" }}>
+              <label style={{ padding: 14, border: `1.5px solid ${starterFile ? teacherAccent : C.grey200}`, borderRadius: 10, background: starterFile ? teacherAccentLight : C.grey50, cursor: "pointer" }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: C.navy, marginBottom: 5 }}>Starter Code (optional)</div>
                 <div style={{ fontSize: 11, color: C.grey500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{starterFile?.name || "ZIP or source-code file"}</div>
                 <input type="file" accept=".zip,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.h,.cs,.php,.rb,.go,.rs,.html,.css,.json,.xml,.sql,.txt,.md,.ipynb,.xlsx,.csv" style={{ display: "none" }} onChange={e => setStarterFile(e.target.files?.[0] || null)} />
@@ -632,7 +708,7 @@ export default function TeacherPage({ activePage, setPage, user }) {
                 </div>
               ) : exams.filter(e => e.exam_paper_url).map(e => (
                 <div key={e.exam_id} style={{ display: "flex", gap: 14, alignItems: "center", padding: "13px 16px", background: C.grey50, borderRadius: 9, border: `1px solid ${C.grey200}` }}>
-                  <div style={{ color: C.teal, display: "flex" }}>{Icon.fileText}</div>
+                  <div style={{ color: teacherAccent, display: "flex" }}>{Icon.fileText}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, color: C.navy, fontSize: 13 }}>{e.course_code} {e.exam_type}</div>
                     <div style={{ fontSize: 12, color: C.grey400 }}>{e.section_name} · {new Date(e.exam_date).toLocaleDateString()}</div>
@@ -647,59 +723,23 @@ export default function TeacherPage({ activePage, setPage, user }) {
 
       {/* ═══════════════ INVIGILATION DUTY ═══════════════ */}
       {activeTab === "invigilation" && <>
-        {/* Incoming Swap Requests Section */}
-        {incomingSwaps.length > 0 && (
-          <Card style={{ marginBottom: 24, border: `2px solid ${C.amber}`, background: C.amberLight }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div style={{ color: C.amber, display: "flex" }}>{Icon.bell}</div>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>Incoming Swap Requests</h3>
-              <Badge color={C.amber} bg={C.white}>{incomingSwaps.length} pending</Badge>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {incomingSwaps.map(req => (
-                <div key={req.request_id} style={{ padding: "14px 18px", borderRadius: 10, background: C.white, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 3 }}>
-                      {req.requester_name} requests you to cover: {req.course_code} {req.exam_type}
-                    </div>
-                    <div style={{ fontSize: 12, color: C.grey500, marginBottom: 2 }}>
-                      Date: <strong style={{ color: C.navy }}>{new Date(req.exam_date).toLocaleDateString()}</strong> · Lab: <strong style={{ color: C.navy }}>{req.lab_name}</strong> · Section: <strong style={{ color: C.navy }}>{req.section_name}</strong>
-                    </div>
-                    <div style={{ fontSize: 12, color: C.grey500 }}>
-                      Reason: <em>"{req.reason}"</em>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn variant="primary" size="sm" onClick={() => respondIncoming(req.request_id, "Accepted")}>
-                      Accept Swap
-                    </Btn>
-                    <Btn variant="ghost" size="sm" style={{ color: C.red, borderColor: C.redLight }} onClick={() => respondIncoming(req.request_id, "Declined")}>
-                      Decline
-                    </Btn>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {!hasDuty && incomingSwaps.length === 0 ? (
+        {!hasDuty ? (
           <Card style={{ textAlign: "center", padding: "64px 24px" }}>
             <div style={{ width: 64, height: 64, borderRadius: 18, background: C.grey100, display: "flex", alignItems: "center", justifyContent: "center", color: C.grey400, margin: "0 auto 20px" }}>{Icon.clipboard}</div>
             <h3 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: C.navy }}>No Invigilation Duty Assigned</h3>
             <p style={{ margin: "0 auto", color: C.grey500, fontSize: 14, maxWidth: 380, lineHeight: 1.65 }}>You have not been assigned any invigilator duties this semester. Duties are assigned by the Departmental Exam Committee (DEC).</p>
           </Card>
         ) : <>
-          <div style={{ padding: "12px 20px", background: C.tealLight, border: `1.5px solid ${C.tealMid}`, borderRadius: 10, marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ color: C.teal, display: "flex" }}>{Icon.userCheck}</span>
+          <div style={{ padding: "12px 20px", background: teacherAccentLight, border: "1.5px solid #d0e1e7", borderRadius: 10, marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ color: teacherAccent, display: "flex" }}>{Icon.userCheck}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>You have <strong>{invigilatorAssignments.length}</strong> invigilator {invigilatorAssignments.length === 1 ? "duty" : "duties"} assigned this semester.</span>
           </div>
 
           <div className="resp-grid-4" style={{ marginBottom: 28 }}>
-            <StatCard label="Assigned Exams" value={invigilatorAssignments.length} icon={Icon.clipboard} />
-            <StatCard label="Total Capacity" value={invigilatorAssignments.reduce((s,a) => s + (a.capacity || 0), 0)} icon={Icon.users} />
-            <StatCard label="Swap Requests"  value={mySwaps.length} icon={Icon.bell} accent={mySwaps.length ? C.amber : C.teal} light={mySwaps.length ? C.amberLight : C.tealLight} />
-            <StatCard label="Next Exam"      value={invigilatorAssignments.length > 0 ? new Date(invigilatorAssignments[0].exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None"} icon={Icon.calendar} />
+            <StatCard label="Assigned Exams" value={invigilatorAssignments.length} icon={Icon.clipboard} accent={teacherAccent} light={teacherAccentLight} />
+            <StatCard label="Total Capacity" value={invigilatorAssignments.reduce((s,a) => s + (a.capacity || 0), 0)} icon={Icon.users} accent={teacherAccent} light={teacherAccentLight} />
+            <StatCard label="Swap Requests"  value={mySwaps.length} icon={Icon.bell} accent={mySwaps.length ? C.amber : teacherAccent} light={mySwaps.length ? C.amberLight : teacherAccentLight} />
+            <StatCard label="Next Exam"      value={invigilatorAssignments.length > 0 ? new Date(invigilatorAssignments[0].exam_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None"} icon={Icon.calendar} accent={teacherAccent} light={teacherAccentLight} />
           </div>
 
           <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 800, color: C.navy }}>My Schedule</h3>
@@ -709,13 +749,13 @@ export default function TeacherPage({ activePage, setPage, user }) {
               return (
                 <Card key={a.schedule_id} style={{ border: alreadyRequested ? `2px solid ${C.amber}` : undefined, animation: `slideInLeft .38s cubic-bezier(.22,.68,0,1.1) ${ai * 100}ms both` }}>
                   <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ width: 50, height: 50, borderRadius: 13, background: C.tealLight, display: "flex", alignItems: "center", justifyContent: "center", color: C.teal, flexShrink: 0 }}>{Icon.clipboard}</div>
+                    <div style={{ width: 50, height: 50, borderRadius: 13, background: teacherAccentLight, display: "flex", alignItems: "center", justifyContent: "center", color: teacherAccent, flexShrink: 0 }}>{Icon.clipboard}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
                         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>{a.course_code} {a.exam_type}</h3>
-                        <Badge>{a.section_name}</Badge>
+                        <Badge color={teacherAccent} bg={teacherAccentLight}>{a.section_name}</Badge>
                         {alreadyRequested && <Badge color={C.amber} bg={C.amberLight}>Swap Requested</Badge>}
-                        {a.exam_paper_url && <Badge color={C.teal} bg={C.tealLight}>Paper Available</Badge>}
+                        {a.exam_paper_url && <Badge color={teacherAccent} bg={teacherAccentLight}>Paper Available</Badge>}
                       </div>
                       <div style={{ display: "flex", gap: 18, rowGap: 4, fontSize: 13, color: C.grey500, flexWrap: "wrap" }}>
                         <span>{new Date(a.exam_date).toLocaleDateString()} · {a.start_time?.substring(0,5)}</span>
@@ -739,41 +779,6 @@ export default function TeacherPage({ activePage, setPage, user }) {
             })}
           </div>
 
-          <Card>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.navy }}>My Swap Requests</h3>
-              {mySwaps.filter(r => r.dec_status === "Pending").length > 0 && <Badge color={C.amber} bg={C.amberLight}>{mySwaps.filter(r => r.dec_status === "Pending").length} pending</Badge>}
-            </div>
-            {mySwaps.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "24px 0", color: C.grey400, fontSize: 13 }}>
-                <div style={{ marginBottom: 6, display: "flex", justifyContent: "center", opacity: 0.4 }}>{Icon.bell}</div>
-                No swap requests yet. Use <strong>"Request Swap"</strong> on a duty card above.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {mySwaps.map(req => (
-                  <div key={req.request_id} style={{ padding: "13px 16px", borderRadius: 10, background: C.grey50, border: `1.5px solid ${C.grey200}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14, color: C.navy, marginBottom: 2 }}>{req.course_code} {req.exam_type}</div>
-                      <div style={{ fontSize: 12, color: C.grey500 }}>{req?.exam_date ? new Date(req.exam_date).toLocaleDateString() : "TBD"} · Replacement: <strong style={{ color: C.navy }}>{req?.replacement_name || "Teacher"}</strong></div>
-                      <div style={{ fontSize: 12, color: C.grey500 }}>Reason: {req.reason}</div>
-                    </div>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>Replacement</div>
-                        {statusBadge(req.replacement_status)}
-                      </div>
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontSize: 10, color: C.grey400, marginBottom: 3, fontWeight: 700, textTransform: "uppercase" }}>DEC</div>
-                        {statusBadge(req.dec_status)}
-                      </div>
-                      <Btn variant="ghost" size="sm" onClick={() => setViewSwap(req)}>Details</Btn>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
         </>}
       </>}
 
