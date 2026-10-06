@@ -1,23 +1,5 @@
 import pool from '../db.js';
-import { upload, getFileUrl } from '../middleware/upload.js';
-
-async function notifyDepartmentHods(examId) {
-  const recipients = await pool.query(`
-    SELECT h.user_id, c.course_code, e.exam_type
-    FROM exam e
-    JOIN course_offering co ON co.course_offering_id=e.course_offering_id
-    JOIN course c ON c.course_id=co.course_id
-    JOIN program p ON p.program_id=c.program_id
-    JOIN hod h ON h.department_id=p.department_id
-    WHERE e.exam_id=$1 AND (h.tenure_end IS NULL OR h.tenure_end >= CURRENT_DATE)
-  `, [examId]);
-  for (const row of recipients.rows) {
-    await pool.query(`
-      INSERT INTO user_notification (user_id,title,message,notification_type)
-      VALUES ($1,'Exam Awaiting HOD Review',$2,'Exam')
-    `, [row.user_id, `${row.course_code} ${row.exam_type} has been submitted for your department review.`]);
-  }
-}
+import { upload } from '../middleware/upload.js';
 
 /* ===========================================================
    LIST ALL TEACHERS (for swap / assignment dropdowns)
@@ -93,10 +75,7 @@ export const getSchedule = async (req, res) => {
              COALESCE(u_inv.first_name || ' ' || u_inv.last_name, 'Unassigned') AS invigilator_name,
              ia.assignment_status,
              CASE WHEN co.teacher_id = $1 OR e.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_instructor,
-             CASE WHEN ia.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_invigilator,
-             les.status AS live_session_status,
-             les.session_code AS live_session_code,
-             COALESCE(sub_count.cnt, 0) AS submission_count
+             CASE WHEN ia.teacher_id = $1 THEN TRUE ELSE FALSE END AS is_invigilator
       FROM exam e
       JOIN course_offering co ON e.course_offering_id = co.course_offering_id
       JOIN course c ON co.course_id = c.course_id
@@ -107,20 +86,11 @@ export const getSchedule = async (req, res) => {
       LEFT JOIN invigilator_assignment ia ON es.schedule_id = ia.schedule_id
       LEFT JOIN teacher t_inv ON ia.teacher_id = t_inv.teacher_id
       LEFT JOIN users u_inv ON t_inv.user_id = u_inv.user_id
-      LEFT JOIN live_exam_session les ON les.exam_id = e.exam_id
-      LEFT JOIN (
-        SELECT exam_id, COUNT(*) AS cnt FROM student_submission GROUP BY exam_id
-      ) sub_count ON sub_count.exam_id = e.exam_id
       WHERE co.teacher_id = $1 OR e.teacher_id = $1 OR ia.teacher_id = $1
       ORDER BY COALESCE(es.exam_date, e.proposed_date, e.created_at) DESC
     `, [teacherId]);
 
-    const rows = result.rows.map(row => ({
-      ...row,
-      exam_paper_url: row.exam_paper_url ? getFileUrl(req, row.exam_paper_url) : null
-    }));
-
-    res.status(200).json({ status: 'success', schedule: rows });
+    res.status(200).json({ status: 'success', schedule: result.rows });
   } catch (error) {
     console.error('Error fetching teacher schedule:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch schedule.' });
@@ -156,14 +126,6 @@ export const createExam = async (req, res) => {
         return res.status(404).json({ status: 'error', message: `No course offering found for course code "${course_code}" assigned to you.` });
       }
       targetCourseOfferingId = coQuery.rows[0].course_offering_id;
-    }
-
-    const ownedOffering = await pool.query(
-      'SELECT 1 FROM course_offering WHERE course_offering_id=$1 AND teacher_id=$2',
-      [targetCourseOfferingId, teacher_id]
-    );
-    if (!ownedOffering.rowCount) {
-      return res.status(403).json({ status: 'error', message: 'You can only create an exam for a course offering assigned to you.' });
     }
 
     const result_check = await pool.query(
@@ -212,39 +174,26 @@ export const uploadPaper = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'No file uploaded.' });
     }
 
-    // Resolve URL: Cloudinary URL if Cloudinary is active, local URL otherwise
-    const fileUrl = getFileUrl(req, req.file);
+    const fileUrl = `http://localhost:${process.env.PORT || 5000}/uploads/${req.file.filename}`;
 
     const teacherRes = await pool.query(`
-      SELECT e.teacher_id
+      SELECT co.teacher_id
       FROM exam e
-      JOIN teacher t ON t.teacher_id = e.teacher_id
-      WHERE e.exam_id = $1 AND ($2 = 'admin' OR t.user_id = $3)
-    `, [exam_id, req.sessionUser?.role, req.sessionUser?.sub]);
+      JOIN course_offering co ON e.course_offering_id = co.course_offering_id
+      WHERE e.exam_id = $1
+    `, [exam_id]);
     const teacherId = teacherRes.rows[0]?.teacher_id || null;
-    if (!teacherId) {
-      return res.status(403).json({ status: 'error', message: 'You can only upload files for your own exam.' });
-    }
 
-    const checkPaper = await pool.query('SELECT question_paper_id FROM question_paper WHERE exam_id = $1', [exam_id]);
-    if (checkPaper.rows.length === 0) {
-      await pool.query(
-        `INSERT INTO question_paper (exam_id, uploaded_by, file_path, uploaded_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [exam_id, teacherId, fileUrl]
-      );
-    } else {
-      await pool.query(
-        `UPDATE question_paper SET file_path = $1, uploaded_at = NOW() WHERE exam_id = $2`,
-        [fileUrl, exam_id]
-      );
-    }
+    await pool.query(`
+      INSERT INTO question_paper (exam_id, uploaded_by, file_path, version)
+      VALUES ($1, $2, $3, 1)
+      ON CONFLICT DO NOTHING
+    `, [exam_id, teacherId, fileUrl]);
 
     await pool.query(
       "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1",
       [exam_id]
     );
-    await notifyDepartmentHods(exam_id);
 
     res.status(200).json({ status: 'success', message: 'Exam paper uploaded successfully.', fileUrl });
   } catch (error) {
@@ -259,16 +208,13 @@ export const uploadPaper = async (req, res) => {
 export const submitToHOD = async (req, res) => {
   const { exam_id } = req.body;
   try {
-    const result = await pool.query(`
-      UPDATE exam SET status='PendingHOD', submitted_at=NOW()
-      WHERE exam_id=$1 AND status IN ('Draft','Rejected')
-        AND EXISTS (SELECT 1 FROM teacher t WHERE t.teacher_id=exam.teacher_id AND ($2='admin' OR t.user_id=$3))
-      RETURNING exam_id
-    `, [exam_id, req.sessionUser?.role, req.sessionUser?.sub]);
+    const result = await pool.query(
+      "UPDATE exam SET status = 'PendingHOD', submitted_at = NOW() WHERE exam_id = $1 AND status IN ('Draft', 'Rejected') RETURNING exam_id",
+      [exam_id]
+    );
     if (result.rows.length === 0) {
       return res.status(400).json({ status: 'error', message: 'Exam not found or cannot be submitted in its current status.' });
     }
-    await notifyDepartmentHods(exam_id);
     res.status(200).json({ status: 'success', message: 'Exam submitted to HOD for review.' });
   } catch (error) {
     console.error('Error submitting exam to HOD:', error);
@@ -378,7 +324,6 @@ export const respondToSwapRequest = async (req, res) => {
     if (teacherQuery.rows.length === 0) {
       return res.status(403).json({ status: 'error', message: 'Teacher profile not found.' });
     }
-    const teacherId = teacherQuery.rows[0].teacher_id;
     if (decision === 'Accepted') {
       const getSched = await pool.query(`
         SELECT ia.schedule_id, es.exam_date, es.start_time, es.end_time

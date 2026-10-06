@@ -79,17 +79,16 @@ async function seedUsers() {
     // ── STEP 3: Insert students ───────────────────────────────────────
     console.log('\n📥 Registering students...');
     const studentData = [
-      { email: 'shanawar.khan@university.edu',     reg: '231593' },
-      { email: 'manahil.akhtar@university.edu',    reg: '231594' },
-      { email: 'sumaiyyah.siddiqui@university.edu',reg: '231595' },
+      { email: 'shanawar.khan@university.edu',     reg: '2023-CS-201' },
+      { email: 'manahil.akhtar@university.edu',    reg: '2023-CS-202' },
+      { email: 'sumaiyyah.siddiqui@university.edu',reg: '2023-CS-203' },
     ];
     const studentIds = {};
     for (const s of studentData) {
       const uid = insertedIds[s.email];
       const ex = await client.query('SELECT student_id FROM student WHERE user_id = $1', [uid]);
       if (ex.rows.length > 0) {
-        await client.query('UPDATE student SET registration_no = $1 WHERE user_id = $2', [s.reg, uid]);
-        console.log(`  ✅  Student registration_no updated: ${s.email} (reg: ${s.reg})`);
+        console.log(`  ⚠️  Student already registered: ${s.email}`);
         studentIds[s.email] = ex.rows[0].student_id;
         continue;
       }
@@ -216,9 +215,9 @@ async function seedUsers() {
     const section_6b = section6BRes.rows[0]?.section_id;
 
     const newOfferings = [
-      { email: 'dr.sumaira.naz@university.edu',  course_code: 'CS301' },
-      { email: 'sir.ayaz.ahmed@university.edu',  course_code: 'CS501' },
-      { email: 'mam.amnah.riaz@university.edu',  course_code: 'CS601' },
+      { email: 'dr.sumaira.naz@university.edu',  course_code: 'CS-312' },
+      { email: 'sir.ayaz.ahmed@university.edu',  course_code: 'CS-501' },
+      { email: 'mam.amnah.riaz@university.edu',  course_code: 'CS-415' },
     ];
 
     for (const o of newOfferings) {
@@ -236,8 +235,8 @@ async function seedUsers() {
         );
         // Create a Draft exam for this offering
         await client.query(
-          "INSERT INTO exam (course_offering_id, teacher_id, exam_type, total_marks, duration, status) VALUES ($1,$2,'LabFinal',100,120,'Draft')",
-          [res.rows[0].course_offering_id, teacher_id]
+          "INSERT INTO exam (course_offering_id, exam_type, total_marks, duration, status) VALUES ($1,'LabFinal',100,120,'Draft')",
+          [res.rows[0].course_offering_id]
         );
         console.log(`  ✅  ${o.email} → ${o.course_code} Lab (Section 6B) + Draft exam`);
       } else {

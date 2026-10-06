@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
@@ -7,12 +7,11 @@ import Btn from "../components/common/Btn";
 import Input from "../components/common/Input";
 import Badge from "../components/common/Badge";
 import StatCard from "../components/common/StatCard";
-import JoinExamModal from "../components/JoinExamModal";
-import { API_BASE_URL } from "../config/apiConfig";
+
+import { useEffect } from "react";
 
 export default function StudentPage({ activePage, user }) {
   const [selectedExam, setSelectedExam] = useState(null);
-  const [showJoinExam, setShowJoinExam] = useState(false);
 
   // Profile states
   const [currentPass, setCurrentPass] = useState("");
@@ -24,13 +23,13 @@ export default function StudentPage({ activePage, user }) {
 
   useEffect(() => {
     if (user?.userId) {
-      fetch(`${API_BASE_URL}/notifications/${user.userId}`)
+      fetch(`http://localhost:5000/api/notifications/${user.userId}`)
         .then(res => res.json())
         .then(data => { if (data.status === "success") setNotifications(data.notifications); });
     }
 
     if (user?.userId) {
-      fetch(`${API_BASE_URL}/student/${user.userId}/schedule`)
+      fetch(`http://localhost:5000/api/student/${user.userId}/schedule`)
         .then(res => res.json())
         .then(data => { if (data.status === "success") setSchedule(data.schedule); });
     }
@@ -73,7 +72,7 @@ export default function StudentPage({ activePage, user }) {
       showToast("Session error. Please log in again.", "warn");
       return;
     }
-    fetch(`${API_BASE_URL}/auth/change-password`, {
+    fetch("http://localhost:5000/api/auth/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, current_password: currentPass, new_password: newPass }),
@@ -107,7 +106,7 @@ export default function StudentPage({ activePage, user }) {
     formData.append("avatar", file);
     formData.append("user_id", userId);
 
-    fetch(`${API_BASE_URL}/auth/profile-picture`, {
+    fetch("http://localhost:5000/api/auth/profile-picture", {
       method: "POST",
       body: formData,
     })
@@ -141,10 +140,6 @@ export default function StudentPage({ activePage, user }) {
   if (activePage === "student") {
     return (
       <PageWrap title="Student Dashboard" subtitle="Manage your profile, update credentials, and check announcements">
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
-            <Btn variant="navy" onClick={() => setShowJoinExam(true)}>Join Exam</Btn>
-          </div>
-          {showJoinExam && <JoinExamModal onClose={() => setShowJoinExam(false)} />}
         {toast && (
           <div style={{ position: "fixed", top: 24, right: 24, zIndex: 300, background: toast.type === "warn" ? C.amber : C.navy, color: C.white, padding: "13px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 10 }}>
             {toast.type === "warn" ? Icon.alertTriangle : Icon.check} {toast.msg}

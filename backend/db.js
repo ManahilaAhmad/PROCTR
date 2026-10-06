@@ -1,16 +1,13 @@
 import pg from "pg";
 import dotenv from "dotenv";
-import { fileURLToPath } from 'url';
 
-dotenv.config({ path: fileURLToPath(new URL('.env', import.meta.url)) });
+dotenv.config();
 
 const { Pool } = pg;
 
-const useSsl = process.env.DATABASE_URL?.includes('neon.tech') || process.env.DATABASE_URL?.includes('sslmode=require') || process.env.PG_SSL === 'true';
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: useSsl ? { rejectUnauthorized: false } : false,
+  ssl: { rejectUnauthorized: false }, // required for Neon
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,

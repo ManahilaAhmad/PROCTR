@@ -13,13 +13,6 @@
 -- collapse these two into one before running.
 -- =====================================================================
 
-DROP TABLE IF EXISTS exam_file CASCADE;
-DROP TABLE IF EXISTS password_recovery_audit CASCADE;
-DROP TABLE IF EXISTS password_reset_token CASCADE;
-DROP TABLE IF EXISTS system_setting CASCADE;
-DROP TABLE IF EXISTS admin CASCADE;
-DROP TABLE IF EXISTS proctoring_event CASCADE;
-DROP TABLE IF EXISTS exam_whitelist CASCADE;
 DROP TABLE IF EXISTS notification_read CASCADE;
 DROP TABLE IF EXISTS broadcast_announcement CASCADE;
 DROP TABLE IF EXISTS user_notification CASCADE;
@@ -63,12 +56,10 @@ CREATE TABLE users (
     email          VARCHAR(255) NOT NULL UNIQUE,
     password_hash  VARCHAR(255) NOT NULL,
     user_type      VARCHAR(20) NOT NULL
-                   CHECK (user_type IN ('student','teacher','hod','coordinator','director','dec','admin')),
+                   CHECK (user_type IN ('student','teacher','hod','coordinator','director','dec')),
     is_active      BOOLEAN NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_login_at  TIMESTAMP NULL,
-    session_version INTEGER NOT NULL DEFAULT 0,
-    password_changed_at TIMESTAMPTZ NULL
+    last_login_at  TIMESTAMP NULL
 );
 
 CREATE TABLE department (
@@ -142,58 +133,6 @@ CREATE TABLE dec_member (
     is_active      BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-CREATE TABLE admin (
-    admin_id        INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id         INT NOT NULL UNIQUE REFERENCES users(user_id),
-    is_super_admin  BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE password_reset_token (
-    reset_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id       INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    token_hash    CHAR(64) NOT NULL UNIQUE,
-    requested_ip  VARCHAR(45),
-    expires_at    TIMESTAMPTZ NOT NULL,
-    used_at       TIMESTAMPTZ NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_password_reset_token_user_created
-    ON password_reset_token(user_id, created_at DESC);
-
-CREATE INDEX idx_password_reset_token_expiry
-    ON password_reset_token(expires_at) WHERE used_at IS NULL;
-
-CREATE TABLE password_recovery_audit (
-    audit_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id       INT NULL REFERENCES users(user_id) ON DELETE SET NULL,
-    action        VARCHAR(40) NOT NULL,
-    performed_by  INT NULL REFERENCES users(user_id) ON DELETE SET NULL,
-    ip_address    VARCHAR(45),
-    metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_password_recovery_audit_user_created
-    ON password_recovery_audit(user_id, created_at DESC);
-
-CREATE TABLE system_setting (
-    setting_key    VARCHAR(100) PRIMARY KEY,
-    setting_value  JSONB NOT NULL,
-    description    TEXT,
-    updated_by     INT NULL REFERENCES users(user_id),
-    updated_at     TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-INSERT INTO system_setting (setting_key, setting_value, description) VALUES
-('default_lab_cidr', '"192.168.18.0/24"'::jsonb, 'Fallback network range when a lab has no range.'),
-('allow_loopback_exam_access', 'false'::jsonb, 'Allow localhost clients during development.'),
-('max_exam_extension_minutes', '20'::jsonb, 'Maximum time an invigilator may add.'),
-('exam_warning_minutes', '5'::jsonb, 'When the low-time warning is shown.'),
-('clipboard_threshold_chars', '300'::jsonb, 'Clipboard size that triggers a violation.'),
-('focus_loss_seconds', '10'::jsonb, 'Focus-loss duration that triggers a violation.');
-
 -- =====================================================================
 -- 2. ACADEMIC FRAMEWORK & ENROLLMENT
 -- =====================================================================
@@ -260,8 +199,6 @@ CREATE TABLE lab (
     network_range  VARCHAR(50),
     status         VARCHAR(20) NOT NULL CHECK (status IN ('Available','InUse','Maintenance'))
 );
-
-CREATE UNIQUE INDEX unique_lab_name ON lab (LOWER(lab_name));
 
 CREATE TABLE exam (
     exam_id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -360,31 +297,10 @@ CREATE TABLE student_submission (
     student_id       INT NOT NULL REFERENCES student(student_id),
     exam_id          INT NOT NULL REFERENCES exam(exam_id),
     submission_path  VARCHAR(500) NOT NULL,
-    submission_manifest JSONB, -- Cloudinary asset metadata; null for legacy disk submissions
-    submission_attempt_id BIGINT,
     ip_address       VARCHAR(45) NOT NULL,  -- lab local IP, verifies correct subnet
     mac_address      VARCHAR(17) NOT NULL,  -- physical NIC address, prevents proxy submissions
     submitted_at     TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (student_id, exam_id)
-);
-
-CREATE TABLE submission_attempt (
-    request_id UUID PRIMARY KEY,
-    attempt_id BIGSERIAL UNIQUE NOT NULL,
-    student_id INT NOT NULL REFERENCES student(student_id),
-    exam_id INT NOT NULL REFERENCES exam(exam_id),
-    content_hash TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','complete','superseded')),
-    submission_id INT,
-    manifest JSONB,
-    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
-
-CREATE TABLE submission_access_session (
-    token_hash TEXT PRIMARY KEY,
-    user_id INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE ai_evaluation (
@@ -462,120 +378,6 @@ CREATE TABLE notification_read (
     user_id                 INT NOT NULL REFERENCES users(user_id),
     read_at                 TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (announcement_id, user_id)
-);
-
--- =====================================================================
--- 6. PROCTORING, MONITORING & EXAM FILES (Desktop Integration)
--- =====================================================================
-
--- Whitelist of allowed domains per exam (used by the local proxy)
-CREATE TABLE exam_whitelist (
-    whitelist_id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    exam_id         INT NOT NULL REFERENCES exam(exam_id),
-    domain          VARCHAR(255) NOT NULL,
-    added_by        INT NOT NULL REFERENCES teacher(teacher_id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (exam_id, domain)
-);
-
--- Real-time proctoring events logged by the desktop client
-CREATE TABLE proctoring_event (
-    event_id        INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    exam_id         INT NOT NULL REFERENCES exam(exam_id),
-    student_id      INT NOT NULL REFERENCES student(student_id),
-    event_type      VARCHAR(30) NOT NULL
-                    CHECK (event_type IN (
-                      'USB_INSERT','BLOCKED_SITE','UNTRUSTED_FILE',
-                      'APP_CLOSE_ATTEMPT','APP_KILLED',
-                      'FUZZY_LOW','FUZZY_MEDIUM','FUZZY_HIGH'
-                    )),
-    severity        VARCHAR(10) NOT NULL CHECK (severity IN ('Hard','Low','Medium','High')),
-    description     TEXT NOT NULL,
-    metadata        JSONB NULL,  -- extra detail: domain, file name, fuzzy scores, etc.
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- Multi-file attachments per exam (question paper, rubric, starter files, Word template)
-CREATE TABLE exam_file (
-    exam_file_id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    exam_id         INT NOT NULL REFERENCES exam(exam_id),
-    file_type       VARCHAR(20) NOT NULL
-                    CHECK (file_type IN ('question_paper','rubric','starter_file','word_template')),
-    file_path       VARCHAR(500) NOT NULL,
-    original_name   VARCHAR(255) NOT NULL,
-    uploaded_by     INT NOT NULL REFERENCES teacher(teacher_id),
-    uploaded_at     TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- Extend exam table for desktop integration
-ALTER TABLE exam ADD COLUMN IF NOT EXISTS word_template_path VARCHAR(500) NULL;
-ALTER TABLE exam ADD COLUMN IF NOT EXISTS starter_files_path VARCHAR(500) NULL;
-
--- Revocable authenticated sessions and security event history.
-CREATE TABLE live_exam_session (
-    live_session_id      INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    exam_id              INT NOT NULL REFERENCES exam(exam_id),
-    session_code         VARCHAR(50) NOT NULL UNIQUE,
-    passcode             VARCHAR(10) NOT NULL,
-    passcode_hash        VARCHAR(255),
-    passcode_expires_at  TIMESTAMPTZ,
-    invigilator_id       INT NULL REFERENCES teacher(teacher_id),
-    is_paper_revealed    BOOLEAN NOT NULL DEFAULT FALSE,
-    is_timer_started     BOOLEAN NOT NULL DEFAULT FALSE,
-    duration_minutes     INT NOT NULL DEFAULT 90,
-    timer_start_time     TIMESTAMPTZ NULL,
-    status               VARCHAR(30) NOT NULL DEFAULT 'CREATED',
-    join_attempts        INT NOT NULL DEFAULT 0,
-    locked_until         TIMESTAMPTZ NULL,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE security_session (
-    session_id       UUID PRIMARY KEY,
-    user_id          INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    token_hash       CHAR(64) NOT NULL UNIQUE,
-    client_type      VARCHAR(20) NOT NULL CHECK (client_type IN ('web','desktop')),
-    user_agent       VARCHAR(500),
-    created_ip       VARCHAR(45),
-    last_ip          VARCHAR(45),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at       TIMESTAMPTZ NOT NULL,
-    revoked_at       TIMESTAMPTZ NULL,
-    revoke_reason    VARCHAR(100) NULL
-);
-
-CREATE TABLE security_audit_log (
-    audit_id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id          INT NULL REFERENCES users(user_id) ON DELETE SET NULL,
-    session_id       UUID NULL,
-    event_type       VARCHAR(80) NOT NULL,
-    outcome          VARCHAR(20) NOT NULL CHECK (outcome IN ('SUCCESS','DENIED','FAILURE','INFO')),
-    ip_address       VARCHAR(45),
-    user_agent       VARCHAR(500),
-    method           VARCHAR(10),
-    request_path     VARCHAR(1000),
-    object_type      VARCHAR(80),
-    object_id        VARCHAR(255),
-    metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE authentication_attempt (
-    attempt_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    identifier_hash CHAR(64) NOT NULL,
-    ip_address       VARCHAR(45) NOT NULL,
-    succeeded        BOOLEAN NOT NULL DEFAULT FALSE,
-    attempted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE exam_join_attempt (
-    attempt_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    live_session_id  INT NOT NULL REFERENCES live_exam_session(live_session_id) ON DELETE CASCADE,
-    student_id       INT NULL REFERENCES student(student_id) ON DELETE SET NULL,
-    ip_address       VARCHAR(45) NOT NULL,
-    succeeded        BOOLEAN NOT NULL DEFAULT FALSE,
-    attempted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =====================================================================

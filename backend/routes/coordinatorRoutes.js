@@ -12,10 +12,8 @@ import {
     broadcastAnnouncement,
     getRecipients
 } from "../controllers/coordinatorController.js";
-import { requireRole, requireSession } from "../middleware/sessionAuth.js";
 
 const router = express.Router();
-router.use(requireSession, requireRole('coordinator', 'admin'));
 
 /* ===========================================================
    LABS
@@ -52,4 +50,4 @@ router.get("/notifications/recipients", getRecipients);
 
 router.post("/notifications/broadcast", broadcastAnnouncement);
 
-export default router;
+export default router;
