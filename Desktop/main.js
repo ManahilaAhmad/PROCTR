@@ -118,17 +118,39 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // Intercept window close to warn student
-  examWindow.on('close', (e) => {
+  examWindow.on('close', async (e) => {
     if (quitting || examWindow.__allowClose) return;
     e.preventDefault();
-    try { backupActiveSubmission(examWindow.webContents.id); }
-    catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
-    stopSensors();
-    if (submissionQueue.hasPending()) {
-      examWindow.hide();
-      showQueueStatus();
-      void flushSubmissions();
-    } else { examWindow.__allowClose = true; examWindow.close(); }
+    if (examWindow.__closePromptOpen) return;
+    examWindow.__closePromptOpen = true;
+    try {
+      if (activeSubmissions.has(examWindow.webContents.id)) {
+        const answer = await dialog.showMessageBox(examWindow, {
+          type: 'warning',
+          buttons: ['Stay in exam', 'Close exam'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          message: 'Are you sure you want to close the exam?',
+          detail: 'Closing PROCTR will interrupt your active exam session. Choose “Stay in exam” to continue working.'
+        });
+        if (answer.response !== 1) return;
+      }
+
+      try { backupActiveSubmission(examWindow.webContents.id); }
+      catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
+      stopSensors();
+      if (submissionQueue.hasPending()) {
+        examWindow.hide();
+        showQueueStatus();
+        void flushSubmissions();
+      } else {
+        examWindow.__allowClose = true;
+        examWindow.close();
+      }
+    } finally {
+      examWindow.__closePromptOpen = false;
+    }
   });
   examWindow.on('closed', () => {
     activeSubmissions.delete(webContentsId);

@@ -333,7 +333,7 @@ loginForm.addEventListener('submit', async (e) => {
     }
   } catch (err) {
     console.error('Login error:', err);
-    loginError.textContent = `✖ ${err.message || 'Failed to connect to backend server. Make sure node server.js is running.'}`;
+    loginError.textContent = `${err.message || 'Failed to connect to backend server. Make sure node server.js is running.'}`;
     loginError.style.display = 'block';
   } finally {
     loginBtn.disabled = false;
@@ -540,14 +540,14 @@ function renderStudentScheduleTable(schedule) {
 
     if (examExpired) {
       // Date passed — lock joining entirely
-      statusPill = '<span class="status-pill" style="background:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">📅 Exam Date Passed</span>';
+      statusPill = '<span class="status-pill" style="background:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">Exam Date Passed</span>';
       actionBtn = '<span style="font-size:11px; color:#94a3b8; font-style:italic;">—</span>';
     } else if (isLiveActive) {
-      statusPill = '<span class="status-pill active-pill">⚡ Live Active</span>';
-      actionBtn = `<button class="btn-primary join-scheduled-exam" data-course-code="${escapeHtmlJS(item.course_code)}" style="padding:4px 10px; font-size:11px; width:auto;">⚡ Join Exam</button>`;
+      statusPill = '<span class="status-pill active-pill">Live Active</span>';
+      actionBtn = `<button class="btn-primary join-scheduled-exam" data-course-code="${escapeHtmlJS(item.course_code)}" style="padding:4px 10px; font-size:11px; width:auto;">Join Exam</button>`;
     } else {
-      statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⏳ Session Not Started</span>';
-      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" disabled title="Wait for your invigilator to create and start the session.">⏳ Waiting for Invigilator</button>`;
+      statusPill = '<span class="status-pill warning-pill" style="background:#fef3c7; color:#b45309; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">Session Not Started</span>';
+      actionBtn = `<button class="btn-secondary" style="padding:4px 10px; font-size:11px; width:auto; opacity:0.8;" disabled title="Wait for your invigilator to create and start the session.">Waiting for Invigilator</button>`;
     }
 
     return `
@@ -675,13 +675,13 @@ function renderTeacherScheduleTable(schedule) {
     let actionBtn = '';
     if (isCompleted) {
       // Exam was explicitly completed by invigilator
-      actionBtn = `<button class="btn-action-secondary view-teacher-submissions">📁 View Submissions & Logs</button>`;
+      actionBtn = `<button class="btn-action-secondary view-teacher-submissions">View Submissions & Logs</button>`;
     } else if (isInvigilator) {
       // Assigned Invigilator can create & start live session
-      actionBtn = `<button class="btn-action-primary create-live-session" data-exam-id="${Number(examId)}" data-course-code="${courseCodeStr}">⚡ Create Live Session</button>`;
+      actionBtn = `<button class="btn-action-primary create-live-session" data-exam-id="${Number(examId)}" data-course-code="${courseCodeStr}">Create Live Session</button>`;
     } else {
       // Course Instructor only (Not Invigilator)
-      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" disabled title="Only the assigned invigilator can start this session.">🔒 Invigilation: ${escapeHtmlJS(item.invigilator_name || 'Assigned')}</button>`;
+      actionBtn = `<button class="btn-action-secondary" style="opacity:0.8; font-size:11px;" disabled title="Only the assigned invigilator can start this session.">Invigilation: ${escapeHtmlJS(item.invigilator_name || 'Assigned')}</button>`;
     }
 
     return `
@@ -840,12 +840,12 @@ function renderInvigilatorLiveRoomUI(session) {
     let secs = Math.max(0, session.secondsRemaining);
     const timerEl = document.getElementById('teacher-timer');
     if (timerEl) {
-      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      timerEl.textContent = secs > 0 ? formatSecondsToHMS(secs) : 'Time Expired';
     }
     teacherLocalCountdown = setInterval(() => {
       secs = Math.max(0, secs - 1);
       const el = document.getElementById('teacher-timer');
-      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : '⏰ Time Expired';
+      if (el) el.textContent = secs > 0 ? formatSecondsToHMS(secs) : 'Time Expired';
       if (secs <= 0) clearInterval(teacherLocalCountdown);
     }, 1000);
   }
@@ -921,11 +921,11 @@ function renderInvigilatorLiveRoomUI(session) {
         const studentViolations = recentViolations.filter(v => String(v.reg_no) === studentReg || String(v.student_id) === String(s.student_id));
         const isSelected = selectedStudentFilter === studentReg;
         const violBadge = studentViolations.length > 0
-          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">🚨 ${studentViolations.length} Alert(s)</span>`
-          : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">🟢 Clean</span>`;
+          ? `<span style="font-size:11px; font-weight:800; background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:10px;">${studentViolations.length} Alert(s)</span>`
+          : `<span style="font-size:11px; font-weight:700; background:#dcfce7; color:#166534; padding:3px 8px; border-radius:10px;">Clean</span>`;
 
         return `
-          <div class="candidate-card-item" data-reg-no="${escapeHtmlJS(studentReg)}" data-student-name="${escapeHtmlJS(s.name)}" style="background:${isSelected ? 'var(--teal-light, #f0fdfa)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(0,180,166,0.15)' : 'none'};">
+          <div class="candidate-card-item" data-reg-no="${escapeHtmlJS(studentReg)}" data-student-name="${escapeHtmlJS(s.name)}" style="background:${isSelected ? 'var(--teal-light, #e5f0f4)' : '#ffffff'}; border:2px solid ${isSelected ? 'var(--teal)' : '#e2e8f0'}; border-radius:10px; padding:14px 16px; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(85,121,135,0.15)' : 'none'};">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <button type="button" title="View this student's notifications" style="padding:0; border:0; background:none; font-size:14px; font-weight:800; color:var(--navy); cursor:pointer; text-align:left;">
                 ${escapeHtmlJS(s.name)}
@@ -1081,7 +1081,7 @@ function renderInvigilatorFeeds(session) {
               ${escapeHtmlJS(v.surface_title || v.title)}
             </div>
             <div style="font-size:12.5px; color:#334155; font-weight:600; line-height:1.4; background:#f8fafc; padding:8px 12px; border-radius:6px; border-left:3px solid ${badgeColor}; margin-top:4px;">
-              📌 ${escapeHtmlJS(cleanSummary)}
+              ${escapeHtmlJS(cleanSummary)}
             </div>
             <div style="margin-top:8px; font-size:11px; color:#64748b;">
               Opened at <strong>${v.timestamp ? new Date(v.timestamp).toLocaleString() : 'Unknown time'}</strong>
@@ -1151,7 +1151,7 @@ if (roomBtnReveal) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
-      roomBtnReveal.textContent = '✓ Paper Revealed';
+      roomBtnReveal.textContent = 'Paper Revealed';
       roomBtnReveal.disabled = true;
       roomBtnReveal.style.background = 'var(--grey-400)';
     } catch (err) {
@@ -1171,7 +1171,7 @@ if (roomBtnTimer) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_code: activeInvigilationCode }),
       });
-      roomBtnTimer.textContent = '✓ Timer Running';
+      roomBtnTimer.textContent = 'Timer Running';
       roomBtnTimer.disabled = true;
       roomBtnTimer.style.background = 'var(--grey-400)';
     } catch (err) {
@@ -1193,7 +1193,7 @@ if (roomBtnExtend) {
       });
       const data = await res.json();
       if (data.status === 'success') {
-        alert(`⏱️ ${data.message}`);
+        alert(data.message);
       }
     } catch (err) {
       console.error('Error extending time:', err);
@@ -1279,7 +1279,7 @@ if (joinExamForm) {
 
     if (!examCode || !passcode) {
       if (joinExamError) {
-        joinExamError.textContent = '✖ Please enter both Exam ID and Passcode.';
+        joinExamError.textContent = 'Please enter both Exam ID and Passcode.';
         joinExamError.style.display = 'block';
       }
       return;
@@ -1372,7 +1372,7 @@ if (joinExamForm) {
       }
     } catch (err) {
       if (joinExamError) {
-        joinExamError.textContent = `✖ ${err.message}`;
+        joinExamError.textContent = err.message;
         joinExamError.style.display = 'block';
       }
     } finally {
@@ -1494,8 +1494,8 @@ function startStudentSessionPoll(sessionCode) {
         }
 
         const statusEl = document.getElementById('exam-status-text');
-        if (statusEl) statusEl.textContent = '🔒 Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
-        alert('🔴 The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
+        if (statusEl) statusEl.textContent = 'Exam Ended by Invigilator — All Sensors Deactivated & Submissions Locked';
+        alert('The invigilator has ended this live exam session. All security sensors have been deactivated and submissions are locked.');
         return;
       }
 
@@ -1581,7 +1581,7 @@ function startStudentSessionPoll(sessionCode) {
             const warningEl = document.getElementById('five-min-warning');
 
             if (secs <= 0) {
-              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              if (timerEl) timerEl.textContent = 'Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
@@ -1620,7 +1620,7 @@ function startStudentSessionPoll(sessionCode) {
             const timerEl = document.getElementById('student-room-timer');
             const warningEl = document.getElementById('five-min-warning');
             if (secs <= 0) {
-              if (timerEl) timerEl.textContent = '⏰ Time Expired — Submissions Closed';
+              if (timerEl) timerEl.textContent = 'Time Expired — Submissions Closed';
               clearInterval(studentLocalCountdown);
               studentLocalCountdown = null;
               if (!autoSubmitTriggered) {
@@ -1757,18 +1757,18 @@ if (submitExamBtn) {
     const result = await performExamSubmission('MANUAL');
 
     if (result.status === 'success') {
-      submitExamBtn.textContent = '✓ Submitted';
+      submitExamBtn.textContent = 'Submitted';
       if (status) {
-        status.textContent = `✅ ${result.message || 'Your submission has been sent successfully.'}`;
+        status.textContent = result.message || 'Your submission has been sent successfully.';
         status.style.display = 'block';
         status.style.color = 'var(--teal)';
       }
       enableLeaveExamButton();
     } else {
       submitExamBtn.disabled = false;
-      submitExamBtn.textContent = '✓ Submit Solution';
+      submitExamBtn.textContent = 'Submit Solution';
       if (status) {
-        status.textContent = `✖ ${result.message || 'Submission failed — you can try again.'}`;
+        status.textContent = result.message || 'Submission failed — you can try again.';
         status.style.display = 'block';
         status.style.color = '#dc2626';
       }
@@ -1816,7 +1816,7 @@ async function loadStudentSubmittedWork() {
     const res = await fetch(`${API_BASE}/submission/student/${studentId}/labs`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load.');
-    renderStudentLabsList(data.labs || []);
+    renderStudentLabsList(data.courses || []);
   } catch (err) {
     root.innerHTML = `<div class="empty-state">Could not load submitted work: ${escapeHtmlJS(err.message)}</div>`;
   }
@@ -1824,65 +1824,69 @@ async function loadStudentSubmittedWork() {
 
 function renderStudentLabsList(labs) {
   const root = document.getElementById('student-submitted-work-root');
-  if (!labs.length) {
+  const submittedLabs = labs.filter(lab => Array.isArray(lab.submissions) && lab.submissions.length > 0);
+  if (!submittedLabs.length) {
     root.innerHTML = '<div class="empty-state">You haven\'t submitted any work yet. It will appear here automatically once your exam session ends, or once you submit manually.</div>';
     return;
   }
   root.innerHTML = `
     <div class="folder-grid">
-      ${labs.map((lab, i) => `
-        <button class="folder-card" data-co-id="${lab.course_offering_id}" data-idx="${i}">
-          <div class="folder-icon">📁</div>
+      ${submittedLabs.map((lab, i) => {
+        const latestSubmission = lab.submissions[0];
+        return `
+        <button class="folder-card" data-idx="${i}">
+          <div class="folder-icon" aria-hidden="true"></div>
           <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
-          <div class="folder-meta">Submitted ${new Date(lab.submitted_at).toLocaleString()}</div>
+          <div class="folder-meta">${lab.submissions.length} submission${lab.submissions.length === 1 ? '' : 's'} · latest ${latestSubmission.submitted_at ? new Date(latestSubmission.submitted_at).toLocaleString() : 'time unavailable'}</div>
         </button>
-      `).join('')}
+      `;}).join('')}
     </div>
   `;
   root.querySelectorAll('.folder-card').forEach((card, i) => {
-    card.addEventListener('click', () => loadStudentLabFiles(labs[i].course_offering_id, labs[i].label));
+    card.addEventListener('click', () => renderStudentLabFiles(submittedLabs[i]));
   });
 }
 
-async function loadStudentLabFiles(courseOfferingId, labLabel) {
+function renderStudentLabFiles(lab) {
   const root = document.getElementById('student-submitted-work-root');
   const studentId = currentUser?.studentId || currentUser?.userId;
-  root.innerHTML = '<div class="empty-state">Loading files…</div>';
-  try {
-    const res = await fetch(`${API_BASE}/submission/student/${studentId}/lab/${courseOfferingId}/files`);
-    const data = await res.json();
-    if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load files.');
-    const files = data.files || [];
-    root.innerHTML = `
+  root.innerHTML = `
       <div class="breadcrumb-bar">
         <button class="crumb-link" id="back-to-labs">Submitted Work</button>
         <span class="crumb-sep">/</span>
-        <span class="crumb-current">${escapeHtmlJS(labLabel)}</span>
+        <span class="crumb-current">${escapeHtmlJS(lab.label)}</span>
       </div>
-      ${files.length === 0 ? '<div class="empty-state">No files found in this submission.</div>' : `
-      <table class="file-list-table">
-        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
-        <tbody>
-          ${files.map(f => {
-            const downloadUrl = `${API_BASE}/submission/file/${f.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&studentId=${studentId}&download=true`;
-            return `
-              <tr>
-                <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
-                <td>${formatFileSize(f.file_size)}</td>
-                <td><button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(downloadUrl)}" data-name="${escapeHtmlJS(f.relative_path)}">Download</button></td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>`}
+      ${lab.submissions.map(submission => {
+        const files = Array.isArray(submission.files) ? submission.files : [];
+        return `
+          <section style="margin-top:16px; padding:18px; background:#fff; border:1px solid var(--grey-200); border-radius:12px;">
+            <div style="font-weight:800; color:var(--navy);">${escapeHtmlJS(submission.label || submission.exam_type || 'Exam')}</div>
+            <div style="font-size:12px; color:var(--grey-500); margin:4px 0 14px;">Submitted ${submission.submitted_at ? new Date(submission.submitted_at).toLocaleString() : 'time unavailable'}</div>
+            ${submission.files_unavailable
+              ? `<div class="empty-state">${escapeHtmlJS(submission.files_unavailable)}</div>`
+              : files.length === 0
+                ? '<div class="empty-state">No files were included in this submission.</div>'
+                : `<table class="file-list-table">
+                    <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+                    <tbody>
+                      ${files.map(file => {
+                        const downloadUrl = `${API_BASE}/submission/file/${file.submission_id}?relativePath=${encodeURIComponent(file.relative_path)}&studentId=${studentId}&download=true`;
+                        return `
+                          <tr>
+                            <td class="file-name">${escapeHtmlJS(file.relative_path)}</td>
+                            <td>${formatFileSize(file.file_size)}</td>
+                            <td><button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(downloadUrl)}" data-name="${escapeHtmlJS(file.relative_path)}">Download</button></td>
+                          </tr>`;
+                      }).join('')}
+                    </tbody>
+                  </table>`}
+          </section>`;
+      }).join('')}
     `;
-    document.getElementById('back-to-labs').addEventListener('click', loadStudentSubmittedWork);
-    root.querySelectorAll('.authenticated-download').forEach(button => {
-      button.addEventListener('click', () => downloadAuthenticatedResource(button.dataset.url, button.dataset.name));
-    });
-  } catch (err) {
-    root.innerHTML = `<div class="empty-state">Could not load files: ${escapeHtmlJS(err.message)}</div>`;
-  }
+  document.getElementById('back-to-labs').addEventListener('click', loadStudentSubmittedWork);
+  root.querySelectorAll('.authenticated-download').forEach(button => {
+    button.addEventListener('click', () => downloadAuthenticatedResource(button.dataset.url, button.dataset.name));
+  });
 }
 
 function getPreviewKind(name) {
@@ -1956,6 +1960,11 @@ function openResourceInViewer(resourceUrl, title) {
 
       if (previewKind === 'html' || mimeType.includes('text/html') || mimeType.includes('application/xhtml+xml')) {
         const html = await blob.text();
+        if (title === 'Security Log Report') {
+          iframe.srcdoc = html;
+          iframe.style.display = 'block';
+          return;
+        }
         const safeText = escapeHtmlJS(html);
         iframe.srcdoc = `<html><body style="font-family:ui-monospace,Consolas,monospace;padding:20px;line-height:1.5;white-space:pre-wrap;background:#fff;color:#0f172a;"><strong>HTML source preview (scripts are not executed)</strong><hr>${safeText}</body></html>`;
         iframe.style.display = 'block';
@@ -2069,7 +2078,7 @@ function renderTeacherLabsList(labs) {
     <div class="folder-grid">
       ${labs.map(lab => `
         <button class="folder-card" data-co-id="${lab.course_offering_id}">
-          <div class="folder-icon">📁</div>
+          <div class="folder-icon" aria-hidden="true"></div>
           <div class="folder-name">${escapeHtmlJS(lab.label)}</div>
           <div class="folder-meta">${lab.submission_count} submission${lab.submission_count === 1 ? '' : 's'}</div>
         </button>
@@ -2100,7 +2109,7 @@ async function loadLabStudents(courseOfferingId, labLabel) {
       <div class="folder-grid">
         ${students.map(s => `
           <button class="folder-card" data-student-id="${s.student_id}">
-            <div class="folder-icon">🧑‍🎓</div>
+            <div class="folder-icon" aria-hidden="true"></div>
             <div class="folder-name">${escapeHtmlJS(s.registration_no)}</div>
             <div class="folder-meta">${escapeHtmlJS(s.name)} · ${s.file_count} file${s.file_count === 1 ? '' : 's'}</div>
           </button>
@@ -2124,8 +2133,48 @@ async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel
     const res = await fetch(`${API_BASE}/submission/teacher/${teacherId}/lab/${courseOfferingId}/student/${studentId}/files`);
     const data = await res.json();
     if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Failed to load submission.');
-    const files = data.files || [];
-    const submission = data.submission || {};
+    const submissions = Array.isArray(data.submissions) ? data.submissions : [];
+    const renderSubmission = submission => {
+      const submittedAt = submission.submitted_at
+        ? new Date(submission.submitted_at).toLocaleString()
+        : 'Time unavailable';
+      const files = Array.isArray(submission.files) ? submission.files : [];
+      const reportUrl = `${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}`;
+      return `
+        <section class="submission-entry" style="margin-top:18px; padding:18px; background:#fff; border:1px solid var(--grey-200); border-radius:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+            <div>
+              <div style="font-weight:800; color:var(--navy);">${escapeHtmlJS(submission.exam_type || 'Exam')} submission</div>
+              <div style="font-size:12px; color:var(--grey-500); margin-top:4px;">Submitted ${escapeHtmlJS(submittedAt)}</div>
+            </div>
+            ${submission.has_report ? `
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="report-btn open-secure-resource" data-url="${escapeHtmlJS(`${reportUrl}?download=false`)}" data-title="Security Log Report">Open Security Log Report</button>
+                <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${reportUrl}?download=true`)}" data-name="security_log_report.html">Download Report</button>
+              </div>` : ''}
+          </div>
+          ${submission.migration_required ? `
+            <div class="empty-state">This older submission is stored in the legacy format. Its files must be migrated to Cloudinary before they can be opened or downloaded.</div>
+          ` : files.length === 0 ? '<div class="empty-state">No files were included in this submission.</div>' : `
+            <table class="file-list-table">
+              <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+              <tbody>
+                ${files.map(file => {
+                  const fileUrl = `${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(file.relative_path)}&teacherId=${teacherId}`;
+                  return `
+                    <tr>
+                      <td class="file-name">${escapeHtmlJS(file.relative_path)}</td>
+                      <td>${formatFileSize(file.file_size)}</td>
+                      <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="file-download open-secure-resource" data-url="${escapeHtmlJS(`${fileUrl}&download=false`)}" data-title="${escapeHtmlJS(file.relative_path)}">Open</button>
+                        <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${fileUrl}&download=true`)}" data-name="${escapeHtmlJS(file.relative_path)}">Download</button>
+                      </td>
+                    </tr>`;
+                }).join('')}
+              </tbody>
+            </table>`}
+        </section>`;
+    };
     root.innerHTML = `
       <div class="breadcrumb-bar">
         <button class="crumb-link" id="back-to-teacher-labs2">Student Submissions</button>
@@ -2134,36 +2183,9 @@ async function loadStudentSubmissionDetail(courseOfferingId, studentId, labLabel
         <span class="crumb-sep">/</span>
         <span class="crumb-current">${escapeHtmlJS(regNo)}</span>
       </div>
-      ${submission.has_report ? `
-      <div class="report-download-bar">
-        <div>
-          <div style="font-weight:800; font-size:13px; color:var(--navy);">📋 Security Log Report</div>
-          <div style="font-size:11.5px; color:var(--grey-500); margin-top:2px;">Filterable by severity (Critical / High / Medium / Low) — open in browser or download at any time.</div>
-        </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="report-btn open-secure-resource" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=false`)}" data-title="Security Log Report">📖 Open Security Log Report</button>
-          <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${API_BASE}/submission/teacher/${teacherId}/report/${submission.submission_id}?download=true`)}" data-name="security_log_report.html">⬇ Download</button>
-        </div>
-      </div>` : ''}
-      ${files.length === 0 ? '<div class="empty-state">No files in this submission.</div>' : `
-      <table class="file-list-table">
-        <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
-        <tbody>
-          ${files.map(f => {
-            const fileUrl = `${API_BASE}/submission/file/${submission.submission_id}?relativePath=${encodeURIComponent(f.relative_path)}&teacherId=${teacherId}`;
-            return `
-              <tr>
-                <td class="file-name">${escapeHtmlJS(f.relative_path)}</td>
-                <td>${formatFileSize(f.file_size)}</td>
-                <td style="display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
-                  <button type="button" class="file-download open-secure-resource" data-url="${escapeHtmlJS(`${fileUrl}&download=false`)}" data-title="${escapeHtmlJS(f.relative_path)}">Open</button>
-                  <button type="button" class="file-download authenticated-download" data-url="${escapeHtmlJS(`${fileUrl}&download=true`)}" data-name="${escapeHtmlJS(f.relative_path)}">Download</button>
-                </td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>`}
+      ${submissions.length === 0
+        ? '<div class="empty-state">No submitted work was found for this student.</div>'
+        : submissions.map(renderSubmission).join('')}
     `;
     document.getElementById('back-to-teacher-labs2').addEventListener('click', loadTeacherSubmissionLabs);
     document.getElementById('back-to-lab-students').addEventListener('click', () => loadLabStudents(courseOfferingId, labLabel));
@@ -2196,7 +2218,7 @@ if (changePwdForm) {
 
     if (newPassword !== confirmPassword) {
       if (changePwdErr) {
-        changePwdErr.textContent = '✖ New passwords do not match.';
+        changePwdErr.textContent = 'New passwords do not match.';
         changePwdErr.style.display = 'block';
       }
       return;
@@ -2204,7 +2226,7 @@ if (changePwdForm) {
 
     if (newPassword.length < 6) {
       if (changePwdErr) {
-        changePwdErr.textContent = '✖ New password must be at least 6 characters.';
+        changePwdErr.textContent = 'New password must be at least 6 characters.';
         changePwdErr.style.display = 'block';
       }
       return;
@@ -2228,7 +2250,7 @@ if (changePwdForm) {
 
       if (res.ok && data.status === 'success') {
         if (changePwdSucc) {
-          changePwdSucc.textContent = '✅ Password updated successfully!';
+          changePwdSucc.textContent = 'Password updated successfully!';
           changePwdSucc.style.display = 'block';
         }
         changePwdForm.reset();
@@ -2237,7 +2259,7 @@ if (changePwdForm) {
       }
     } catch (err) {
       if (changePwdErr) {
-        changePwdErr.textContent = `✖ ${err.message}`;
+        changePwdErr.textContent = err.message;
         changePwdErr.style.display = 'block';
       }
     } finally {
@@ -2255,7 +2277,7 @@ function renderWhitelist() {
   whitelist.forEach((item, i) => {
     const div = document.createElement('div');
     div.className = 'whitelist-item';
-    div.innerHTML = `<span>🔓 ${escapeHtmlJS(item)}</span><button class="btn-remove" data-index="${i}">Remove</button>`;
+    div.innerHTML = `<span>${escapeHtmlJS(item)}</span><button class="btn-remove" data-index="${i}">Remove</button>`;
     div.querySelector('.btn-remove').addEventListener('click', () => removeWhitelistItem(i));
     container.appendChild(div);
   });
@@ -2354,8 +2376,6 @@ if (window.proctrAPI) {
     if (payload.type === 'SENSOR_SYSTEM_START') {
       const ws = document.getElementById('stat-workspace');
       if (ws && payload.workspace_dir) ws.textContent = payload.workspace_dir;
-    } else if (payload.type === 'VIOLATION_ALERT') {
-      addViolationCard(payload, 'student-feed', 'violation-badge');
     }
   });
 

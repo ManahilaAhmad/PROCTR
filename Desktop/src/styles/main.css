@@ -2,15 +2,14 @@
 
 /* ═══════════════════════════════════════════════════
    PROCTR DESKTOP — COLOR TOKENS
-   Exact match to website src/theme/colors.js
 ═══════════════════════════════════════════════════ */
 :root {
   --navy:        #1a2b4b;
   --navy-dark:   #111d33;
   --navy-mid:    #1a3a5c;
-  --teal:        #00b4a6;
-  --teal-light:  #e6f7f6;
-  --teal-mid:    #b3ece8;
+  --teal:        #557987;
+  --teal-light:  #e5f0f4;
+  --teal-mid:    #c3d8e4;
   --white:       #ffffff;
   --grey-50:     #f7f8fa;
   --grey-100:    #f0f1f3;
@@ -58,7 +57,7 @@ body {
 @keyframes slideIn   { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
 @keyframes slideInLeft{ from{opacity:0;transform:translateX(-20px)} to{opacity:1;transform:translateX(0)} }
 @keyframes countUp   { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-@keyframes pulseGlow { 0%,100%{box-shadow:0 0 0 0 rgba(0,180,166,.4)} 50%{box-shadow:0 0 0 5px rgba(0,180,166,0)} }
+@keyframes pulseGlow { 0%,100%{box-shadow:0 0 0 0 rgba(85,121,135,.4)} 50%{box-shadow:0 0 0 5px rgba(85,121,135,0)} }
 @keyframes waveSweep {
   0%, 100% { transform: translate3d(-5%, 0, 0) scaleX(1.08); }
   50% { transform: translate3d(5%, -34px, 0) scaleX(1.18); }
@@ -124,20 +123,20 @@ body {
 
 .wave-back {
   bottom: -4%;
-  color: rgba(37, 211, 196, .28);
+  color: rgba(85, 121, 135, .28);
   filter: blur(2px);
   animation: waveSweepReverse 10s ease-in-out infinite;
 }
 
 .wave-middle {
   bottom: -11%;
-  color: rgba(0, 180, 166, .48);
+  color: rgba(85, 121, 135, .38);
   animation: waveSweep 7s ease-in-out infinite;
 }
 
 .wave-front {
   bottom: -18%;
-  color: rgba(19, 115, 151, .78);
+  color: rgba(85, 121, 135, .68);
   animation: waveSweepReverse 8.5s ease-in-out infinite -2s;
 }
 
@@ -168,7 +167,7 @@ body {
 
 .brand-logo { margin-bottom: 0; }
 .brand-logo .login-logo-name { color: #fff; font-size: 23px; }
-.brand-logo .login-logo-sub { color: #87eee5; }
+.brand-logo .login-logo-sub { color: #c3d8e4; }
 
 .login-brand-content {
   margin: clamp(48px, 8vh, 82px) 0 0;
@@ -212,7 +211,7 @@ body {
   height: 26px;
   display: grid;
   place-items: center;
-  color: #5ef3e5;
+  color: #c3d8e4;
   font-size: 19px;
   font-weight: 800;
 }
@@ -236,7 +235,7 @@ body {
   text-align: left;
 }
 
-/* Logo — navy badge with shield icon, PROCTR text in navy, teal subtitle */
+/* Logo — navy badge with shield icon and PROCTR text */
 .login-logo {
   display: flex;
   align-items: center;
@@ -249,14 +248,14 @@ body {
   width: 42px;
   height: 42px;
   flex-shrink: 0;
-  filter: drop-shadow(0 10px 14px rgba(0,180,166,.3));
+  filter: drop-shadow(0 10px 14px rgba(85,121,135,.3));
 }
 
 .logo-badge-ring {
   position: absolute;
   inset: 0;
   border-radius: 0;
-  background: rgba(0,180,166,.5);
+  background: rgba(85,121,135,.5);
   animation: none;
 }
 
@@ -265,13 +264,13 @@ body {
   width: 42px;
   height: 42px;
   border-radius: 0;
-  border: 2px solid #b9fff8;
-  background: linear-gradient(145deg, #04cbbb, #008f86);
+  border: 2px solid #c3d8e4;
+  background: linear-gradient(145deg, #7899a6, #557987);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 8px 22px rgba(0,180,166,.28);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 8px 22px rgba(85,121,135,.28);
 }
 
 .logo-badge-inner svg {
@@ -350,7 +349,7 @@ body {
   line-height: 1.3;
 }
 
-.role-tab:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,180,166,.18); }
+.role-tab:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(85,121,135,.18); }
 
 .role-tab.active {
   border-color: var(--teal);
@@ -398,7 +397,7 @@ body {
 .field-group input:focus,
 .field-input:focus {
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(0,180,166,.12);
+  box-shadow: 0 0 0 3px rgba(85,121,135,.12);
 }
 
 .field-group input::placeholder,
@@ -676,7 +675,7 @@ body {
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
-  border: 1px solid rgba(0,180,166,.3);
+  border: 1px solid rgba(85,121,135,.3);
   background: var(--teal-light);
   border-radius: 99px;
   font-size: 12px;
@@ -785,8 +784,8 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: rgba(0,180,166,.15);
-  border: 1px solid rgba(0,180,166,.3);
+  background: rgba(85,121,135,.15);
+  border: 1px solid rgba(85,121,135,.3);
   border-radius: 99px;
   font-size: 13px;
   font-weight: 700;
@@ -859,7 +858,7 @@ body {
   background: var(--teal);
   border-color: var(--teal);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,180,166,.25);
+  box-shadow: 0 4px 12px rgba(85,121,135,.25);
 }
 
 .btn-action-secondary {
@@ -895,7 +894,7 @@ body {
   white-space: nowrap;
 }
 
-.active-pill, .instructor-pill   { background: rgba(0,180,166,.1); color: var(--teal); border: 1px solid rgba(0,180,166,.25); }
+.active-pill, .instructor-pill   { background: rgba(85,121,135,.1); color: var(--teal); border: 1px solid rgba(85,121,135,.25); }
 .upcoming-pill, .invigilator-pill { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
 .done-pill     { background: var(--green-light); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
 

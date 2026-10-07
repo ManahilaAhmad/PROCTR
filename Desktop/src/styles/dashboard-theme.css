@@ -1,11 +1,11 @@
-/* Shared visual system for the student and invigilator workspaces. */
+/* Shared slate-blue visual system for the student and invigilator workspaces. */
 
 /* Login visual layer. These selectors intentionally use the established
    markup, so the authentication and forgotten-password handlers are kept. */
 #view-login .login-bg {
   background:
-    radial-gradient(circle at 14% 12%, rgba(103,217,208,.24), transparent 28%),
-    linear-gradient(135deg, #e8f2f5 0%, #dce9ef 100%);
+    radial-gradient(circle at 14% 12%, rgba(85,121,135,.16), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #c3d8e4 100%);
 }
 
 #view-login .login-frame {
@@ -15,14 +15,14 @@
 }
 
 #view-login .login-brand-panel {
-  background: linear-gradient(155deg, #416c82 0%, #254b61 100%);
+  background: linear-gradient(155deg, #557987 0%, #1a2b4b 100%);
 }
 
 #view-login .login-brand-content h1,
 #view-login .login-logo-name { color: #fff; }
 
 #view-login .login-logo-sub,
-#view-login .login-feature small { color: rgba(229,250,250,.74); }
+#view-login .login-feature small { color: rgba(255,255,255,.74); }
 
 #view-login .login-feature {
   border-color: rgba(255,255,255,.16);
@@ -31,21 +31,21 @@
 }
 
 #view-login .login-feature span,
-#view-login .login-feature strong { color: #d9f8f4; }
+#view-login .login-feature strong { color: #e5f0f4; }
 
 #view-login .login-card {
   background: rgba(255,255,255,.96);
   border: 0;
 }
 
-#view-login .login-welcome { color: #355f75; }
-#view-login .login-sub { color: #708591; }
+#view-login .login-welcome { color: #557987; }
+#view-login .login-sub { color: #6b7280; }
 
 #view-login .role-tabs {
   gap: 8px;
   padding: 5px;
   border: 1px solid rgba(85,121,135,.16);
-  background: #f3f8fa;
+  background: #e5f0f4;
   border-radius: 12px;
 }
 
@@ -56,7 +56,7 @@
 
 #view-login .role-tab.active {
   color: #fff;
-  background: #416c82;
+  background: linear-gradient(135deg, #557987 0%, #7899a6 100%);
   box-shadow: 0 4px 10px rgba(47,88,108,.18);
 }
 
@@ -66,17 +66,17 @@
 }
 
 #view-login .field-group input:focus {
-  border-color: #6f9baa;
+  border-color: #7899a6;
   box-shadow: 0 0 0 3px rgba(85,121,135,.13);
 }
 
 #view-login .btn-primary {
   border-radius: 10px;
-  background: linear-gradient(135deg, #416c82 0%, #557987 100%);
+  background: linear-gradient(135deg, #557987 0%, #7899a6 100%);
   box-shadow: 0 8px 18px rgba(47,88,108,.18);
 }
 
-#view-login .login-forgot { color: #416c82; }
+#view-login .login-forgot { color: #557987; }
 
 /* Sumaiyyah login layout: visual-only overrides for the existing login IDs. */
 #view-login .login-frame,
@@ -86,8 +86,8 @@
 #view-login .login-bg { position: relative; overflow: hidden; }
 #view-login .login-float-ball {
   position: absolute; z-index: 1; display: block; width: 7px; height: 7px;
-  border-radius: 50%; background: #41c8e8; opacity: .55;
-  box-shadow: 0 0 16px 4px rgba(65,200,232,.28); pointer-events: none;
+  border-radius: 50%; background: #7899a6; opacity: .45;
+  box-shadow: 0 0 16px 4px rgba(85,121,135,.2); pointer-events: none;
 }
 #view-login .login-float-ball-one { top: 30%; left: 8%; }
 #view-login .login-float-ball-two { top: 60%; right: 10%; width: 6px; height: 6px; }
@@ -99,7 +99,7 @@
 }
 #view-login .desktop-login-brand-mark {
   display: grid; width: 46px; height: 46px; place-items: center; border-radius: 9px;
-  color: #fff; background: linear-gradient(145deg, #416c82, #254b61);
+  color: #fff; background: linear-gradient(145deg, #557987, #1a2b4b);
   box-shadow: 0 7px 18px rgba(26,43,75,.16);
 }
 #view-login .desktop-login-brand-mark svg { width: 27px; height: 27px; }
@@ -109,11 +109,11 @@
 #view-login .login-hero-copy {
   position: absolute; z-index: 2; top: 31%; left: clamp(28px, 4.5vw, 56px); width: min(240px, 30vw);
 }
-#view-login .login-hero-copy h1 { margin: 0; color: #557987; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(38px, 4vw, 58px); line-height: 1; }
+#view-login .login-hero-copy h1 { margin: 0; color: #557987; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: clamp(38px, 4vw, 58px); line-height: 1; }
 #view-login .login-hero-copy p { margin: 12px 0 0; color: #557987; font-size: 12px; line-height: 1.6; }
 #view-login .login-illustration {
   position: absolute; z-index: 1; top: 25%; left: calc(50% - 297px); width: min(265px, 26vw); max-height: 42vh;
-  object-fit: contain; filter: drop-shadow(0 14px 28px rgba(43,168,207,.42));
+  object-fit: contain; filter: drop-shadow(0 14px 28px rgba(85,121,135,.22));
 }
 #view-login .login-feature-list {
   position: absolute; z-index: 2; bottom: 12%; left: clamp(28px, 4.5vw, 56px); width: min(320px, 36vw);
@@ -130,9 +130,19 @@
 #view-login .role-prompt { display: block; margin: 0 0 10px; color: #6b7280; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-align: center; text-transform: uppercase; }
 #view-login .role-tab { display: flex; align-items: center; justify-content: center; min-height: 48px; }
 #view-login .field-group { position: relative; }
-#view-login .login-field-icon { position: absolute; z-index: 1; top: 36px; left: 13px; width: 14px; height: 14px; color: #8ca5b0; pointer-events: none; }
+#view-login .login-field-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 13px;
+  width: 14px;
+  height: 14px;
+  color: #7899a6;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
 #view-login .field-group input { padding-left: 38px; }
-#view-login .login-card .login-forgot { display: block; width: max-content; margin: -8px 0 16px auto; padding: 0; border: 0; background: transparent; color: #00a99d; font-weight: 700; cursor: pointer; }
+#view-login .login-card .login-forgot { display: block; width: max-content; margin: -8px 0 16px auto; padding: 0; border: 0; background: transparent; color: #557987; font-weight: 700; cursor: pointer; }
 #view-login .login-access-note { margin: 20px 0 0; color: #9ca3af; font-size: 12px; text-align: center; }
 
 @media (max-width: 760px), (max-height: 680px) {
@@ -143,13 +153,13 @@
 
 #view-student,
 #view-teacher {
-  --workspace-bg: #eaf2f6;
-  --workspace-surface: rgba(255,255,255,.88);
-  --workspace-border: rgba(85,121,135,.14);
-  --workspace-shadow: 0 10px 30px rgba(41,91,117,.08);
-  color: #344b5b;
+  --workspace-bg: #eef7fa;
+  --workspace-surface: linear-gradient(145deg, rgba(255,255,255,.82), rgba(255,255,255,.62));
+  --workspace-border: rgba(255,255,255,.86);
+  --workspace-shadow: 0 18px 45px rgba(41,91,117,.12), inset 0 1px 0 rgba(255,255,255,.9);
+  color: #1a2b4b;
   background: var(--workspace-bg);
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
 #view-student .app-shell,
@@ -157,19 +167,25 @@
 
 #view-student .sidebar,
 #view-teacher .sidebar {
-  background: linear-gradient(180deg, #416c82 0%, #254b61 100%);
+  background: linear-gradient(160deg, #dce9ef 0%, #c3d8e4 100%);
   border: 0;
-  box-shadow: 8px 0 28px rgba(26,43,75,.1);
+  border-right: 1px solid rgba(255,255,255,.86);
+  box-shadow: 8px 0 28px rgba(41,91,117,.12);
 }
 
 #view-student .sidebar-brand,
 #view-teacher .sidebar-brand {
   min-height: 82px;
-  border-bottom-color: rgba(255,255,255,.14);
+  border-bottom-color: rgba(255,255,255,.78);
 }
 
+#view-student .sidebar-brand > span,
+#view-teacher .sidebar-brand > span,
+#view-student .sidebar-brand-name,
+#view-teacher .sidebar-brand-name { color: #1a2b4b; }
+
 #view-student .sidebar-brand-role,
-#view-teacher .sidebar-brand-role { color: #b9e8ee; }
+#view-teacher .sidebar-brand-role { color: #557987; }
 
 #view-student .sidebar-nav,
 #view-teacher .sidebar-nav { padding: 16px 10px; gap: 5px; }
@@ -178,50 +194,64 @@
 #view-teacher .nav-item {
   min-height: 42px;
   border-radius: 10px !important;
-  color: rgba(255,255,255,.76);
+  color: #557987;
   transition: background .18s ease, color .18s ease, transform .18s ease;
 }
 
 #view-student .nav-item:hover,
 #view-teacher .nav-item:hover {
-  background: rgba(255,255,255,.12);
-  color: #fff;
+  background: rgba(255,255,255,.48);
+  color: #1a2b4b;
   transform: translateX(2px);
 }
 
 #view-student .nav-item.active,
 #view-teacher .nav-item.active {
-  border-left: 3px solid #67d9d0;
-  background: rgba(255,255,255,.18);
+  border-left: 3px solid #557987;
+  background: linear-gradient(135deg, #557987 0%, #7899a6 100%);
   color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+  box-shadow: 0 8px 20px rgba(47,110,139,.18);
 }
 
 #view-student .nav-item.active svg,
-#view-teacher .nav-item.active svg { color: #9be9e2; }
+#view-teacher .nav-item.active svg { color: #fff; }
 
 #view-student .nav-divider,
-#view-teacher .nav-divider { color: rgba(255,255,255,.56); border-top-color: rgba(255,255,255,.14); }
+#view-teacher .nav-divider { color: rgba(85,121,135,.72); border-top-color: rgba(255,255,255,.72); }
 
 #view-student .sidebar-footer,
-#view-teacher .sidebar-footer { border-top-color: rgba(255,255,255,.14); }
+#view-teacher .sidebar-footer { border-top-color: rgba(255,255,255,.78); }
 
 #view-student .user-role,
-#view-teacher .user-role { color: rgba(255,255,255,.64); }
+#view-teacher .user-role { color: rgba(26,43,75,.64); }
+
+#view-student .user-name,
+#view-teacher .user-name { color: #1a2b4b; }
 
 #view-student .user-avatar,
 #view-teacher .user-avatar {
-  border: 1px solid rgba(255,255,255,.55);
-  background: #d9edf2;
-  color: #355f75;
+  border: 1px solid rgba(255,255,255,.86);
+  background: #fff;
+  color: #557987;
 }
 
 #view-student .btn-logout,
-#view-teacher .btn-logout { border-radius: 10px !important; color: rgba(255,255,255,.76); }
+#view-teacher .btn-logout { border-radius: 10px !important; color: #557987; }
+
+#view-student .btn-logout:hover,
+#view-teacher .btn-logout:hover {
+  background: rgba(85,121,135,.12);
+  color: #1a2b4b;
+}
+
+#view-teacher .user-avatar.teacher-av { background: #557987; color: #fff; }
 
 #view-student .main-content,
 #view-teacher .main-content {
-  background: linear-gradient(145deg, #f7fafc 0%, #eaf2f6 100%);
+  background:
+    radial-gradient(circle at 16% 18%, rgba(255,255,255,.92), transparent 28%),
+    radial-gradient(circle at 84% 12%, rgba(85,121,135,.16), transparent 24%),
+    linear-gradient(90deg, #fff 0%, #fff 42%, #eef7fa 58%, #c3d8e4 100%);
   padding: 28px 32px;
 }
 
@@ -229,10 +259,10 @@
 #view-teacher .page-header { align-items: center; margin-bottom: 24px; }
 
 #view-student .page-header h2,
-#view-teacher .page-header h2 { color: #355f75; font-size: 21px; letter-spacing: -.45px; }
+#view-teacher .page-header h2 { color: #557987; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 21px; letter-spacing: -.45px; }
 
 #view-student .subtitle,
-#view-teacher .subtitle { color: #708591; }
+#view-teacher .subtitle { color: #6b7280; }
 
 #view-student .card,
 #view-student .stat-card,
@@ -384,13 +414,11 @@
   background: linear-gradient(135deg, #557987 0%, #7899a6 100%);
 }
 
-#view-student .profile-dept { color: #d7f5f2; text-shadow: none; }
-
 #view-student .student-material-notice {
   border-radius: 11px !important;
-  border: 1px solid rgba(0,180,166,.2) !important;
-  background: #effaf9;
-  color: #355f75;
+  border: 1px solid rgba(85,121,135,.2) !important;
+  background: #e5f0f4;
+  color: #1a2b4b;
 }
 
 #view-student .table-responsive,
@@ -399,4 +427,230 @@
 @media (max-width: 900px) {
   #view-student .main-content,
   #view-teacher .main-content { padding: 22px 20px; }
+}
+
+#view-login,
+#view-student,
+#view-teacher,
+#view-login *,
+#view-student *,
+#view-teacher * {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+#view-student .profile-dept { color: #e5f0f4; }
+
+#view-student .profile-header-card {
+  background: linear-gradient(135deg, #557987 0%, #7899a6 100%);
+  box-shadow: 0 16px 38px rgba(41,91,117,.18);
+}
+
+#view-student #join-exam-card,
+#view-teacher .teacher-passcode-panel {
+  border-left-color: #557987 !important;
+}
+
+#view-teacher .teacher-passcode-panel { background: var(--workspace-surface) !important; }
+
+#view-student #btn-submit-exam,
+#view-teacher #room-btn-reveal,
+#view-teacher #room-btn-timer,
+#view-teacher #room-btn-extend,
+#view-teacher #room-btn-end {
+  background: linear-gradient(135deg, #557987 0%, #7899a6 100%) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+
+#view-student #submit-status { color: #557987 !important; }
+
+#view-teacher #filter-active-header {
+  background: #e5f0f4 !important;
+  border-color: rgba(85,121,135,.3) !important;
+}
+
+#view-teacher .report-download-bar {
+  background: rgba(255,255,255,.72);
+}
+
+/* Desktop login layout mirrors the website while keeping the Desktop form. */
+#view-login .login-bg {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0;
+  background: #fff !important;
+  isolation: isolate;
+}
+
+#view-login .login-bg::before {
+  display: block;
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 0 50%;
+  width: auto;
+  background: #c3d8e4;
+}
+
+#view-login .login-frame,
+#view-login .login-brand-panel,
+#view-login .login-brand-content { display: contents; }
+
+#view-login .desktop-login-brand {
+  top: 10%;
+  left: clamp(28px, 4.5vw, 56px);
+  z-index: 2;
+}
+
+#view-login .desktop-login-brand-mark {
+  background: linear-gradient(145deg, #557987, #1a2b4b);
+}
+
+#view-login .desktop-login-brand-name,
+#view-login .desktop-login-brand-sub { color: #557987; }
+
+#view-login .login-hero-copy {
+  position: absolute;
+  z-index: 2;
+  top: 31%;
+  left: clamp(28px, 4.5vw, 56px);
+  width: min(300px, 24vw);
+  display: block;
+  color: #557987;
+  text-align: left;
+}
+
+#view-login .login-hero-copy h1 {
+  margin: 0;
+  color: #557987;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: clamp(48px, 4.4vw, 68px);
+  font-weight: 800;
+  line-height: .98;
+  letter-spacing: -2.4px;
+}
+
+#view-login .login-hero-copy h1 span { color: #557987; }
+
+#view-login .login-hero-copy p {
+  max-width: 290px;
+  margin: 20px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+#view-login .login-illustration {
+  position: absolute;
+  z-index: 1;
+  top: 22%;
+  left: calc(50% - 540px);
+  width: min(520px, 42vw);
+  max-height: 47vh;
+  margin: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 28px rgba(85,121,135,.2));
+}
+
+#view-login .login-feature-list {
+  position: absolute;
+  z-index: 2;
+  left: clamp(28px, 4vw, 50px);
+  bottom: clamp(100px, 20vh, 160px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  width: min(420px, 34vw);
+  text-align: center;
+  color: #557987;
+}
+
+#view-login .login-feature {
+  min-height: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #557987;
+  font-size: 12px;
+}
+
+#view-login .login-feature span {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 8px;
+  border: 1px solid rgba(255,255,255,.94);
+  border-radius: 50%;
+  background: #e5f0f4;
+  box-shadow: 0 9px 24px rgba(85,121,135,.16), inset 0 1px 0 rgba(255,255,255,.96);
+  color: #557987;
+}
+
+#view-login .login-feature span svg { width: 22px; height: 22px; }
+#view-login .login-feature strong { color: #3f6678; font-size: 13px; }
+#view-login .login-feature small { color: #5f7885; font-size: 12px; }
+
+#view-login .login-card {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: clamp(28px, 4.2vw, 60px);
+  width: min(640px, calc(50vw - 120px));
+  max-width: 640px;
+  margin: 0;
+  translate: 0 -50%;
+  border: 1px solid rgba(255,255,255,.86);
+  border-radius: 22px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 28px 80px rgba(41,91,117,.18);
+}
+
+@media (min-width: 761px) and (max-width: 1259px) {
+  #view-login .login-hero-copy { width: min(260px, 25vw); }
+  #view-login .login-hero-copy h1 { font-size: 56px; }
+  #view-login .login-hero-copy p { max-width: 255px; font-size: 13px; }
+  #view-login .login-illustration {
+    top: 23%;
+    left: calc(50% - 390px);
+    width: min(290px, 40vw);
+    max-height: 45vh;
+  }
+  #view-login .login-feature-list {
+    left: clamp(28px, 4vw, 50px);
+    bottom: clamp(100px, 20vh, 150px);
+    width: min(320px, 32vw);
+    gap: 10px;
+  }
+  #view-login .login-feature span { width: 44px; height: 44px; }
+  #view-login .login-feature strong { font-size: 11px; }
+  #view-login .login-feature small { font-size: 10px; }
+  #view-login .login-card {
+    width: min(540px, calc(44vw - 62px));
+    max-width: 540px;
+    right: clamp(24px, 3vw, 42px);
+  }
+}
+
+@media (max-width: 760px), (max-height: 680px) {
+  #view-login .login-bg {
+    min-height: 100vh;
+    height: auto;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 32px 0;
+  }
+  #view-login .login-bg::before,
+  #view-login .desktop-login-brand,
+  #view-login .login-hero-copy,
+  #view-login .login-illustration,
+  #view-login .login-feature-list { display: none; }
+  #view-login .login-card {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: calc(100% - 48px);
+    max-width: 480px;
+    margin: 0 24px;
+    translate: none;
+  }
 }
