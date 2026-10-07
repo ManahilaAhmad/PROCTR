@@ -472,6 +472,72 @@ code {
   gap: 22px;
 }
 
+/* Shared PROCTR workspace styling, matched to the login's slate and ice-blue palette. */
+.dashboard-shell {
+  color-scheme: light;
+  --workspace-ink: #284957;
+  --workspace-slate: #557987;
+  --workspace-muted: #637c88;
+  --workspace-line: rgba(85, 121, 135, .15);
+  background: #eef5f8;
+  color: var(--workspace-ink);
+  text-align: left;
+}
+
+.dashboard-sidebar {
+  background: linear-gradient(180deg, #416c82 0%, #35596a 100%) !important;
+  box-shadow: 10px 0 36px rgba(41, 91, 117, .12);
+}
+.dashboard-sidebar .nav-btn { transition: background .18s ease, color .18s ease, transform .18s ease; }
+.dashboard-sidebar .nav-btn:hover { background: rgba(255,255,255,.13) !important; color: #fff !important; transform: translateX(2px); }
+.dashboard-sidebar .nav-btn[style*="background: rgb(85, 121, 135)"] { box-shadow: inset 3px 0 0 #c3d8e4; }
+
+.dashboard-page {
+  background: radial-gradient(ellipse at 92% 0%, rgba(195,216,228,.48), transparent 42%), #eef5f8 !important;
+}
+.dashboard-page .resp-page-padding { max-width: 1600px; margin: 0 auto; padding-top: 34px; padding-bottom: 40px; }
+.dashboard-page h1 { color: #35596a !important; }
+.dashboard-page h2, .dashboard-page h3, .dashboard-page h4 { color: #35596a; }
+.dashboard-page p { color: #637c88; }
+
+.dashboard-card {
+  border-color: rgba(255,255,255,.92) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 34px rgba(41,91,117,.09), inset 0 1px 0 rgba(255,255,255,.82);
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.dashboard-card:hover { box-shadow: 0 16px 38px rgba(41,91,117,.13), inset 0 1px 0 rgba(255,255,255,.92); }
+
+.dashboard-btn { border-radius: 10px !important; transition: transform .18s ease, box-shadow .18s ease, filter .18s ease !important; }
+.dashboard-btn-primary, .dashboard-btn-navy {
+  background: linear-gradient(135deg, #557987, #7899a6) !important;
+  box-shadow: 0 8px 20px rgba(63,116,139,.2), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.dashboard-btn-primary:hover, .dashboard-btn-navy:hover { transform: translateY(-1px); box-shadow: 0 11px 24px rgba(63,116,139,.27); }
+.dashboard-btn-ghost { background: rgba(255,255,255,.58) !important; border-color: rgba(85,121,135,.2) !important; color: #557987 !important; }
+.dashboard-btn-ghost:hover { background: #fff !important; }
+
+.dashboard-page input, .dashboard-page select, .dashboard-page textarea {
+  border-color: rgba(85,121,135,.2) !important;
+  border-radius: 10px !important;
+  background-color: rgba(255,255,255,.82) !important;
+  color: #284957 !important;
+  box-shadow: inset 0 1px 2px rgba(48,91,112,.04);
+}
+.dashboard-page input:focus, .dashboard-page select:focus, .dashboard-page textarea:focus {
+  outline: 3px solid rgba(85,121,135,.14);
+  border-color: #7899a6 !important;
+}
+.dashboard-page table { border-collapse: separate; border-spacing: 0; }
+.dashboard-page th { color: #557987; background: rgba(195,216,228,.22); }
+.dashboard-page td, .dashboard-page th { border-color: rgba(85,121,135,.11); }
+.dashboard-page tr:hover td { background-color: rgba(195,216,228,.14); }
+.resp-mobile-header { background: linear-gradient(110deg, #416c82, #35596a); box-shadow: 0 5px 20px rgba(41,91,117,.12); }
+
+@media (max-width: 768px) {
+  .dashboard-page .resp-page-padding { padding: 22px 16px 32px; }
+}
+
 @media (max-width: 992px) {
   .director-overview-grid {
     grid-template-columns: 1fr;

@@ -5,8 +5,9 @@ const getHost = () => {
   return 'localhost';
 };
 
-export const API_BASE_URL = `http://${getHost()}:5000/api`;
-export const SERVER_BASE_URL = `http://${getHost()}:5000`;
+const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || `${protocol}//${getHost()}:5000/api`).replace(/\/$/, '');
+export const SERVER_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
 
 export function installAuthenticatedFetch() {
   if (typeof window === 'undefined' || window.__proctrAuthenticatedFetchInstalled) return;
@@ -26,12 +27,8 @@ export function installAuthenticatedFetch() {
     const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
     try {
       const user = JSON.parse(localStorage.getItem('proctr_user') || 'null');
-      if (user?.sessionToken && !headers.has('Authorization')) {
-        headers.set('Authorization', `Bearer ${user.sessionToken}`);
-      }
-    } catch {
-      // A damaged local session is handled normally by the API's 401 response.
-    }
+      if (user?.sessionToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${user.sessionToken}`);
+    } catch {}
     return nativeFetch(input, { ...options, headers, credentials: options.credentials || 'include' });
   };
 

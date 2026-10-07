@@ -22,7 +22,6 @@ import { requireExamAccessByBody } from '../middleware/examAuthorization.js';
 
 const router = express.Router();
 router.use(requireSession);
-
 router.get('/receipt/:requestId', requireRole('student', 'admin'), getSubmissionReceipt);
 
 // Mounted at /api/submission

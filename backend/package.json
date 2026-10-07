@@ -16,7 +16,7 @@
     "create-test-course": "node createTestCourse.mjs",
     "verify-email": "node verifyEmail.mjs",
     "migrate:submissions": "node migrateSubmissionsToCloudinary.mjs",
-    "test": "node --test --test-isolation=none tests/*.test.mjs"
+    "test": "node --experimental-test-module-mocks --test --test-isolation=none"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

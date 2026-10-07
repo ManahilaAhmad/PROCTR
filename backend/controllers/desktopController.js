@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { getFileUrl } from '../middleware/upload.js';
 import { emitToSession } from '../socketRegistry.js';
-import { isAllowedLabIp } from '../middleware/labNetwork.js';
+import { isAllowedLabIp, resolveLabNetwork } from '../middleware/labNetwork.js';
 import { auditSecurityEvent, clientIp as requestClientIp } from '../middleware/security.js';
 
 /* ===========================================================
@@ -187,81 +187,66 @@ export const joinLiveSession = async (req, res) => {
     const rawIp = reqSimulatedIp || req.ip || req.socket.remoteAddress || '127.0.0.1';
     const clientIp = String(rawIp).replace('::ffff:', '').trim();
 
-    const labRes = await pool.query(
-      `SELECT l.lab_name, l.network_range
-       FROM live_exam_session les
-       JOIN exam e ON les.exam_id = e.exam_id
-       JOIN exam_schedule es ON es.exam_id = e.exam_id
-       JOIN lab l ON es.lab_id = l.lab_id
-       WHERE les.session_code = $1`,
-      [codeUpper]
-    );
+    const labNetwork = await resolveLabNetwork(codeUpper);
+    const allowedRange = String(labNetwork.network_range || '').trim();
+    const settingsResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('allow_loopback_exam_access','clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
+    const securitySettings = Object.fromEntries(settingsResult.rows.map(row => [row.setting_key, row.setting_value]));
+    const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1';
+    const isMatch = isAllowedLabIp(clientIp, allowedRange) || (securitySettings.allow_loopback_exam_access === true && isLoopback);
+    if (!isMatch) {
+      const existingRequest = await pool.query(`
+        SELECT request_id,status,requested_ip,expires_at
+        FROM network_access_request
+        WHERE live_session_id=$1 AND student_id=$2
+      `, [session.live_session_id, student_id]);
+      const existing = existingRequest.rows[0];
+      const requestIsCurrent = existing && existing.requested_ip === clientIp
+        && new Date(existing.expires_at).getTime() > Date.now();
 
-    if (labRes.rows.length > 0 && labRes.rows[0].network_range) {
-      const allowedRange = (labRes.rows[0].network_range || '').trim();
-      const labName = labRes.rows[0].lab_name || 'Assigned Lab';
-
-      if (allowedRange && allowedRange !== '*') {
-        const settingsResult = await pool.query(`SELECT setting_key,setting_value FROM system_setting WHERE setting_key IN ('allow_loopback_exam_access','clipboard_threshold_chars','focus_loss_seconds')`).catch(() => ({ rows: [] }));
-        const securitySettings = Object.fromEntries(settingsResult.rows.map(row => [row.setting_key, row.setting_value]));
-        const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1';
-        const isMatch = isAllowedLabIp(clientIp, allowedRange) || (securitySettings.allow_loopback_exam_access === true && isLoopback);
-        if (!isMatch) {
-          const existingRequest = await pool.query(`
-            SELECT request_id,status,requested_ip,expires_at
-            FROM network_access_request
-            WHERE live_session_id=$1 AND student_id=$2
-          `, [session.live_session_id, student_id]);
-          const existing = existingRequest.rows[0];
-          const requestIsCurrent = existing && existing.requested_ip === clientIp
-            && new Date(existing.expires_at).getTime() > Date.now();
-
-          if (!(requestIsCurrent && existing.status === 'APPROVED')) {
-            if (requestIsCurrent && existing.status === 'REJECTED') {
-              return res.status(403).json({
-                status: 'rejected',
-                message: 'The invigilator rejected your request to join from this network.'
-              });
-            }
-
-            const requestResult = await pool.query(`
-              INSERT INTO network_access_request
-                (live_session_id,student_id,requested_ip,allowed_network,lab_name,status,student_reason,requested_at,expires_at,decided_by,decided_at,decision_reason)
-              VALUES ($1,$2,$3,$4,$5,'PENDING',$6,NOW(),NOW() + INTERVAL '10 minutes',NULL,NULL,NULL)
-              ON CONFLICT (live_session_id,student_id) DO UPDATE
-              SET requested_ip=EXCLUDED.requested_ip,
-                  allowed_network=EXCLUDED.allowed_network,
-                  lab_name=EXCLUDED.lab_name,
-                  status=CASE
-                    WHEN network_access_request.status='PENDING'
-                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
-                     AND network_access_request.expires_at>NOW()
-                    THEN network_access_request.status ELSE 'PENDING' END,
-                  student_reason=EXCLUDED.student_reason,
-                  requested_at=CASE
-                    WHEN network_access_request.status='PENDING'
-                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
-                     AND network_access_request.expires_at>NOW()
-                    THEN network_access_request.requested_at ELSE NOW() END,
-                  expires_at=CASE
-                    WHEN network_access_request.status='PENDING'
-                     AND network_access_request.requested_ip=EXCLUDED.requested_ip
-                     AND network_access_request.expires_at>NOW()
-                    THEN network_access_request.expires_at ELSE NOW() + INTERVAL '10 minutes' END,
-                  decided_by=NULL,decided_at=NULL,decision_reason=NULL
-              RETURNING request_id,status,expires_at
-            `, [session.live_session_id, student_id, clientIp, allowedRange, labName, String(req.body?.network_reason || '').trim().slice(0, 500) || null]);
-            const accessRequest = requestResult.rows[0];
-            emitToSession(codeUpper, 'network_access_request', { requestId: accessRequest.request_id });
-            await auditSecurityEvent(req, { eventType: 'NETWORK_ACCESS_REQUESTED', outcome: 'INFO', objectType: 'exam', objectId: session.exam_id, metadata: { requestedIp: clientIp, allowedRange } });
-            return res.status(202).json({
-              status: 'pending_network_approval',
-              message: `Your IP (${clientIp}) is outside ${allowedRange}. Waiting for the invigilator's approval.`,
-              requestId: accessRequest.request_id,
-              expiresAt: accessRequest.expires_at
-            });
-          }
+      if (!(requestIsCurrent && existing.status === 'APPROVED')) {
+        if (requestIsCurrent && existing.status === 'REJECTED') {
+          return res.status(403).json({
+            status: 'rejected',
+            message: 'The invigilator rejected your request to join from this network.'
+          });
         }
+
+        const requestResult = await pool.query(`
+          INSERT INTO network_access_request
+            (live_session_id,student_id,requested_ip,allowed_network,lab_name,status,student_reason,requested_at,expires_at,decided_by,decided_at,decision_reason)
+          VALUES ($1,$2,$3,$4,$5,'PENDING',$6,NOW(),NOW() + INTERVAL '10 minutes',NULL,NULL,NULL)
+          ON CONFLICT (live_session_id,student_id) DO UPDATE
+          SET requested_ip=EXCLUDED.requested_ip,
+              allowed_network=EXCLUDED.allowed_network,
+              lab_name=EXCLUDED.lab_name,
+              status=CASE
+                WHEN network_access_request.status='PENDING'
+                 AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                 AND network_access_request.expires_at>NOW()
+                THEN network_access_request.status ELSE 'PENDING' END,
+              student_reason=EXCLUDED.student_reason,
+              requested_at=CASE
+                WHEN network_access_request.status='PENDING'
+                 AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                 AND network_access_request.expires_at>NOW()
+                THEN network_access_request.requested_at ELSE NOW() END,
+              expires_at=CASE
+                WHEN network_access_request.status='PENDING'
+                 AND network_access_request.requested_ip=EXCLUDED.requested_ip
+                 AND network_access_request.expires_at>NOW()
+                THEN network_access_request.expires_at ELSE NOW() + INTERVAL '10 minutes' END,
+              decided_by=NULL,decided_at=NULL,decision_reason=NULL
+          RETURNING request_id,status,expires_at
+        `, [session.live_session_id, student_id, clientIp, allowedRange, labNetwork.lab_name, String(req.body?.network_reason || '').trim().slice(0, 500) || null]);
+        const accessRequest = requestResult.rows[0];
+        emitToSession(codeUpper, 'network_access_request', { requestId: accessRequest.request_id });
+        await auditSecurityEvent(req, { eventType: 'NETWORK_ACCESS_REQUESTED', outcome: 'INFO', objectType: 'exam', objectId: session.exam_id, metadata: { requestedIp: clientIp, allowedRange } });
+        return res.status(202).json({
+          status: 'pending_network_approval',
+          message: `Your IP (${clientIp}) is outside ${allowedRange}. Waiting for the invigilator's approval.`,
+          requestId: accessRequest.request_id,
+          expiresAt: accessRequest.expires_at
+        });
       }
     }
 
@@ -323,7 +308,7 @@ export const joinLiveSession = async (req, res) => {
         isPaperRevealed: session.is_paper_revealed,
         isTimerStarted: session.is_timer_started,
         durationMinutes: session.duration_minutes,
-        labNetworkRange: labRes.rows[0]?.network_range || null,
+        labNetworkRange: allowedRange,
         securityPolicy
       }
     });
@@ -713,7 +698,6 @@ export const logViolation = async (req, res) => {
         title VARCHAR(255) NOT NULL,
         description TEXT,
         severity VARCHAR(20) DEFAULT 'HIGH',
-        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);

@@ -43,9 +43,9 @@ export async function getSubmissionReceipt(req, res) {
     const { rows } = await pool.query(`
       SELECT sa.*
       FROM submission_attempt sa
-      JOIN student s ON s.student_id=sa.student_id
-      WHERE sa.request_id=$1 AND ($2::boolean OR s.user_id=$3)
-    `, [req.params.requestId, isAdmin, req.sessionUser?.sub || null]);
+      WHERE sa.request_id=$1 AND ($2::boolean OR sa.student_id=COALESCE(
+        $3, (SELECT student_id FROM student WHERE user_id=$4)))
+    `, [req.params.requestId, isAdmin, req.auth?.student_id || null, req.sessionUser?.sub || null]);
     if (!rows.length) return res.status(404).json({ status: 'error', message: 'Receipt not found.' });
     if (rows[0].state === 'pending') return res.status(202).json({ status: 'pending', request_id: req.params.requestId });
     res.json(receiptResponse(rows[0]));

@@ -36,7 +36,7 @@ async function getSetting(key, fallback) {
   }
 }
 
-async function resolveLabNetwork(sessionCode) {
+export async function resolveLabNetwork(sessionCode) {
   if (sessionCode) {
     const result = await pool.query(`
       SELECT l.lab_id, l.lab_name, l.network_range
@@ -49,10 +49,10 @@ async function resolveLabNetwork(sessionCode) {
       if (error.code === '42P01') return { rows: [] };
       throw error;
     });
-    if (result.rows.length && result.rows[0].network_range) return result.rows[0];
+    if (result.rows.length && result.rows[0].network_range && result.rows[0].network_range !== '*') return result.rows[0];
   }
   const fallback = await getSetting('default_lab_cidr', process.env.LAB_NETWORK_CIDR || DEFAULT_LAB_CIDR);
-  return { lab_id: null, lab_name: 'Default lab network', network_range: fallback };
+  return { lab_id: null, lab_name: 'Default lab network', network_range: fallback || DEFAULT_LAB_CIDR };
 }
 
 export async function requireLabNetwork(req, res, next) {

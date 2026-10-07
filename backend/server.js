@@ -7,7 +7,7 @@ import multer from 'multer';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { securityHeaders, createRateLimiter, auditSecurityEvent, verifyRequestOrigin } from './middleware/security.js';
-import { extractSessionToken, validateSessionToken } from './middleware/sessionAuth.js';
+import { extractSessionToken, validateSessionToken, requireRole, requireSelfBody, requireSession } from './middleware/sessionAuth.js';
 import { userHasExamAccess } from './middleware/examAuthorization.js';
 
 // Route files (namespaced)
@@ -20,15 +20,14 @@ import studentRoutes from './routes/studentRoutes.js';
 import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import notificationsRoutes from './routes/notificationsRoutes.js';
 import desktopRoutes from './routes/desktopRoutes.js';
+import networkRoutes from './routes/networkRoutes.js';
 import proctoringRoutes from './routes/proctoringRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
 import { setIO } from './socketRegistry.js';
-import networkRoutes from './routes/networkRoutes.js';
+import { ensureSubmissionSchema } from './service/submissionSchema.js';
 import adminRoutes from './routes/adminRoutes.js';
 import examFileRoutes from './routes/examFileRoutes.js';
 import whitelistRoutes from './routes/whitelistRoutes.js';
-import { requireRole, requireSelfBody, requireSession } from './middleware/sessionAuth.js';
-import { ensureSubmissionSchema } from './service/submissionSchema.js';
 
 // Controllers (for legacy flat-path aliases)
 import { listTeachers, getSharedPapers } from './controllers/teacherController.js';
@@ -59,18 +58,46 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 };
 
+// Packaged Electron windows load from file:// and send the opaque "null"
+// origin. Accept it only when the request identifies itself as the desktop
+// client; normal browser origins still use the explicit website allowlist.
+const corsOptionsForRequest = (req, callback) => {
+  const requestedHeaders = (req.get('access-control-request-headers') || '')
+    .toLowerCase().split(',').map(header => header.trim());
+  const isDesktopRequest = req.get('x-proctr-client') === 'desktop'
+    || (req.method === 'OPTIONS' && requestedHeaders.includes('x-proctr-client'));
+  if (req.get('origin') === 'null' && isDesktopRequest) {
+    return callback(null, { ...corsOptions, origin: 'null' });
+  }
+  callback(null, corsOptions);
+};
+
 // ── Core Middleware ─────────────────────────────────────────
 app.use(securityHeaders);
-app.use(cors(corsOptions));
+app.use(cors(corsOptionsForRequest));
 app.use(verifyRequestOrigin(configuredOrigins));
-// Desktop submissions contain Base64 file contents; allow the larger upload
-// body while keeping the default API body limit smaller.
-app.use('/api/submission/upload', express.json({ limit: '64mb', strict: true }));
+// Desktop sends base64 files in JSON (40 MB decoded total plus encoding).
+app.use('/api/submission/upload', express.json({ limit: '64mb' }));
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb', strict: true }));
 app.use(createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 600 }));
 
-// Submission paths are never public; ownership-checked API routes deliver them.
-app.use('/uploads/submissions', (req, res) => res.status(404).json({ status: 'error', message: 'File not found.' }));
+// Serve uploaded exam papers statically
+app.use('/uploads', (req, res, next) => {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(req.path).replace(/\\/g, '/');
+  } catch {
+    return res.sendStatus(400);
+  }
+  // Match the path that static serving resolves, including encoded separators
+  // and Windows aliases such as "submissions." or "submissions ".
+  const normalizedPath = path.posix.normalize(decodedPath);
+  const firstSegment = normalizedPath.split('/').find(Boolean) || '';
+  if (firstSegment.replace(/[. ]+$/g, '').toLowerCase() === 'submissions') {
+    return res.sendStatus(404);
+  }
+  next();
+});
 // Local fallback files also require a valid account. Cloudinary deployments
 // should use authenticated/private delivery for equivalent protection.
 app.use('/uploads', requireSession, express.static(path.join(__dirname, 'uploads')));
@@ -126,14 +153,8 @@ pool.query(`
       ALTER TABLE user_notification ADD CONSTRAINT user_notification_notification_type_check
       CHECK (notification_type IN ('Exam','Schedule','Approved','AI','MOSS','Invigilation','System'));
     END IF;
-
-    ALTER TABLE student ADD COLUMN IF NOT EXISTS section_id INT;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'student_section_fk') THEN
-      ALTER TABLE student ADD CONSTRAINT student_section_fk FOREIGN KEY (section_id) REFERENCES section(section_id);
-    END IF;
   END $$;
 `).catch(err => console.log("Database constraint check:", err.message));
-ensureSubmissionSchema().catch(err => console.log('Submission schema check:', err.message));
 
 // ── Primary Namespaced Routes ───────────────────────────────
 app.use('/api/auth', authRoutes);
@@ -170,7 +191,10 @@ app.get('/api/director/papers', requireSession, requireRole('director', 'admin')
 
 // ── Multer Error Handler ────────────────────────────────────
 app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError || err?.message?.includes('files are allowed') || err?.message?.includes('Starter code must') || err?.message?.includes('Question papers and rubrics')) {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ status: 'error', message: 'Submission is too large. Submit at most 40 MB of files in total.' });
+  }
+  if (err instanceof multer.MulterError || err?.message?.includes('PDF and DOCX') || err?.message?.includes('files are allowed') || err?.message?.includes('Starter code must') || err?.message?.includes('Question papers and rubrics')) {
     return res.status(400).json({ status: 'error', message: err.message });
   }
   if (err?.message?.includes('CORS policy')) {
@@ -192,8 +216,18 @@ app.use((err, req, res, next) => {
 // reports a hard violation — no polling delay.
 const httpServer = createServer(app);
 
+const socketCorsOptions = {
+  ...corsOptions,
+  origin(origin, callback) {
+    // Electron's file:// renderer has an opaque null origin. Socket access is
+    // still protected by the authenticated session token in the handshake.
+    if (origin === 'null') return callback(null, 'null');
+    return corsOptions.origin(origin, callback);
+  },
+};
+
 const io = new SocketIOServer(httpServer, {
-  cors: corsOptions
+  cors: socketCorsOptions
 });
 
 io.use(async (socket, next) => {
@@ -258,6 +292,7 @@ io.on('connection', (socket) => {
 setIO(io);
 
 // ── Start Server ────────────────────────────────────────────
-httpServer.listen(PORT, () => {
+await ensureSubmissionSchema();
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`PROCTR Backend Server (HTTP + Socket.IO) is listening on port ${PORT}`);
 });

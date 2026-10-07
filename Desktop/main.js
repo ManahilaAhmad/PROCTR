@@ -117,40 +117,33 @@ function createWindow() {
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  // Intercept window close to warn student
-  examWindow.on('close', async (e) => {
-    if (quitting || examWindow.__allowClose) return;
-    e.preventDefault();
-    if (examWindow.__closePromptOpen) return;
-    examWindow.__closePromptOpen = true;
-    try {
-      if (activeSubmissions.has(examWindow.webContents.id)) {
-        const answer = await dialog.showMessageBox(examWindow, {
+  // An active exam must be ended through the exam workflow before the window
+  // can close. Keep this check in the main process so it also covers Alt+F4.
+  examWindow.on('close', (e) => {
+    if (examWindow.__allowClose) return;
+    if (activeSubmissions.has(examWindow.webContents.id)) {
+      e.preventDefault();
+      if (!examWindow.__activeExamCloseNotice) {
+        examWindow.__activeExamCloseNotice = true;
+        void dialog.showMessageBox(examWindow, {
           type: 'warning',
-          buttons: ['Stay in exam', 'Close exam'],
-          defaultId: 0,
-          cancelId: 0,
-          noLink: true,
-          message: 'Are you sure you want to close the exam?',
-          detail: 'Closing PROCTR will interrupt your active exam session. Choose “Stay in exam” to continue working.'
-        });
-        if (answer.response !== 1) return;
+          title: 'Exam in progress',
+          message: 'PROCTR cannot close while your exam session is active.',
+          detail: 'Wait for the invigilator to end the session, then submit your work and leave the exam environment.'
+        }).finally(() => { examWindow.__activeExamCloseNotice = false; });
       }
-
-      try { backupActiveSubmission(examWindow.webContents.id); }
-      catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
-      stopSensors();
-      if (submissionQueue.hasPending()) {
-        examWindow.hide();
-        showQueueStatus();
-        void flushSubmissions();
-      } else {
-        examWindow.__allowClose = true;
-        examWindow.close();
-      }
-    } finally {
-      examWindow.__closePromptOpen = false;
+      return;
     }
+    if (quitting) return;
+    e.preventDefault();
+    try { backupActiveSubmission(examWindow.webContents.id); }
+    catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
+    stopSensors();
+    if (submissionQueue.hasPending()) {
+      examWindow.hide();
+      showQueueStatus();
+      void flushSubmissions();
+    } else { examWindow.__allowClose = true; examWindow.close(); }
   });
   examWindow.on('closed', () => {
     activeSubmissions.delete(webContentsId);

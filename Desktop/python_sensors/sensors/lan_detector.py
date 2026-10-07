@@ -133,33 +133,7 @@ class LANDetector:
     def _ip_in_allowed_networks(self, ip_str, netmask=None):
         try:
             ip_obj = ipaddress.IPv4Address(ip_str)
-            # First quick check: if any allowed network contains the IP
-            for net in self.allowed_networks:
-                if ip_obj in net:
-                    return True
-
-            # If netmask is provided, check the interface network against allowed networks
-            if netmask:
-                try:
-                    # Convert netmask to prefix length if necessary
-                    if '/' not in netmask and netmask.count('.') == 3:
-                        # netmask like '255.255.0.0' -> determine prefix
-                        prefixlen = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-                        iface_net = ipaddress.IPv4Network(f"{ip_str}/{prefixlen}", strict=False)
-                    elif '/' in netmask:
-                        iface_net = ipaddress.IPv4Network(f"{ip_str}{netmask}", strict=False)
-                    else:
-                        # fallback assume /32
-                        iface_net = ipaddress.IPv4Network(f"{ip_str}/32", strict=False)
-
-                    for net in self.allowed_networks:
-                        # allow if interface network is wholly within allowed net or overlaps
-                        if iface_net.subnet_of(net) or iface_net.overlaps(net):
-                            return True
-                except Exception:
-                    pass
-
-            return False
+            return any(ip_obj in net for net in self.allowed_networks)
         except Exception:
             return False
 
