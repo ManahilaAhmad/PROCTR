@@ -3,7 +3,11 @@ import express from "express";
 import {
     getLabs,
     getApprovedExams,
+    getSchedulableOfferings,
     getSchedule,
+    createIndependentTimetable,
+    updateIndependentTimetable,
+    deleteIndependentTimetable,
     createSchedule,
     updateSchedule,
     deleteSchedule,
@@ -30,12 +34,19 @@ router.get("/labs/available", getAvailableLabs);
 =========================================================== */
 
 router.get("/exams/approved", getApprovedExams);
+router.get("/schedule-options", getSchedulableOfferings);
 
 /* ===========================================================
    SCHEDULE
 =========================================================== */
 
 router.get("/schedule", getSchedule);
+
+router.post("/timetable", createIndependentTimetable);
+
+router.put("/timetable/:timetable_id", updateIndependentTimetable);
+
+router.delete("/timetable/:timetable_id", deleteIndependentTimetable);
 
 router.post("/schedule", createSchedule);
 

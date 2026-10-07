@@ -217,7 +217,7 @@ export default function LoginPage({ setPage, setRole, setUser }) {
             student: "student",
             teacher: "teacher",
             hod: "hod",
-            director: "director",
+            director: "dir-timetable",
             coordinator: "coordinator",
             dec: "dec",
           };

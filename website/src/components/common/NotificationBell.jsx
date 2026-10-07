@@ -4,7 +4,7 @@ import { C } from "../../theme/colors";
 import { Icon } from "../../theme/icons";
 import { API_BASE_URL } from "../../config/apiConfig";
 
-export default function NotificationBell({ userId }) {
+export default function NotificationBell({ userId, accentColor = C.teal, accentLight = C.tealLight }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -205,7 +205,7 @@ export default function NotificationBell({ userId }) {
               {unreadCount > 0 && (
                 <button
                   onClick={markAllRead}
-                  style={{ border: "none", background: "none", color: C.teal, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  style={{ border: "none", background: "none", color: accentColor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
                 >
                   Mark all read
                 </button>
@@ -253,7 +253,7 @@ export default function NotificationBell({ userId }) {
                       padding: "12px 16px",
                       borderBottom: `1px solid ${C.grey100}`,
                       cursor: "pointer",
-                      background: n.is_read ? C.white : C.tealLight,
+                      background: n.is_read ? C.white : accentLight,
                     }}
                   >
                     <div
@@ -277,7 +277,7 @@ export default function NotificationBell({ userId }) {
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                         <span style={{ fontWeight: 700, fontSize: 13, color: C.navy }}>{n.title}</span>
                         {!n.is_read && (
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.teal, flexShrink: 0, marginTop: 4 }} />
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: accentColor, flexShrink: 0, marginTop: 4 }} />
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: C.grey400, marginTop: 1 }}>
@@ -363,8 +363,8 @@ export default function NotificationBell({ userId }) {
                     width: 40,
                     height: 40,
                     borderRadius: "50%",
-                    background: expanded.source === "personal" ? C.grey200 : C.tealLight,
-                    color: expanded.source === "personal" ? C.grey500 : C.teal,
+                    background: expanded.source === "personal" ? C.grey200 : accentLight,
+                    color: expanded.source === "personal" ? C.grey500 : accentColor,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",

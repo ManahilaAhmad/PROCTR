@@ -110,7 +110,7 @@ export async function validateSessionToken(token, requestContext = null) {
   const session = decodeAndVerifyToken(token);
   const result = await pool.query(`
     SELECT u.user_type,u.is_active,u.session_version,
-           ss.revoked_at,ss.expires_at,ss.token_hash,ss.last_ip,ss.user_agent
+           ss.revoked_at,ss.expires_at,ss.token_hash,ss.last_ip,ss.user_agent,ss.client_type
     FROM security_session ss
     JOIN users u ON u.user_id=ss.user_id
     WHERE ss.session_id=$1 AND ss.user_id=$2
@@ -125,7 +125,11 @@ export async function validateSessionToken(token, requestContext = null) {
   if (requestContext) {
     const ip = clientIp(requestContext);
     const currentUserAgent = String(requestContext.get?.('user-agent') || '').slice(0, 500) || null;
-    if (process.env.STRICT_SESSION_USER_AGENT !== 'false' && current.user_agent && currentUserAgent && current.user_agent !== currentUserAgent) {
+    // Electron's main-process submission queue uses Node's user-agent, not the
+    // renderer user-agent captured at desktop login. The signed session token
+    // still authenticates that request, so only browser sessions bind to UA.
+    if (current.client_type !== 'desktop' && process.env.STRICT_SESSION_USER_AGENT !== 'false'
+        && current.user_agent && currentUserAgent && current.user_agent !== currentUserAgent) {
       await pool.query(`UPDATE security_session SET revoked_at=NOW(),revoke_reason='USER_AGENT_CHANGED' WHERE session_id=$1`, [session.sid]);
       throw new Error('Session client changed');
     }

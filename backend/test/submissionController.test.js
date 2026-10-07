@@ -292,13 +292,62 @@ test('teacher file listing exposes file metadata and report availability from th
   });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.submission.has_report, true);
-  assert.deepEqual(res.body.files, [
+  assert.equal(res.body.submissions.length, 1);
+  assert.equal(res.body.submissions[0].has_report, true);
+  assert.deepEqual(res.body.submissions[0].files, [
     { relative_path: 'src/answer.txt', file_size: 6 },
     { relative_path: 'empty.txt', file_size: 0 }
   ]);
+  assert.deepEqual(res.body.submissions[0], {
+    submission_id: 44,
+    exam_id: undefined,
+    exam_type: undefined,
+    submitted_at: '2026-09-25T12:00:00.000Z',
+    has_report: true,
+    migration_required: false,
+    files: [
+      { relative_path: 'src/answer.txt', file_size: 6 },
+      { relative_path: 'empty.txt', file_size: 0 }
+    ]
+  });
   assert.match(state.poolQueries[1].sql, /submission_manifest/);
   assert.deepEqual(state.poolQueries[1].values, ['55', '22']);
+});
+
+test('teacher file listing keeps each exam submission and security report separate', async () => {
+  const first = storedSubmission({ exam_id: 11, exam_type: 'Midterm' });
+  const secondManifest = manifest('submissions/second');
+  const second = storedSubmission({
+    submission_id: 45,
+    exam_id: 12,
+    exam_type: 'Final',
+    submitted_at: '2026-09-26T12:00:00.000Z',
+    submission_manifest: secondManifest
+  });
+  state.poolReplies = [[{ teacher_id: 33 }], [first, second]];
+  const res = await invoke('getStudentSubmissionFiles', {
+    params: { teacherId: '33', courseOfferingId: '55', studentId: '22' }
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.submissions.map(item => [item.submission_id, item.exam_type, item.has_report]), [
+    [44, 'Midterm', true],
+    [45, 'Final', true]
+  ]);
+  assert.deepEqual(state.poolQueries[1].values, ['55', '22']);
+});
+
+test('teacher file listing marks legacy submissions without hiding cloud-backed submissions', async () => {
+  const legacy = storedSubmission({ submission_id: 46, submission_manifest: null });
+  state.poolReplies = [[{ teacher_id: 33 }], [legacy, storedSubmission()]];
+  const res = await invoke('getStudentSubmissionFiles', {
+    params: { teacherId: '33', courseOfferingId: '55', studentId: '22' }
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.submissions.map(item => item.migration_required), [true, false]);
+  assert.deepEqual(res.body.submissions[0].files, []);
+  assert.equal(res.body.submissions[1].files.length, 2);
 });
 
 test('student file listing is scoped to the student and excludes private cloud/report metadata', async () => {
@@ -318,11 +367,16 @@ test('student file listing is scoped to the student and excludes private cloud/r
 });
 
 test('student lab listing queries only the requested student', async () => {
-  state.poolReplies = [[{ course_offering_id: 55, course_code: 'CS101', course_title: 'Programming', section_name: 'A', submitted_at: '2026-09-25' }]];
+  state.poolReplies = [[{
+    course_id: 7, course_offering_id: 55, course_code: 'CS101',
+    course_title: 'Programming', section_name: 'A', submitted_at: '2026-09-25',
+    submission_id: null
+  }]];
   const res = await invoke('getStudentOwnLabs', { params: { studentId: '22' } });
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.labs[0].course_offering_id, 55);
+  assert.equal(res.body.courses[0].course_id, 7);
+  assert.deepEqual(res.body.courses[0].submissions, []);
   assert.deepEqual(state.poolQueries[0].values, ['22']);
   assert.match(state.poolQueries[0].sql, /ss\.student_id\s*=\s*\$1/);
 });
@@ -418,7 +472,7 @@ for (const handler of ['downloadFile', 'downloadReport']) {
   });
 }
 
-for (const handler of ['getStudentSubmissionFiles', 'getStudentOwnFiles', 'downloadFile', 'downloadReport']) {
+for (const handler of ['getStudentOwnFiles', 'downloadFile', 'downloadReport']) {
   test(`${handler} returns a migration conflict for legacy local storage`, async () => {
     const legacy = storedSubmission({ submission_manifest: null, submission_path: 'C:\\old-server\\uploads\\submission' });
     state.poolReplies = handler === 'getStudentSubmissionFiles' ? [[{ teacher_id: 33 }], [legacy]] : [[legacy]];

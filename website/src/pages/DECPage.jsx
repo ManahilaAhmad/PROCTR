@@ -2,15 +2,127 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/colors";
 import { Icon } from "../theme/icons";
 import PageWrap from "../components/common/PageWrap";
-import Tabs from "../components/common/Tabs";
 import Card from "../components/common/Card";
 import Btn from "../components/common/Btn";
 import Table from "../components/common/Table";
 import StatCard from "../components/common/StatCard";
 import Badge from "../components/common/Badge";
-import statusBadge from "../components/common/statusBadge";
+import Tabs from "../components/common/Tabs";
 import Select from "../components/common/Select";
 import { API_BASE_URL } from "../config/apiConfig";
+
+const decAccent = "#557987";
+const decAccentLight = "#e5f0f4";
+
+function decStatusBadge(status) {
+  const labels = {
+    Approved: "Approved",
+    Rejected: "Rejected",
+    Pending: "Pending",
+    Confirmed: "Confirmed",
+    Draft: "Draft",
+    Completed: "Completed",
+    Upcoming: "Upcoming",
+  };
+  return <Badge color={decAccent} bg={decAccentLight}>{labels[status] || status || "Unknown"}</Badge>;
+}
+
+const decWorkspaceStyles = `
+  .dec-workspace {
+    position: relative;
+    isolation: isolate;
+    background: transparent !important;
+  }
+  .dec-workspace::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 16% 18%, rgba(255,255,255,.92), transparent 28%),
+      radial-gradient(circle at 84% 12%, rgba(85,121,135,.16), transparent 24%),
+      linear-gradient(90deg, #fff 0%, #fff 42%, #eef7fa 58%, #c3d8e4 100%);
+  }
+  .dec-workspace .proctr-page-wrap { background: transparent !important; }
+  .dec-workspace .resp-page-padding {
+    width: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 36px 40px 48px;
+    box-sizing: border-box;
+  }
+  .dec-workspace h1,
+  .dec-workspace h2,
+  .dec-workspace h3,
+  .dec-workspace h4 {
+    color: ${decAccent} !important;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+  }
+  .dec-workspace p,
+  .dec-workspace label,
+  .dec-workspace input,
+  .dec-workspace select,
+  .dec-workspace button { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important; }
+  .dec-workspace .proctr-card {
+    background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(255,255,255,.56)) !important;
+    border: 1px solid rgba(255,255,255,.86) !important;
+    box-shadow: 0 22px 55px rgba(41,91,117,.16), inset 0 1px 0 rgba(255,255,255,.96) !important;
+    backdrop-filter: blur(20px) saturate(135%);
+    -webkit-backdrop-filter: blur(20px) saturate(135%);
+  }
+  .dec-workspace .proctr-card input,
+  .dec-workspace .proctr-card select,
+  .dec-workspace .proctr-card textarea {
+    background: rgba(255,255,255,.5) !important;
+    border-color: rgba(255,255,255,.9) !important;
+    border-radius: 11px !important;
+    box-shadow: inset 0 1px 2px rgba(48,91,112,.06), 0 7px 22px rgba(47,110,139,.14);
+    outline: none;
+  }
+  .dec-workspace .proctr-card input:focus,
+  .dec-workspace .proctr-card select:focus,
+  .dec-workspace .proctr-card textarea:focus {
+    border-color: rgba(85,121,135,.62) !important;
+    box-shadow: 0 0 0 3px rgba(85,121,135,.12), 0 7px 22px rgba(47,110,139,.18);
+  }
+  .dec-workspace .proctr-btn-primary,
+  .dec-workspace .proctr-btn-navy {
+    background: linear-gradient(135deg, #557987 0%, #7899a6 100%) !important;
+    color: #fff !important;
+    box-shadow: 0 10px 24px rgba(47,110,139,.18);
+  }
+  .dec-workspace .proctr-tab.active {
+    color: ${decAccent} !important;
+    border-bottom-color: ${decAccent} !important;
+  }
+  .dec-workspace .proctr-card button {
+    border-radius: 11px !important;
+    font-size: 13px;
+    font-weight: 700;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .dec-workspace .proctr-badge-default {
+    background: ${decAccentLight} !important;
+    color: ${decAccent} !important;
+  }
+  .dec-workspace table thead th {
+    color: ${decAccent} !important;
+    border-bottom-color: rgba(255,255,255,.9) !important;
+  }
+  .dec-workspace table thead tr { background: rgba(255,255,255,.42) !important; }
+  .dec-workspace table tbody tr:hover { background: rgba(255,255,255,.34); }
+  .dec-workspace table td { border-bottom-color: rgba(255,255,255,.65) !important; }
+  .dec-workspace .dec-section-heading {
+    padding: 18px 22px;
+    border-bottom: 1px solid rgba(85,121,135,.16);
+    color: #1a2b4b;
+    font-weight: 800;
+  }
+  @media (max-width: 768px) {
+    .dec-workspace .resp-page-padding { padding: 20px 16px 32px; }
+  }
+`;
 
 // ── Main Component ───────────────────────────────────────────────────
 export default function DECPage({ activePage, setPage, user }) {
@@ -63,7 +175,7 @@ export default function DECPage({ activePage, setPage, user }) {
   // toast
   const [toast, setToast] = useState(null);
 
-  function showToast(msg, color = C.teal) {
+  function showToast(msg, color = decAccent) {
     setToast({ msg, color });
     setTimeout(() => setToast(null), 3000);
   }
@@ -105,10 +217,10 @@ export default function DECPage({ activePage, setPage, user }) {
   // Helper badge
   function swapStatusBadge(status) {
     if (status === "Approved")
-      return <Badge color={C.green} bg={C.greenLight}>Approved</Badge>;
+      return <Badge color={decAccent} bg={decAccentLight}>Approved</Badge>;
     if (status === "Rejected")
-      return <Badge color={C.red} bg={C.redLight}>Rejected</Badge>;
-    return <Badge color={C.amber} bg={C.amberLight}>Pending</Badge>;
+      return <Badge color={decAccent} bg={decAccentLight}>Rejected</Badge>;
+    return <Badge color={decAccent} bg={decAccentLight}>Pending</Badge>;
   }
 
   // ── Approve / Reject swap ───────────────────────────────────────
@@ -131,9 +243,9 @@ export default function DECPage({ activePage, setPage, user }) {
       .then(data => {
         if (data.status === "success") {
           if (decision === "Approved") {
-            showToast(`Swap approved — ${swapTarget?.replacement_name || "replacement"} assigned`, C.green);
+            showToast(`Swap approved — ${swapTarget?.replacement_name || "replacement"} assigned`);
           } else {
-            showToast("Swap request rejected", C.red);
+            showToast("Swap request rejected");
           }
           setShowSwapDetail(false);
           fetchData();
@@ -167,9 +279,11 @@ export default function DECPage({ activePage, setPage, user }) {
 
   return (
     <PageWrap
+      className="dec-workspace"
       title="Departmental Exam Committee"
       subtitle="Manage lab exam invigilation, assignments, and swap approvals"
     >
+      <style>{decWorkspaceStyles}</style>
       {/* ── Toast ── */}
       {toast && (
         <div
@@ -301,11 +415,11 @@ export default function DECPage({ activePage, setPage, user }) {
                   width: 40,
                   height: 40,
                   borderRadius: 10,
-                  background: C.amberLight,
+                  background: decAccentLight,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: C.amber,
+                  color: decAccent,
                 }}
               >
                 {Icon.bell}
@@ -381,8 +495,8 @@ export default function DECPage({ activePage, setPage, user }) {
                   style={{
                     flex: 1,
                     justifyContent: "center",
-                    borderColor: C.red,
-                    color: C.red,
+                    borderColor: decAccent,
+                    color: decAccent,
                   }}
                   onClick={() => handleSwapDecision("Rejected")}
                 >
@@ -393,7 +507,7 @@ export default function DECPage({ activePage, setPage, user }) {
                   style={{
                     flex: 1,
                     justifyContent: "center",
-                    background: C.green,
+                    background: decAccent,
                   }}
                   onClick={() => handleSwapDecision("Approved")}
                 >
@@ -433,22 +547,22 @@ export default function DECPage({ activePage, setPage, user }) {
               label="Invigilators Assigned"
               value={assigned}
               icon={Icon.userCheck}
-              accent={C.green}
-              light={C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
             <StatCard
               label="Coverage Gap"
               value={unassigned}
               icon={Icon.alertTriangle}
-              accent={unassigned > 0 ? C.red : C.green}
-              light={unassigned > 0 ? C.redLight : C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
             <StatCard
               label="Pending Swaps"
               value={pendingSwaps}
               icon={Icon.bell}
-              accent={pendingSwaps > 0 ? C.amber : C.green}
-              light={pendingSwaps > 0 ? C.amberLight : C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
           </div>
 
@@ -471,10 +585,8 @@ export default function DECPage({ activePage, setPage, user }) {
                   fontSize: 22,
                   color:
                     coveragePct === 100
-                      ? C.green
-                      : coveragePct >= 60
-                      ? C.amber
-                      : C.red,
+                      ? decAccent
+                      : decAccent,
                 }}
               >
                 {coveragePct}%
@@ -494,10 +606,8 @@ export default function DECPage({ activePage, setPage, user }) {
                   width: `${coveragePct}%`,
                   background:
                     coveragePct === 100
-                      ? C.green
-                      : coveragePct >= 60
-                      ? C.amber
-                      : C.red,
+                      ? decAccent
+                      : decAccent,
                   borderRadius: 99,
                   transition: "width .6s cubic-bezier(.22,.68,0,1.2)",
                 }}
@@ -506,7 +616,7 @@ export default function DECPage({ activePage, setPage, user }) {
             <p style={{ margin: "10px 0 0", fontSize: 13, color: C.grey500 }}>
               {assigned} of {totalExams} exams have an assigned invigilator
               {unassigned > 0 && (
-                <span style={{ color: C.red, fontWeight: 700 }}>
+                <span style={{ color: decAccent, fontWeight: 700 }}>
                   {" "}
                   — {unassigned} exam{unassigned > 1 ? "s" : ""} still need
                   {unassigned === 1 ? "s" : ""} assignment
@@ -519,8 +629,8 @@ export default function DECPage({ activePage, setPage, user }) {
             <Card
               style={{
                 marginBottom: 24,
-                border: `1.5px solid ${C.amberLight}`,
-                background: "#fffef7",
+                border: `1.5px solid ${decAccentLight}`,
+                background: "rgba(255,255,255,.62)",
               }}
             >
               <div
@@ -531,13 +641,13 @@ export default function DECPage({ activePage, setPage, user }) {
                   marginBottom: 16,
                 }}
               >
-                <span style={{ color: C.amber }}>{Icon.bell}</span>
+                <span style={{ color: decAccent }}>{Icon.bell}</span>
                 <h3
                   style={{ margin: 0, fontWeight: 800, color: C.navy, fontSize: 15 }}
                 >
                   Pending Swap Requests
                 </h3>
-                <Badge color={C.amber} bg={C.amberLight}>
+                <Badge color={decAccent} bg={decAccentLight}>
                   {pendingSwaps} pending
                 </Badge>
               </div>
@@ -552,7 +662,7 @@ export default function DECPage({ activePage, setPage, user }) {
                         justifyContent: "space-between",
                         alignItems: "center",
                         padding: "12px 16px",
-                        background: C.amberLight,
+                        background: decAccentLight,
                         borderRadius: 9,
                       }}
                     >
@@ -622,7 +732,7 @@ export default function DECPage({ activePage, setPage, user }) {
                         width: 32,
                         height: 32,
                         borderRadius: "50%",
-                        background: C.teal,
+                        background: decAccent,
                         color: C.white,
                         display: "flex",
                         alignItems: "center",
@@ -650,7 +760,7 @@ export default function DECPage({ activePage, setPage, user }) {
                       </div>
                     </div>
                   </div>
-                  <Badge color={C.teal} bg={C.tealLight}>Available</Badge>
+                  <Badge color={decAccent} bg={decAccentLight}>Available</Badge>
                 </div>
               ))}
             </div>
@@ -673,15 +783,15 @@ export default function DECPage({ activePage, setPage, user }) {
               label="Confirmed"
               value={assignments.filter((a) => a.status === "Confirmed").length}
               icon={Icon.check}
-              accent={C.green}
-              light={C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
             <StatCard
               label="Pending / Draft"
               value={assignments.filter((a) => a.status !== "Confirmed").length}
               icon={Icon.bell}
-              accent={C.amber}
-              light={C.amberLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
           </div>
           <Card style={{ padding: 0, overflow: "hidden" }}>
@@ -708,7 +818,7 @@ export default function DECPage({ activePage, setPage, user }) {
                 `${(s?.start_time || "--:--").substring(0, 5)} - ${(s?.end_time || "--:--").substring(0, 5)}`,
                 s?.lab_name || "N/A",
                 s?.capacity || 0,
-                statusBadge(s?.status),
+                decStatusBadge(s?.status),
               ])}
             />
           </Card>
@@ -730,15 +840,15 @@ export default function DECPage({ activePage, setPage, user }) {
               label="Assigned"
               value={assigned}
               icon={Icon.userCheck}
-              accent={C.green}
-              light={C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
             <StatCard
               label="Unassigned"
               value={unassigned}
               icon={Icon.alertTriangle}
-              accent={unassigned > 0 ? C.red : C.green}
-              light={unassigned > 0 ? C.redLight : C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
           </div>
           <Card style={{ padding: 0, overflow: "hidden" }}>
@@ -768,7 +878,7 @@ export default function DECPage({ activePage, setPage, user }) {
                         width: 24,
                         height: 24,
                         borderRadius: "50%",
-                        background: C.teal,
+                        background: decAccent,
                         color: C.white,
                         display: "inline-flex",
                         alignItems: "center",
@@ -790,7 +900,7 @@ export default function DECPage({ activePage, setPage, user }) {
                     </span>
                   </span>
                 ) : (
-                  <span style={{ color: C.red, fontWeight: 700 }}>⚠ Unassigned</span>
+                  <span style={{ color: decAccent, fontWeight: 700 }}>⚠ Unassigned</span>
                 ),
                 <span
                   style={{ fontSize: 12, color: C.grey500, fontStyle: "italic" }}
@@ -821,15 +931,15 @@ export default function DECPage({ activePage, setPage, user }) {
               label="Pending"
               value={pendingSwaps}
               icon={Icon.alertTriangle}
-              accent={pendingSwaps > 0 ? C.amber : C.green}
-              light={pendingSwaps > 0 ? C.amberLight : C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
             <StatCard
               label="Resolved"
               value={swapRequests.filter((r) => r.dec_status !== "Pending").length}
               icon={Icon.checkCircle}
-              accent={C.green}
-              light={C.greenLight}
+              accent={decAccent}
+              light={decAccentLight}
             />
           </div>
 
@@ -854,7 +964,7 @@ export default function DECPage({ activePage, setPage, user }) {
                 <span style={{ fontWeight: 600, color: C.grey800, fontSize: 13 }}>
                   {req?.requester_name || "Teacher"}
                 </span>,
-                <span style={{ fontWeight: 700, color: C.teal, fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: decAccent, fontSize: 13 }}>
                   {req?.replacement_name || "Teacher"}
                 </span>,
                 <span

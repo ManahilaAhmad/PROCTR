@@ -1,11 +1,11 @@
 import express from 'express';
-import { getSubmissionReceipt } from '../service/submissionReceipts.js';
 import {
   uploadSubmission,
   getTeacherLabs,
   getLabStudents,
   getStudentSubmissionFiles,
   getStudentOwnLabs,
+  getStudentOwnSubmissionFiles,
   getStudentOwnFiles,
   downloadFile,
   downloadReport
@@ -22,8 +22,6 @@ import { requireExamAccessByBody } from '../middleware/examAuthorization.js';
 
 const router = express.Router();
 router.use(requireSession);
-router.get('/receipt/:requestId', requireRole('student'), getSubmissionReceipt);
-
 router.get('/receipt/:requestId', requireRole('student', 'admin'), getSubmissionReceipt);
 
 // Mounted at /api/submission
@@ -39,6 +37,7 @@ router.get('/teacher/:teacherId/report/:submissionId', requireOwnTeacherProfile(
 
 // Student browsing: their own submitted labs → files (no report exposed)
 router.get('/student/:studentId/labs', requireOwnStudentProfile(), getStudentOwnLabs);
+router.get('/student/:studentId/submission/:submissionId/files', requireOwnStudentProfile(), getStudentOwnSubmissionFiles);
 router.get('/student/:studentId/lab/:courseOfferingId/files', requireOwnStudentProfile(), getStudentOwnFiles);
 
 // Shared: download an individual file (path-based — pass ?relativePath=...&teacherId=... or &studentId=...)

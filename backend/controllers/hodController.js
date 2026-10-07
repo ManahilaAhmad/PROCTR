@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import { getFileUrl } from '../middleware/upload.js';
+import ensureCoordinatorTimetableSchema from '../service/coordinatorTimetableSchema.js';
 
 async function getHodDepartmentId(req) {
   if (req.sessionUser?.role === 'admin') return null;
@@ -77,6 +78,41 @@ export const reviewExam = async (req, res) => {
       return res.status(404).json({ status: 'error', message: 'Exam paper was not found in your department.' });
     }
 
+    let scheduleLinkWarning = null;
+    let independentTimetableLinked = false;
+    if (newStatus === 'Approved') {
+      try {
+        await ensureCoordinatorTimetableSchema();
+        const planned = await pool.query(`
+          SELECT cet.timetable_id,cet.lab_id,cet.coordinator_id,cet.exam_date,cet.start_time,cet.end_time,e.exam_id
+          FROM coordinator_exam_timetable cet
+          JOIN exam e ON e.course_offering_id=cet.course_offering_id AND e.exam_type=cet.exam_type
+          WHERE e.exam_id=$1 AND cet.status='Published' AND cet.linked_schedule_id IS NULL
+        `, [exam_id]);
+        if (planned.rowCount) {
+          const item = planned.rows[0];
+          const schedule = await pool.query(`
+            INSERT INTO exam_schedule (exam_id,lab_id,coordinator_id,exam_date,start_time,end_time,status)
+            VALUES ($1,$2,$3,$4,$5,$6,'Published')
+            ON CONFLICT (exam_id) DO UPDATE
+            SET lab_id=EXCLUDED.lab_id,coordinator_id=EXCLUDED.coordinator_id,
+                exam_date=EXCLUDED.exam_date,start_time=EXCLUDED.start_time,
+                end_time=EXCLUDED.end_time,status='Published',updated_at=NOW()
+            RETURNING schedule_id
+          `, [item.exam_id, item.lab_id, item.coordinator_id, item.exam_date, item.start_time, item.end_time]);
+          await pool.query(`
+            UPDATE coordinator_exam_timetable
+            SET linked_exam_id=$1,linked_schedule_id=$2,updated_at=NOW()
+            WHERE timetable_id=$3
+          `, [item.exam_id, schedule.rows[0].schedule_id, item.timetable_id]);
+          independentTimetableLinked = true;
+        }
+      } catch (error) {
+        console.error('HOD approved the exam, but its independent timetable could not be linked for invigilation:', error);
+        scheduleLinkWarning = 'The paper was approved, but the timetable could not be connected to the invigilation system. Please contact an administrator.';
+      }
+    }
+
     // Notify the teacher
     try {
       const teacherRes = await pool.query(`
@@ -117,8 +153,10 @@ export const reviewExam = async (req, res) => {
               VALUES ($1, $2, $3, 'Exam')
             `, [
               row.user_id,
-              'Exam Approved — Ready to Schedule',
-              `${course_code} ${exam_type} has been approved by HOD and is ready for exam scheduling.`
+              independentTimetableLinked ? 'Exam Approved — Timetable Connected' : 'Exam Approved — Ready to Schedule',
+              independentTimetableLinked
+                ? `${course_code} ${exam_type} has been approved by HOD and its coordinator timetable is now connected to the invigilation system.`
+                : `${course_code} ${exam_type} has been approved by HOD and is ready for exam scheduling.`
             ]);
           }
         }
@@ -127,7 +165,11 @@ export const reviewExam = async (req, res) => {
       console.error('Failed to notify teacher/coordinator of HOD decision:', notifyErr);
     }
 
-    res.status(200).json({ status: 'success', message: `Exam paper ${newStatus.toLowerCase()} successfully.` });
+    res.status(200).json({
+      status: 'success',
+      message: scheduleLinkWarning || `Exam paper ${newStatus.toLowerCase()} successfully.`,
+      ...(scheduleLinkWarning ? { schedule_link_warning: scheduleLinkWarning } : {})
+    });
   } catch (error) {
     console.error('Error updating exam review:', error);
     res.status(500).json({ status: 'error', message: 'Failed to submit review decision.' });
