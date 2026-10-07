@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('proctrAPI', {
   installStarterCode: (data) => ipcRenderer.invoke('install-starter-code', data),
   downloadExamPaper: (url) => ipcRenderer.invoke('download-exam-paper', url),
   openWorkspaceFolder: (path) => ipcRenderer.invoke('open-workspace-folder', path),
+  openWordDocument: (data) => ipcRenderer.invoke('open-word-document', data),
+  markExamEnded: (sessionCode) => ipcRenderer.invoke('mark-exam-ended', sessionCode),
   setScreenProtection: (enable) => ipcRenderer.invoke('set-screen-protection', enable),
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
   writeLocalLog: (data) => ipcRenderer.invoke('write-local-log', data),

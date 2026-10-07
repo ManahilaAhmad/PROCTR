@@ -109,9 +109,24 @@ function createWindow() {
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  // Intercept window close to warn student
+  // An active exam must be ended through the exam workflow before the window
+  // can close. Keep this check in the main process so it also covers Alt+F4.
   examWindow.on('close', (e) => {
-    if (quitting || examWindow.__allowClose) return;
+    if (examWindow.__allowClose) return;
+    if (activeSubmissions.has(webContentsId)) {
+      e.preventDefault();
+      if (!examWindow.__activeExamCloseNotice) {
+        examWindow.__activeExamCloseNotice = true;
+        void dialog.showMessageBox(examWindow, {
+          type: 'warning',
+          title: 'Exam in progress',
+          message: 'PROCTR cannot close while your exam session is active.',
+          detail: 'Wait for the invigilator to end the session, then submit your work and leave the exam environment.'
+        }).finally(() => { examWindow.__activeExamCloseNotice = false; });
+      }
+      return;
+    }
+    if (quitting) return;
     e.preventDefault();
     try { backupActiveSubmission(examWindow.webContents.id); }
     catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
@@ -153,23 +168,32 @@ function startPythonSensors(examId, studentId, securityPolicy = {}, targetWebCon
   };
   pythonProcess.stdin.write(`${JSON.stringify(policyCommand)}\n`);
 
-  // Listen to JSON lines printed by Python sensors
-  pythonProcess.stdout.on('data', (data) => {
-    const lines = data.toString().split('\n');
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-      try {
-        const jsonPayload = JSON.parse(line);
-        console.log('[Sensor Event Payload]:', jsonPayload);
+  // Sensor messages are newline-delimited JSON. Keep incomplete lines between
+  // stdout chunks so a split write cannot silently drop a live log event.
+  let stdoutBuffer = '';
+  const handleSensorLine = line => {
+    line = line.trim();
+    if (!line) return;
+    try {
+      const jsonPayload = JSON.parse(line);
+      console.log('[Sensor Event Payload]:', jsonPayload);
 
-        if (targetWebContents && !targetWebContents.isDestroyed()) {
-          targetWebContents.send('sensor-event', jsonPayload);
-        }
-      } catch (err) {
-        console.log('[Python Raw Output]:', line);
+      if (targetWebContents && !targetWebContents.isDestroyed()) {
+        targetWebContents.send('sensor-event', jsonPayload);
       }
+    } catch (err) {
+      console.log('[Python Raw Output]:', line);
     }
+  };
+  pythonProcess.stdout.on('data', (data) => {
+    stdoutBuffer += data.toString('utf8');
+    const lines = stdoutBuffer.split(/\r?\n/);
+    stdoutBuffer = lines.pop() || '';
+    for (const line of lines) handleSensorLine(line);
+  });
+  pythonProcess.stdout.on('end', () => {
+    if (stdoutBuffer.trim()) handleSensorLine(stdoutBuffer);
+    stdoutBuffer = '';
   });
 
   pythonProcess.stderr.on('data', (data) => {
@@ -219,6 +243,14 @@ app.whenReady().then(() => {
     { label: 'Open backup folder', click: () => shell.openPath(submissionQueue.directory) },
     { label: 'Retry saved submissions', click: () => { for (const job of submissionQueue.jobs.values()) job.nextRetry = 0; void flushSubmissions(); } },
     { label: 'Quit', click: async () => {
+      if (activeSubmissions.size) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'warning', title: 'Exam in progress',
+          message: 'PROCTR cannot close while a student exam session is active.',
+          detail: 'Wait for the invigilator to end the session and for the student to leave the exam environment.'
+        });
+        return;
+      }
       try {
         for (const webContentsId of activeSubmissions.keys()) backupActiveSubmission(webContentsId);
       } catch (error) { dialog.showErrorBox('Submission was not saved', error.message); return; }
@@ -396,7 +428,12 @@ function getMacAddress() {
   return '00:00:00:00:00:00';
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (activeSubmissions.size) {
+    event.preventDefault();
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    return;
+  }
   for (const webContentsId of activeSubmissions.keys()) {
     try { backupActiveSubmission(webContentsId); } catch { /* Normal close reports errors; forced shutdown cannot be blocked reliably. */ }
   }
@@ -414,10 +451,23 @@ ipcMain.handle('submission-backups', event => {
 });
 ipcMain.handle('finish-exam-work', event => {
   try {
+    const activeSubmission = activeSubmissions.get(event.sender.id);
+    if (activeSubmission && !activeSubmission.examEnded) {
+      return { status: 'error', message: 'The invigilator must end the exam session before you can leave.' };
+    }
     const job = backupActiveSubmission(event.sender.id); activeSubmissions.delete(event.sender.id); stopSensors();
     void flushSubmissions();
     return { status: 'success', pending: job && job.state !== 'synced' };
   } catch (error) { return { status: 'error', message: error.message }; }
+});
+
+ipcMain.handle('mark-exam-ended', (event, sessionCode) => {
+  const activeSubmission = activeSubmissions.get(event.sender.id);
+  if (!activeSubmission || String(activeSubmission.sessionCode).toUpperCase() !== String(sessionCode || '').trim().toUpperCase()) {
+    return { status: 'error', message: 'The active exam session could not be verified.' };
+  }
+  activeSubmission.examEnded = true;
+  return { status: 'success' };
 });
 
 // IPC Handler to stop sensors manually if needed
@@ -467,7 +517,7 @@ ipcMain.handle('start-exam-workspace', async (event, { examId, studentId, course
   startPythonSensors(examId || 1, studentId || 101, securityPolicy || {}, event.sender);
     }
 
-    if (isStudent !== false) activeSubmissions.set(event.sender.id, { workspacePath, examId, studentId });
+    if (isStudent !== false) activeSubmissions.set(event.sender.id, { workspacePath, examId, studentId, sessionCode, examEnded: false });
     return {
       status: 'success',
       workspacePath: workspacePath,
@@ -527,6 +577,36 @@ ipcMain.handle('open-workspace-folder', async (event, folderPath) => {
     return { status: 'success' };
   } catch (err) {
     return { status: 'error', message: err.message };
+  }
+});
+
+// Open the authenticated exam paper in the student's registered Word handler.
+// The renderer passes bytes it already fetched using the signed-in session;
+// paths are always derived from the main-process exam workspace.
+ipcMain.handle('open-word-document', async (event, { fileName, contentBase64 } = {}) => {
+  try {
+    const activeSubmission = activeSubmissions.get(event.sender.id);
+    if (!activeSubmission) throw new Error('Join the exam before opening its question paper.');
+    const safeName = path.basename(String(fileName || 'question-paper.docx'))
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+    if (!/\.(doc|docx|rtf)$/i.test(safeName)) throw new Error('Only Word or RTF exam papers can be opened here.');
+    if (typeof contentBase64 !== 'string' || contentBase64.length > 36 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64)) {
+      throw new Error('The Word document is empty or exceeds the 25 MB limit.');
+    }
+    const documentBytes = Buffer.from(contentBase64, 'base64');
+    if (!documentBytes.length || documentBytes.length > 25 * 1024 * 1024) throw new Error('The Word document is empty or exceeds the 25 MB limit.');
+
+    const workspace = requireExamWorkspace(activeSubmission.workspacePath);
+    const documentsDir = path.join(workspace, 'exam_materials');
+    await fs.promises.mkdir(documentsDir, { recursive: true });
+    const documentPath = path.join(documentsDir, safeName);
+    await fs.promises.writeFile(documentPath, documentBytes);
+    const openError = await shell.openPath(documentPath);
+    if (openError) throw new Error(`Windows could not open this document: ${openError}`);
+    return { status: 'success', path: documentPath };
+  } catch (error) {
+    console.error('[ExamPaper] Could not open Word document:', error.message);
+    return { status: 'error', message: error.message };
   }
 });
 

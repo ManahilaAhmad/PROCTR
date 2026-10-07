@@ -698,7 +698,6 @@ export const logViolation = async (req, res) => {
         title VARCHAR(255) NOT NULL,
         description TEXT,
         severity VARCHAR(20) DEFAULT 'HIGH',
-        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);

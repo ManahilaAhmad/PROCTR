@@ -1325,6 +1325,7 @@ if (joinExamForm) {
       const sessionObj = joinData.session || joinData.data || {};
       window.activeSessionId = sessionObj.session_id || joinData.session_id || null;
       window.activeSessionCode = examCode;
+      window.activeSessionEnded = false;
       window.activeExamId = sessionObj.examId || null;
       autoSubmitTriggered = false; // fresh exam session — allow auto-submit to fire again
       starterCodeInstalledForSession = null;
@@ -1439,8 +1440,12 @@ async function loadQuestionPaperPreview(iframe, paperUrl, sessionCode) {
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'question-paper');
   const isWordDoc = /\.(docx?|rtf)$/i.test(fileName) || /wordprocessingml|msword/.test(blob.type);
   if (isWordDoc) {
-    await downloadAuthenticatedResource(parsed.toString(), fileName);
-    iframe.srcdoc = '<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#0f172a"><h3>Question paper downloaded</h3><p>Open the downloaded Word document using the approved exam application. The paper was fetched securely without sharing its URL with a third-party viewer.</p></body></html>';
+    const wordName = /\.(docx?|rtf)$/i.test(fileName)
+      ? fileName
+      : `${fileName}.${blob.type.includes('rtf') ? 'rtf' : blob.type.includes('msword') ? 'doc' : 'docx'}`;
+    const result = await openWordDocument(blob, wordName);
+    if (result?.status !== 'success') throw new Error(result?.message || 'The Word document could not be opened.');
+    iframe.srcdoc = `<html><body style="font-family:Segoe UI,sans-serif;padding:32px;color:#0f172a"><h3>Question paper opened</h3><p>${escapeHtmlJS(fileName)} was saved in this exam workspace and opened in the registered Word application.</p></body></html>`;
   } else {
     const objectUrl = URL.createObjectURL(blob);
     iframe.src = `${objectUrl}#toolbar=0&navpanes=0&scrollbar=1`;
@@ -1462,6 +1467,8 @@ function startStudentSessionPoll(sessionCode) {
 
       // 0. Check if Invigilator Ended Session
       if (session.isSessionEnded || session.status === 'ENDED' || session.status === 'COMPLETED') {
+        window.activeSessionEnded = true;
+        await window.proctrAPI?.markExamEnded?.(sessionCode);
         if (studentPollInterval) clearInterval(studentPollInterval);
         if (studentLocalCountdown) clearInterval(studentLocalCountdown);
 
@@ -1475,7 +1482,7 @@ function startStudentSessionPoll(sessionCode) {
           autoSubmitTriggered = true;
           performExamSubmission('AUTO').then(r => {
             console.log('[AutoSubmit] Session ended:', r);
-            if (r?.status === 'success') enableLeaveExamButton();
+            if (['success', 'pending'].includes(r?.status)) enableLeaveExamButton();
           });
         }
 
@@ -1684,10 +1691,11 @@ let submissionInFlight = null;
 
 function enableLeaveExamButton() {
   const button = document.getElementById('btn-leave-exam');
-  if (button) button.style.display = 'inline-flex';
+  if (button && window.activeSessionEnded) button.style.display = 'inline-flex';
 }
 
 async function leaveStudentExamEnvironment() {
+  if (!window.activeSessionEnded) throw new Error('Wait until the invigilator ends the exam session before leaving.');
   const studentId = currentUser?.studentId || currentUser?.userId;
   if (window.activeSessionCode && studentId) {
     const response = await fetch(`${API_BASE}/desktop/session/leave`, {
@@ -1700,6 +1708,9 @@ async function leaveStudentExamEnvironment() {
       throw new Error(data.message || 'Could not leave the exam environment.');
     }
   }
+  const finished = await window.proctrAPI?.finishExamWork?.();
+  if (finished?.status === 'error') throw new Error(finished.message);
+  if (finished?.pending) alert('Your local backup is saved. Cloud confirmation is still pending and will retry while PROCTR is running.');
   if (studentPollInterval) clearInterval(studentPollInterval);
   if (studentLocalCountdown) clearInterval(studentLocalCountdown);
   if (window.proctrAPI?.stopSensors) await window.proctrAPI.stopSensors();
@@ -1709,6 +1720,7 @@ async function leaveStudentExamEnvironment() {
   window.activeSessionCode = null;
   window.activeSessionId = null;
   window.activeExamId = null;
+  window.activeSessionEnded = false;
   activeWorkspacePath = null;
   showSection('section-s-dashboard', document.querySelectorAll('#view-student .nav-item'));
   await loadStudentData(currentUser.userId);
@@ -1799,6 +1811,7 @@ if (submitExamBtn) {
       }
       enableLeaveExamButton();
     } else {
+      if (result.status === 'pending' && window.activeSessionEnded) enableLeaveExamButton();
       submitExamBtn.disabled = false;
       submitExamBtn.textContent = 'Submit Solution';
       if (status) {
@@ -1956,6 +1969,18 @@ async function downloadAuthenticatedResource(resourceUrl, suggestedName) {
   } catch (error) {
     alert(error.message || 'The file could not be downloaded.');
   }
+}
+
+async function openWordDocument(blob, fileName) {
+  if (!window.proctrAPI?.openWordDocument) throw new Error('Opening Word documents is unavailable in this Desktop build.');
+  if (blob.size > 25 * 1024 * 1024) throw new Error('The Word document exceeds the 25 MB limit.');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return window.proctrAPI.openWordDocument({ fileName, contentBase64: btoa(binary) });
 }
 
 function openResourceInViewer(resourceUrl, title) {
@@ -2363,16 +2388,27 @@ function addViolationCard(v, feedId, counterId) {
 }
 
 async function logViolationToDB(v) {
+  const studentId = currentUser?.studentId || currentUser?.userId;
   const payload = {
     session_id: window.activeSessionId || null,
-    session_code: window.activeSessionCode || activeInvigilationCode || null,
-    student_id: currentUser?.studentId || currentUser?.id || 101,
+    session_code: window.activeSessionCode || null,
+    student_id: studentId || null,
     violation_code: v.code || 'H0',
     title: v.title || 'Security Violation',
     description: v.detected_value ? `${v.description || ''} | ${v.detected_value}` : (v.description || ''),
     severity: v.severity || 'HIGH',
     event_key: v.event_key || '',
   };
+
+  if (!payload.session_code || !payload.student_id) {
+    console.warn('[LiveLogs] Sensor event has no active student exam session; keeping it in the local log only.');
+    try {
+      await window.proctrAPI?.writeLocalLog?.({ endpoint: '/desktop/violation', payload, timestamp: v.timestamp || new Date().toISOString() });
+    } catch (error) {
+      console.error('[LiveLogs] Could not save the sensor event locally:', error.message);
+    }
+    return;
+  }
 
   // Use offline-first safe post: logs locally first, queues for backend sync if offline
   if (window.offlineQueue) {
